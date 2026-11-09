@@ -317,6 +317,30 @@ fn context_property_says_it_is_not_searchable() {
     }
 }
 
+/// The production gate counts UTF-8 bytes, so the published bound names that
+/// unit; a caller who reads "bytes" as characters would overshoot the limit.
+#[test]
+fn context_property_publishes_the_utf8_byte_bound() {
+    for tool in [
+        "store",
+        "admit_preview",
+        "triple_add",
+        "task_upsert",
+        "failure_record",
+        "persona_put_stable",
+        "canonical_put",
+    ] {
+        let context = tool_def(tool)["inputSchema"]["properties"]["context"].clone();
+        let desc = context["description"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{tool} has no context description"));
+        assert!(
+            desc.contains("4096 UTF-8 bytes"),
+            "{tool} must publish the UTF-8 byte bound: {desc}"
+        );
+    }
+}
+
 #[test]
 fn the_duplicate_waiver_is_named_for_what_it_waives() {
     // `consolidate` already owns an unrelated `force`. The duplicate waiver must

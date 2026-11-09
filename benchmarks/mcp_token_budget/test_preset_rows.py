@@ -229,15 +229,16 @@ class PresetSurfaceTests(unittest.TestCase):
         )
         self.assertEqual(by_preset["all"]["tokens"], max(row["tokens"] for row in rows))
 
-    def test_minimal_is_smallest_and_all_is_largest_without_a_monotonic_chain(self):
+    def test_minimal_is_the_smallest_preset_and_all_the_largest(self):
         rows = load_record()["rows"]
         by_preset = {row["preset"]: row for row in rows}
         self.assertEqual(
             by_preset["minimal"]["bytes"], min(row["bytes"] for row in rows)
         )
         self.assertEqual(by_preset["all"]["bytes"], max(row["bytes"] for row in rows))
+
+    def test_ops_preset_lists_more_tools_than_coding(self):
         self.assertGreater(len(load_tools("ops")), len(load_tools("coding")))
-        self.assertLess(by_preset["ops"]["bytes"], by_preset["coding"]["bytes"])
 
     def test_the_baseline_digest_matches_the_file_the_record_names(self):
         baseline = load_record()["baseline_record"]

@@ -38,6 +38,8 @@ that cannot be trusted is an unusable input, not a silent skip.
 The whole report is built in memory and written once, so a failure can never leave
 half a document behind. An unusable input exits 2 with ``mcp-budget-check:
 <message>`` on stderr; a fail verdict exits 1 and still prints the report.
+The description arm fails the same run when an in-scope description is past
+its published bound, and names the location and both limits.
 """
 
 import argparse
@@ -50,6 +52,7 @@ import activated_budget
 import baseline_provenance
 import budget_allowances
 import budget_targets
+import description_bounds
 from measure import _parse_pack, _read_pack
 from offline_tokenizer import BudgetError, load
 
@@ -109,10 +112,6 @@ def load_baseline(path=BASELINE_FILE):
     return record, digest
 
 
-def _row_unit(row_id) -> str:
-    return row_id.rsplit("/", 1)[-1]
-
-
 def baseline_value(record, row_id) -> int:
     """Return the positive integer value of ``row_id`` in ``record``; never a default."""
     rows = record.get("rows")
@@ -123,7 +122,7 @@ def baseline_value(record, row_id) -> int:
     if len(matches) > 1:
         raise BudgetError(f"budget: duplicate baseline row: {row_id}")
     row = matches[0]
-    unit = _row_unit(row_id)
+    unit = row_id.rsplit("/", 1)[-1]
     if row.get("unit") != unit:
         raise BudgetError(
             f"budget: baseline row {row_id} unit is {row.get('unit')!r}, expected {unit!r}"
@@ -361,6 +360,7 @@ def render(report) -> str:
         "skill": report["skill"],
         "activated": report["activated"],
         "targets": report["targets"],
+        "descriptions": report.get("descriptions"),
         "failures": report["failures"],
         "verdict": report["verdict"],
     }
@@ -435,6 +435,7 @@ def main(argv=None) -> int:
             targets=targets,
             skill_rows=skill_row_values(record),
         )
+        description_bounds.attach(report, pack, tokenizer)
         output = render(report)
     except (BudgetError, budget_allowances.AllowanceError, budget_targets.TargetError) as exc:
         sys.stderr.write(f"mcp-budget-check: {exc}\n")

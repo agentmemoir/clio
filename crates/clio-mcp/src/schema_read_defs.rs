@@ -97,23 +97,7 @@ pub(crate) fn read_defs() -> Vec<ToolDef> {
         ),
         read(
             "maintenance_status",
-            "Report leaf queryability and dirty/refreshing ancestors, plus a `pressure` block: \
-             counts of dirty and refreshing ancestors, eligible hubs, pending and retry index \
-             jobs, stale distilled units with the source that answered and the last completed \
-             wave, and archive candidates. Each pressure entry is a count, or an unavailable \
-             reason when its source is absent or fails (no hub engine, failed hub eligibility \
-             scan, failed drain status read, failed stored-unit read, or failed archive scan). \
-             Archive candidates are an on-demand bounded scan — at most 256 items per band scan, \
-             two band scans — over the hygiene archive band (score 0.70 to below 0.90; \
-             discard-band items such as secret hits are never counted), and `incomplete` marks a \
-             partial scan. The `trigger` block carries the automatic maintenance trigger's last \
-             recorded decision for the bank: the evaluated pressure counts, whether the last \
-             evaluation fired a wave, the elapsed seconds since the last automatic wave and until \
-             the next one is eligible (the trigger keeps monotonic instants, so no wall-clock time \
-             is available for them), the waves in the last hour, and the last decline reason; a \
-             bank the trigger has not evaluated renders an explicit unavailable marker. The \
-             `index` pipeline block reuses the same one drain-status read; when that read fails, \
-             the `index` block renders an unavailable value and the call still succeeds.",
+            "Leaf queryability, dirty ancestors, pressure/trigger fields; 256 per band; gaps unavailable/incomplete, not fatal.",
             &[],
             vec![
                 ("item_id", s("Optional item id.")),

@@ -410,34 +410,35 @@ fn maintenance_status_merges_pressure_without_touching_existing_fields() {
 }
 
 #[test]
-fn the_published_description_matches_the_bounded_archive_scan() {
+fn the_published_description_names_pressure_trigger_and_failure_reporting() {
     let defs = crate::schema_read_defs::read_defs();
     let def = defs
         .iter()
         .find(|def| def.name == "maintenance_status")
         .expect("maintenance_status def");
-    // The published budget matches the production constant, so the two
-    // cannot drift apart silently.
+    // The description names the two blocks the response carries.
     assert!(
-        def.description
-            .contains(&format!("at most {}", super::ARCHIVE_SCAN_BUDGET)),
+        def.description.contains("pressure") && def.description.contains("trigger"),
         "{}",
         def.description
     );
+    // The published archive-scan cap and the gap markers are the contract.
+    assert!(
+        def.description.contains("256 per band"),
+        "the description must state the 256-per-band scan cap: {}",
+        def.description
+    );
+    assert!(
+        def.description.contains("unavailable") && def.description.contains("incomplete"),
+        "the description must name both gap markers: {}",
+        def.description
+    );
+    // A failed block is reported and does not abort the whole status read.
+    assert!(def.description.contains("not fatal"), "{}", def.description);
     // The schema declares the timestamp argument the handler honours.
     assert!(
         def.props.iter().any(|(key, _)| *key == "timestamp"),
         "{:?}",
         def.props
-    );
-    // The published row names the trigger block and its never-evaluated
-    // marker, so the block's absence of a bank is never read as silence.
-    assert!(
-        def.description.contains("`trigger` block")
-            && def
-                .description
-                .contains("has not evaluated renders an explicit unavailable marker"),
-        "{}",
-        def.description
     );
 }

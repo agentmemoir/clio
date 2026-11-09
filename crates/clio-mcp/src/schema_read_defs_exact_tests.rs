@@ -280,8 +280,9 @@ struct Arm {
     form: HitForm,
     /// The clause the `compose_context` row publishes for this arm.
     row_clause: &'static str,
-    /// The clause the `fidelity` property publishes for this arm.
-    prop_clause: &'static str,
+    /// The clause the `fidelity` property publishes for this arm, when the
+    /// shortened property states this arm's channel order.
+    prop_clause: Option<&'static str>,
 }
 
 /// Every arm a `compose_context` call can reach, with the clauses publishing it.
@@ -308,7 +309,7 @@ fn arms() -> Vec<Arm> {
             budget_tokens: None,
             form: HitForm::Prose,
             row_clause: "A hit with no rendering contributes its gist instead",
-            prop_clause: "reading each hit's gist first",
+            prop_clause: Some("flow (default) reads gist before rendering"),
         },
         Arm {
             label: "flow with a rendering it never asks for",
@@ -319,8 +320,7 @@ fn arms() -> Vec<Arm> {
             form: HitForm::Reference,
             row_clause: "a hit with neither a rendering nor a gist is marked as a \
                          reference rather than silently replaced by its identifier",
-            prop_clause: "a hit with neither a rendering nor a gist is marked as a \
-                          reference rather than a bare identifier",
+            prop_clause: None,
         },
         Arm {
             label: "exact with a rendering the budget holds",
@@ -331,7 +331,7 @@ fn arms() -> Vec<Arm> {
             form: HitForm::Exact,
             row_clause: "exact prefers each hit's bounded rendering, charged against \
                          this same budget_tokens",
-            prop_clause: "exact reads the bounded rendering first and the gist second",
+            prop_clause: Some("exact the reverse"),
         },
         Arm {
             label: "exact with a rendering over the byte cap",
@@ -341,7 +341,7 @@ fn arms() -> Vec<Arm> {
             budget_tokens: None,
             form: HitForm::Prose,
             row_clause: "A hit with no rendering contributes its gist instead",
-            prop_clause: "A hit whose rendering is absent contributes its gist instead",
+            prop_clause: None,
         },
         Arm {
             label: "exact with neither half",
@@ -352,8 +352,7 @@ fn arms() -> Vec<Arm> {
             form: HitForm::Reference,
             row_clause: "a hit with neither a rendering nor a gist is marked as a \
                          reference rather than silently replaced by its identifier",
-            prop_clause: "a hit with neither a rendering nor a gist is marked as a \
-                          reference rather than a bare identifier",
+            prop_clause: None,
         },
         Arm {
             label: "exact with a rendering over the remaining budget",
@@ -363,7 +362,7 @@ fn arms() -> Vec<Arm> {
             budget_tokens: Some(tight),
             form: HitForm::Reference,
             row_clause: "so is a hit whose rendering did not fit the remaining budget",
-            prop_clause: "so is a hit whose rendering did not fit the remaining budget",
+            prop_clause: None,
         },
     ]
 }
@@ -393,9 +392,11 @@ fn compose(fixture: &ArmFixture, arm: &Arm) -> Value {
 
 /// The published fallback chain and the selector that picks the form are two
 /// halves of one contract, so this drives every arm of the truth table through a
-/// real `compose_context` pack and holds both published texts to the form the
-/// selector actually produced. A clause naming the wrong outcome, or an arm
-/// whose form moved, fails here instead of shipping as prose.
+/// real `compose_context` pack and holds the row to the form the selector
+/// actually produced. The shortened `fidelity` property states only the channel
+/// order, so its clause is checked for the two arms that order describes. A
+/// clause naming the wrong outcome, or an arm whose form moved, fails here
+/// instead of shipping as prose.
 ///
 /// The packed text is checked as well as the form name, because a form alone
 /// would pass even if the section carried other text under it.
@@ -434,9 +435,11 @@ fn every_published_fallback_clause_names_the_form_the_selector_produced() {
             row.contains(arm.row_clause),
             "the {label} arm's clause is published in the compose_context row: {row}"
         );
-        assert!(
-            prop.contains(arm.prop_clause),
-            "the {label} arm's clause is published in the fidelity property: {prop}"
-        );
+        if let Some(clause) = arm.prop_clause {
+            assert!(
+                prop.contains(clause),
+                "the {label} arm's channel order is published in the fidelity property: {prop}"
+            );
+        }
     }
 }

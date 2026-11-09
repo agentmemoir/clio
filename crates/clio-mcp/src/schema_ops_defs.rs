@@ -25,35 +25,25 @@
 
 use crate::schema_defs::{ToolDef, arr, b, en, s};
 
-/// The omitted-`bank` wording `verify`, `doctor` and `reindex` share: the
-/// argument then means the server default bank, and the credential's grant has
-/// to cover that bank or the call is refused. A caller without a credential has
-/// no default to fall back on, so each of those tools states that reach itself,
-/// while `diagnose` publishes its own sentence.
-const OMITTED_BANK: &str =
-    "Bank scope; omitted means the server default bank, which the credential's grant must cover.";
+/// The omitted-`bank` wording `verify` and `doctor` share: the argument then
+/// means the server default bank, and the credential's grant has to cover that
+/// bank or the call is refused. `reindex` adds the reach a caller without a
+/// credential keeps, and `diagnose` publishes its own sentence.
+const OMITTED_BANK: &str = "Bank; omitted=server default the credential grant must cover.";
 
 /// `diagnose`'s own `bank` clause: the shared omitted-bank sentence, then the
 /// reach only this tool keeps, since its arm reads the argument without ever
 /// narrowing an unbound caller to it.
 fn diagnose_bank_clause() -> String {
-    format!(
-        "{OMITTED_BANK} A caller without a credential reads the whole store, whether it names \
-         this or not."
-    )
+    format!("{OMITTED_BANK} A caller without a credential reads the whole store.")
 }
 
 /// The `repair` scope, which is the plan's when a plan is registered, so the
 /// grant has to cover the scope the tool acts on and not only the argument. A
-/// plan outside the grant is answered as not found, in the words below, and an
-/// unbound caller keeps the plan-or-argument reach it had before the grant.
-const REPAIR_BANK: &str = "Bank scope; omitted means the registered plan's own bank, and \
-                           otherwise the bank this call resolves for the credential (the server \
-                           default when no `bank` is passed). A plan registered for a bank the \
-                           credential's grant does not cover is reported as not found, and none \
-                           of its actions run. A caller without a credential acts in its `bank` \
-                           argument when it passes one, and with neither a bank nor a registered \
-                           plan has no bank scope at all, where each action fails without mutating.";
+/// plan outside the grant is answered as not found, an unbound caller keeps its
+/// own `bank` argument, and no scope means no action mutates.
+const REPAIR_BANK: &str = "Bank; omitted=plan's bank or credential default. Outside grant: \
+                           not found; unbound uses bank; no mutation.";
 
 /// `reindex`'s `dry_run` clause: absent, it follows `confirm`, and a `false`
 /// with nothing confirming it is refused as an unconfirmed mutating rebuild.
@@ -86,8 +76,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 (
                     "bank",
                     s(&format!(
-                        "{OMITTED_BANK} A caller without a credential reads the whole store \
-                         when it omits this."
+                        "{OMITTED_BANK} A caller without a credential reads the whole store."
                     )),
                 ),
                 ("timestamp", s("Report time; defaults to now.")),
@@ -101,8 +90,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 (
                     "bank",
                     s(&format!(
-                        "{OMITTED_BANK} A caller without a credential composes over the whole \
-                         store when it omits this."
+                        "{OMITTED_BANK} A caller without a credential composes the whole store."
                     )),
                 ),
                 (
@@ -147,11 +135,10 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 ),
                 (
                     "bank",
-                    s(&format!(
-                        "{OMITTED_BANK} A caller without a credential sweeps every indexable \
-                         bank when it omits this (rejected over MCP while the shared bank \
-                         surface is disabled)."
-                    )),
+                    s(
+                        "Bank; omitted=server default; grant must cover. Without a credential=\
+                       every indexable bank; shared bank off rejects.",
+                    ),
                 ),
                 ("dry_run", b(REINDEX_DRY_RUN)),
                 ("confirm", b("Start the live rebuild; default false.")),

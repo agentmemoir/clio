@@ -169,7 +169,7 @@ pub(crate) fn context_prop() -> (&'static str, Value) {
         json!({
             "type": "string",
             "maxLength": 4096,
-            "description": "Optional bounded descriptive source context, recording where the memory came from, such as a conversation type or workflow stage. It is not searchable: recall does not match on it, so put anything you want to find later in the item text or gist. At most 4096 UTF-8 bytes; rejected when empty or oversized, never truncated."
+            "description": "Optional source context; not searchable. Non-empty, max 4096 UTF-8 bytes, never truncated."
         }),
     )
 }
@@ -234,7 +234,7 @@ fn admission_candidate_props() -> Vec<(&'static str, Value)> {
         (
             "allow_duplicate",
             b(
-                "Store this item even when its text is identical to an item already in this bank. Waives the exact-duplicate rejection only; every other gate still applies.",
+                "Store this item even when identical to one already in this bank; waives the exact-duplicate rejection only.",
             ),
         ),
     ]
