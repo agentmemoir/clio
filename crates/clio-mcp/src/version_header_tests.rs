@@ -27,10 +27,12 @@
 //! Keep this module focused on the admission path's fixtures.
 
 use super::{CANDIDATE_REVISION, PROTOCOL_VERSION_HEADER, SUPPORTED_REVISIONS, admit};
-use crate::conditional_http::MCP_METHOD_HEADER;
+use crate::conditional_http::{MCP_METHOD_HEADER, MCP_NAME_HEADER};
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
-use crate::stateless_fixtures::{code, message, request, required_meta, state};
+use crate::stateless_fixtures::{
+    code, elicitation_answer, message, request, required_meta, state, tool_call,
+};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -95,6 +97,25 @@ fn a_matching_unsupported_version_is_refused() {
     assert_eq!(
         body["error"]["data"]["requested"],
         json!("2025-11-25"),
+        "{body}"
+    );
+    assert!(body.get("result").is_none(), "{body}");
+}
+
+#[test]
+fn a_missing_capability_the_request_needs_is_refused_at_admission() {
+    let msg = tool_call(&required_meta(CANDIDATE_REVISION), elicitation_answer());
+    let supplied = vec![
+        (MCP_METHOD_HEADER, "tools/call"),
+        (MCP_NAME_HEADER, "consolidate"),
+        (PROTOCOL_VERSION_HEADER, CANDIDATE_REVISION),
+    ];
+    let (status, body) = refused(&state(), &supplied, &frame(&msg));
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(code(&body), -32021, "{body}");
+    assert_eq!(
+        body["error"]["data"]["requiredCapabilities"],
+        json!({ "elicitation": {} }),
         "{body}"
     );
     assert!(body.get("result").is_none(), "{body}");

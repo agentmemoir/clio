@@ -101,10 +101,7 @@ pub(crate) const CACHE_HINTS: CacheHints = CacheHints {
 
 /// Admit one candidate-revision HTTP request and, when it passes, serve it.
 ///
-/// The checks run in one fixed order and stop at the first failure: the
-/// conditional headers, JSON syntax, the required version header, the required
-/// metadata, header/body equality, and the supported revision. Only a request
-/// that passes every check reaches [`dispatch`].
+/// The checks run in one fixed order and stop at the first failure: the conditional headers, JSON syntax, the required version header, the required metadata, header/body equality, the supported revision, and the client capability the request needs. Only a request that passes every check reaches [`dispatch`].
 ///
 /// `get` reads one header value by its lowercase wire name. A refused request
 /// answers the status and JSON-RPC body [`refusal`] renders; a notification
@@ -132,7 +129,7 @@ where
     let declared = get(PROTOCOL_VERSION_HEADER)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| missing_version_header(&body))?;
-    let (_, requested) =
+    let (capabilities, requested) =
         request_meta(&body).map_err(|message| refusal(&body, &invalid_params(message)))?;
     if declared != requested {
         let err = RpcError::new(
@@ -148,6 +145,18 @@ where
         let err = RpcError::new(
             ERR_UNSUPPORTED_PROTOCOL_VERSION,
             format!("Unsupported protocol version in `{PROTOCOL_VERSION_HEADER_NAME}`"),
+        )
+        .with_data(data);
+        return Err(refusal(&body, &err));
+    }
+    if let Some(method) = body.get("method").and_then(Value::as_str)
+        && let Some(capability) = required_capability(method, body.get("params"))
+        && !capabilities.contains_key(capability)
+    {
+        let data = json!({ "requiredCapabilities": { (capability): {} } });
+        let err = RpcError::new(
+            ERR_MISSING_REQUIRED_CLIENT_CAPABILITY,
+            format!("request requires the client capability `{capability}`"),
         )
         .with_data(data);
         return Err(refusal(&body, &err));
