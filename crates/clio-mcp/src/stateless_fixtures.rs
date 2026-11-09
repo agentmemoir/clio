@@ -4,22 +4,28 @@
 //! # Responsibility
 //!
 //! This module is responsible for the shared fixtures of the candidate
-//! `2026-07-28` dispatcher's unit tests: runtime state, request metadata, and
-//! the tool-call and answer shapes those fixtures send.
+//! `2026-07-28` dispatcher's unit tests: runtime state, request metadata, the
+//! tool-call and answer shapes those fixtures send, and the result checkers the
+//! transport test modules assert with.
 //!
 //! ## Owns
-//! - The fixture runtime state and its registered bank
+//! - The fixture runtime state, its registered bank, and the seeded domain-read
+//!   state
 //! - The request envelopes and `_meta` variants the candidate tests send
-//! - Accessors for a response's error code, error message, and server identity
+//! - The read tool-call builder and accessors for a response's error code,
+//!   error message, and server identity
+//! - The success, error, completeness, discovery, and domain-read result
+//!   checkers both candidate transports assert with
 //!
 //! ## Does not own
-//! - Any assertion (see `stateless_tests` and `stateless_cache_tests`)
+//! - Any scenario or the choice of assertion (see `stateless_tests`,
+//!   `stdio_candidate_tests`, `http_candidate_tests`)
 //! - The dispatcher itself (see `stateless`)
 //!
 //! ## Boundary
 //!
-//! Changes to how the candidate tests build a request should normally require
-//! changes here. Changes to what a fixture asserts should not.
+//! Changes to how the candidate tests build a request or check a result should
+//! normally require changes here. Changes to what a fixture asserts should not.
 //!
 //! Keep this module free of test functions.
 
@@ -31,6 +37,11 @@ use crate::tools_page::PAGE_SIZE_KEY;
 
 pub(super) const BANK: &str = "fixture-bank";
 
+/// The one stored item the domain-read fixtures seed, and the gist it carries.
+pub(super) const DOMAIN_ITEM_ID: &str = "fixture-item-1";
+pub(super) const DOMAIN_GIST: &str = "the canonical fixture gist";
+const DOMAIN_TS: &str = "2024-01-01T00:00:00Z";
+
 pub(super) fn state() -> Arc<McpState> {
     let state =
         McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
@@ -38,6 +49,38 @@ pub(super) fn state() -> Arc<McpState> {
         .ops_store
         .register_bank(BANK, "2024-01-01T00:00:00Z")
         .expect("bank fixture");
+    state
+}
+
+/// The fixture state with the one stored item a domain read needs.
+///
+/// The item is written through the production store tool, so the row a read
+/// serves is the row a caller would have stored, not a hand-built value.
+pub(super) fn domain_state() -> Arc<McpState> {
+    let state = state();
+    let stored = crate::write_tools::dispatch(
+        &state,
+        "store",
+        &json!({
+            "item": {
+                "id": DOMAIN_ITEM_ID,
+                "subject_id": "subj",
+                "gist": DOMAIN_GIST,
+                "snapshot": { "entity": "fixture", "amount": 1, "date": "2024-01-01" }
+            },
+            "category": "task_spec",
+            "epistemic_kind": "fact",
+            "source_text": "The fixture states the canonical gist (1 note since 2024-01-01).",
+            "bank": BANK,
+            "actor": "agent",
+            "timestamp": DOMAIN_TS
+        }),
+    );
+    assert_eq!(
+        stored["ok"],
+        json!(true),
+        "seed the domain read item: {stored}"
+    );
     state
 }
 
@@ -79,6 +122,19 @@ pub(super) fn tool_call(meta: &Value, extra: Value) -> Value {
     if let Value::Object(extra) = extra {
         params.extend(extra);
     }
+    json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": params })
+}
+
+/// A read tool call: `tools/call` naming `name` with `arguments` on the fixture
+/// bank. The bank is the fixture's, so a read never depends on the caller.
+pub(super) fn read_call(meta: &Value, name: &str, mut arguments: Value) -> Value {
+    if let Value::Object(fields) = &mut arguments {
+        fields.insert("bank".into(), json!(BANK));
+    }
+    let mut params = Map::new();
+    params.insert("_meta".into(), meta.clone());
+    params.insert("name".into(), json!(name));
+    params.insert("arguments".into(), arguments);
     json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": params })
 }
 
@@ -133,4 +189,143 @@ pub(super) fn message(res: &Value) -> &str {
 
 pub(super) fn server_info(result: &Value) -> &Value {
     &result["_meta"]["io.modelcontextprotocol/serverInfo"]
+}
+
+/// A success envelope: JSON-RPC 2.0, the request id, one result, and no error.
+pub(super) fn check_success_envelope(envelope: &Value, id: i64) -> Result<(), String> {
+    if envelope["jsonrpc"] != json!("2.0") {
+        return Err(format!("not JSON-RPC 2.0: {envelope}"));
+    }
+    if envelope.get("result").is_none() {
+        return Err(format!("a success envelope carries a result: {envelope}"));
+    }
+    if envelope.get("error").is_some() {
+        return Err(format!("a success envelope carries no error: {envelope}"));
+    }
+    if envelope["id"] != json!(id) {
+        return Err(format!("the envelope id is not `{id}`: {envelope}"));
+    }
+    Ok(())
+}
+
+/// An error envelope: JSON-RPC 2.0, the request id, one error, no result, and
+/// no result type anywhere.
+pub(super) fn check_error_envelope(envelope: &Value, id: i64) -> Result<(), String> {
+    if envelope["jsonrpc"] != json!("2.0") {
+        return Err(format!("not JSON-RPC 2.0: {envelope}"));
+    }
+    if envelope.get("error").is_none() {
+        return Err(format!("an error envelope carries an error: {envelope}"));
+    }
+    if envelope.get("result").is_some() {
+        return Err(format!("an error envelope carries no result: {envelope}"));
+    }
+    if envelope["id"] != json!(id) {
+        return Err(format!("the envelope id is not `{id}`: {envelope}"));
+    }
+    let raw = serde_json::to_string(envelope).expect("an envelope serializes");
+    if raw.contains("resultType") {
+        return Err(format!(
+            "an error envelope claims no result type: {envelope}"
+        ));
+    }
+    Ok(())
+}
+
+/// A complete result: the revision's one completeness marker.
+pub(super) fn check_complete_result(result: &Value) -> Result<(), String> {
+    if result["resultType"] != json!("complete") {
+        return Err(format!("the result is not complete: {result}"));
+    }
+    Ok(())
+}
+
+/// Discovery identity lives in `result._meta` and never at the top of the
+/// result.
+pub(super) fn check_discovery_identity(result: &Value) -> Result<(), String> {
+    if result.get("serverInfo").is_some() {
+        return Err(format!(
+            "identity is never a top-level result field: {result}"
+        ));
+    }
+    let info = &result["_meta"]["io.modelcontextprotocol/serverInfo"];
+    if info["name"] != json!(env!("CARGO_PKG_NAME")) {
+        return Err(format!("the identity name is the crate name: {result}"));
+    }
+    if info["version"] != json!(env!("CARGO_PKG_VERSION")) {
+        return Err(format!(
+            "the identity version is the crate version: {result}"
+        ));
+    }
+    Ok(())
+}
+
+/// The payload one `tools/call` result carries: `structuredContent` when the
+/// tool declares an output schema, otherwise the serialized payload in its one
+/// text block. Both candidate transports read a payload through this, so a
+/// domain claim is checked on the payload and not on either envelope's shape.
+pub(super) fn read_payload(result: &Value) -> Result<Value, String> {
+    if let Some(payload) = result.get("structuredContent") {
+        return Ok(payload.clone());
+    }
+    let Some(text) = result["content"][0]["text"].as_str() else {
+        return Err(format!("a tool result carries a payload: {result}"));
+    };
+    serde_json::from_str(text)
+        .map_err(|error| format!("the text block is not the payload ({error}): {result}"))
+}
+
+/// A domain read that is not a tool error and carries `isError: false`.
+fn check_read_ok(result: &Value) -> Result<(), String> {
+    if result.get("isError") != Some(&json!(false)) {
+        return Err(format!("the domain read is not an error: {result}"));
+    }
+    Ok(())
+}
+
+/// The `get_gist` domain read: the seeded item's gist, read as the
+/// non-authoritative half.
+pub(super) fn check_gist_read(result: &Value) -> Result<(), String> {
+    check_read_ok(result)?;
+    let payload = read_payload(result)?;
+    if payload["item_id"] != json!(DOMAIN_ITEM_ID) {
+        return Err(format!(
+            "the read names the seeded item `{DOMAIN_ITEM_ID}`: {payload}"
+        ));
+    }
+    if payload["authoritative"] != json!(false) {
+        return Err(format!("a gist is never authoritative: {payload}"));
+    }
+    if payload["gist"] != json!(DOMAIN_GIST) {
+        return Err(format!(
+            "the read carries the stored gist `{DOMAIN_GIST}`: {payload}"
+        ));
+    }
+    Ok(())
+}
+
+/// The `inspect` domain listing: exactly the one seeded item, with the echo of
+/// the filter the store applied.
+pub(super) fn check_domain_listing(result: &Value) -> Result<(), String> {
+    check_read_ok(result)?;
+    let payload = read_payload(result)?;
+    let items = payload["items"]
+        .as_array()
+        .ok_or_else(|| format!("a listing carries an item array: {payload}"))?;
+    if items.len() != 1 || payload["total"] != json!(1) {
+        return Err(format!(
+            "the listing holds exactly the one seeded item: {payload}"
+        ));
+    }
+    if items[0]["item_id"] != json!(DOMAIN_ITEM_ID) {
+        return Err(format!(
+            "the listed row is the seeded item `{DOMAIN_ITEM_ID}`: {payload}"
+        ));
+    }
+    if payload["include_discarded"] != json!(false) {
+        return Err(format!(
+            "a default listing excludes discarded rows: {payload}"
+        ));
+    }
+    Ok(())
 }

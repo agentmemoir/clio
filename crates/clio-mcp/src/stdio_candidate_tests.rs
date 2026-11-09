@@ -5,7 +5,8 @@
 //!
 //! This module is responsible for the candidate `2026-07-28` conformance
 //! scenarios driven through the real stdio adapter: required and optional
-//! request metadata, discovery identity, and the success and error envelopes.
+//! request metadata, discovery identity, the success and error envelopes, and
+//! the domain-read payloads a read pair answers with.
 //!
 //! ## Owns
 //! - The scenario registry: each candidate wire scenario's id, implementation
@@ -28,7 +29,11 @@ use super::serve_candidate;
 use crate::conditional_http::MCP_METHOD_HEADER;
 use crate::runtime::McpState;
 use crate::stateless::{CANDIDATE_REVISION, PROTOCOL_VERSION_HEADER, admit};
-use crate::stateless_fixtures::{full_meta, request, required_meta, state};
+use crate::stateless_fixtures::{
+    DOMAIN_ITEM_ID, check_complete_result, check_discovery_identity, check_domain_listing,
+    check_error_envelope, check_gist_read, check_success_envelope, domain_state, full_meta,
+    read_call, request, required_meta, state,
+};
 use serde_json::{Value, json};
 use std::io::Cursor;
 
@@ -81,6 +86,11 @@ const SCENARIOS: &[Scenario] = &[
         receipt: "cargo test -p clio-mcp --lib stdio_removed_request_is_refused_not_served",
     },
     Scenario {
+        id: "stdio/domain-read",
+        owner: "read tools",
+        receipt: "cargo test -p clio-mcp --lib stdio_domain_read_payloads",
+    },
+    Scenario {
         id: "harness/wrong-header",
         owner: "conformance harness",
         receipt: "cargo test -p clio-mcp --lib a_deliberately_wrong_header_value_fails_the_checker",
@@ -89,6 +99,11 @@ const SCENARIOS: &[Scenario] = &[
         id: "harness/wrong-result-shape",
         owner: "conformance harness",
         receipt: "cargo test -p clio-mcp --lib a_deliberately_wrong_result_shape_fails_the_checkers",
+    },
+    Scenario {
+        id: "harness/wrong-domain-payload",
+        owner: "conformance harness",
+        receipt: "cargo test -p clio-mcp --lib a_deliberately_wrong_domain_payload_fails_the_read_checkers",
     },
 ];
 
@@ -115,75 +130,6 @@ fn answer_one(state: &McpState, frame: &Value) -> Value {
     answers.remove(0)
 }
 
-/// A success envelope: JSON-RPC 2.0, the request id, one result, and no error.
-fn check_success_envelope(envelope: &Value, id: i64) -> Result<(), String> {
-    if envelope["jsonrpc"] != json!("2.0") {
-        return Err(format!("not JSON-RPC 2.0: {envelope}"));
-    }
-    if envelope.get("result").is_none() {
-        return Err(format!("a success envelope carries a result: {envelope}"));
-    }
-    if envelope.get("error").is_some() {
-        return Err(format!("a success envelope carries no error: {envelope}"));
-    }
-    if envelope["id"] != json!(id) {
-        return Err(format!("the envelope id is not `{id}`: {envelope}"));
-    }
-    Ok(())
-}
-
-/// An error envelope: JSON-RPC 2.0, the request id, one error, no result, and
-/// no result type anywhere.
-fn check_error_envelope(envelope: &Value, id: i64) -> Result<(), String> {
-    if envelope["jsonrpc"] != json!("2.0") {
-        return Err(format!("not JSON-RPC 2.0: {envelope}"));
-    }
-    if envelope.get("error").is_none() {
-        return Err(format!("an error envelope carries an error: {envelope}"));
-    }
-    if envelope.get("result").is_some() {
-        return Err(format!("an error envelope carries no result: {envelope}"));
-    }
-    if envelope["id"] != json!(id) {
-        return Err(format!("the envelope id is not `{id}`: {envelope}"));
-    }
-    let raw = serde_json::to_string(envelope).expect("an envelope serializes");
-    if raw.contains("resultType") {
-        return Err(format!(
-            "an error envelope claims no result type: {envelope}"
-        ));
-    }
-    Ok(())
-}
-
-/// A complete result: the revision's one completeness marker.
-fn check_complete_result(result: &Value) -> Result<(), String> {
-    if result["resultType"] != json!("complete") {
-        return Err(format!("the result is not complete: {result}"));
-    }
-    Ok(())
-}
-
-/// Discovery identity lives in `result._meta` and never at the top of the
-/// result.
-fn check_discovery_identity(result: &Value) -> Result<(), String> {
-    if result.get("serverInfo").is_some() {
-        return Err(format!(
-            "identity is never a top-level result field: {result}"
-        ));
-    }
-    let info = &result["_meta"]["io.modelcontextprotocol/serverInfo"];
-    if info["name"] != json!(env!("CARGO_PKG_NAME")) {
-        return Err(format!("the identity name is the crate name: {result}"));
-    }
-    if info["version"] != json!(env!("CARGO_PKG_VERSION")) {
-        return Err(format!(
-            "the identity version is the crate version: {result}"
-        ));
-    }
-    Ok(())
-}
-
 #[test]
 fn every_scenario_records_one_owner_and_one_bounded_check() {
     let mut ids: Vec<&str> = Vec::new();
@@ -207,7 +153,7 @@ fn every_scenario_records_one_owner_and_one_bounded_check() {
         );
         ids.push(scenario.id);
     }
-    assert_eq!(ids.len(), 8, "every covered scenario is registered");
+    assert_eq!(ids.len(), 10, "every covered scenario is registered");
 }
 
 #[test]
@@ -348,6 +294,74 @@ fn stdio_removed_request_is_refused_not_served() {
     assert!(
         answer.get("result").is_none(),
         "a removed method is never served: {answer}"
+    );
+}
+
+#[test]
+fn stdio_domain_read_payloads() {
+    let state = domain_state();
+    let meta = required_meta(CANDIDATE_FIXTURE_REVISION);
+    let gist = answer_one(
+        &state,
+        &read_call(&meta, "get_gist", json!({ "item_id": DOMAIN_ITEM_ID })),
+    );
+    check_success_envelope(&gist, 7).expect("the candidate serves a domain read");
+    check_gist_read(&gist["result"]).expect("the read carries the stored gist");
+    let listing = answer_one(&state, &read_call(&meta, "inspect", json!({})));
+    check_success_envelope(&listing, 7).expect("the candidate serves the domain listing");
+    check_domain_listing(&listing["result"]).expect("the listing carries the stored item");
+}
+
+/// The domain-read checkers reject a payload that is not the seeded read, so a
+/// served read cannot pass them by carrying any shape at all.
+#[test]
+fn a_deliberately_wrong_domain_payload_fails_the_read_checkers() {
+    let missing_gist = json!({
+        "isError": false,
+        "structuredContent": { "item_id": DOMAIN_ITEM_ID, "authoritative": false }
+    });
+    assert!(
+        check_gist_read(&missing_gist).is_err(),
+        "a read without its gist fails the check"
+    );
+
+    let tampered_gist = json!({
+        "isError": false,
+        "structuredContent": {
+            "item_id": DOMAIN_ITEM_ID,
+            "authoritative": false,
+            "gist": "a tampered gist"
+        }
+    });
+    assert!(
+        check_gist_read(&tampered_gist).is_err(),
+        "a read with another gist fails the check"
+    );
+
+    let as_tool_error = json!({
+        "isError": true,
+        "structuredContent": {
+            "item_id": DOMAIN_ITEM_ID,
+            "authoritative": false,
+            "gist": "the canonical fixture gist"
+        }
+    });
+    assert!(
+        check_gist_read(&as_tool_error).is_err(),
+        "a read reported as a tool error fails the check"
+    );
+
+    let extra_rows = json!({
+        "isError": false,
+        "structuredContent": {
+            "items": [{ "item_id": DOMAIN_ITEM_ID }, { "item_id": "another-item" }],
+            "total": 2,
+            "include_discarded": false
+        }
+    });
+    assert!(
+        check_domain_listing(&extra_rows).is_err(),
+        "a listing that is not the one seeded row fails the check"
     );
 }
 
