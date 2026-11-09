@@ -10,7 +10,7 @@
   "basis": {
     "shared_row": true,
     "per_preset_measurement": false,
-    "reason": "preset rows exist for all four presets, but every target still rests on the shared full-surface row. The smallest preset carries no target: its size is a chosen value recorded in the decision record, and a chosen value is never a gate input."
+    "reason": "Every preset now carries both targets, each derived from the shared full-surface row. The value is a ceiling on the preset's own live measurement, not a chosen value: per-preset packs are exported by the built binary and measured as candidates on every run. The all preset cannot reach the shared-derived ceiling without removing shipped tools, so it carries one explicit recorded final ceiling in target_adjustment."
   },
   "tokenizer": {
     "encoding": "cl100k_base",
@@ -28,16 +28,41 @@
     "headroom_formula": "baseline_value - target"
   },
   "policy": {
-    "enforced_by": "none yet; this record states rules for a later gate or validator",
+    "enforced_by": "budget_targets.compare reports every preset target on every run; PRESET_TARGETS_ENFORCED turns a miss into a failure",
     "missing_baseline_row": "reject",
     "foreign_tokenizer": "reject"
   },
+  "target_adjustment": [
+    {
+      "decision_id": "mcp-all-preset-target-adjustment-2026-11-09",
+      "date": "2026-11-09",
+      "preset": "all",
+      "initial": {
+        "baseline_row": {
+          "tokens": "client/synthetic-eager-client/turn/1/tokens",
+          "bytes": "client/synthetic-eager-client/turn/1/bytes"
+        },
+        "factor": { "tokens": 70, "bytes": 80 },
+        "target": { "tokens": 15183, "bytes": 84505 }
+      },
+      "final_target": { "tokens": 30004, "bytes": 140559 },
+      "measured_candidate": {
+        "path": "crates/clio-mcp/tests/fixtures/schema_pack.json",
+        "sha256": "f9820131ad2b5f698e08280d0cf5f6226c2aa5e35258a27568d4fb172f592764",
+        "bytes": 140559,
+        "tokens": 30004
+      },
+      "reason": "The all preset ships the full tool surface, so it cannot reach the shared-row derived ceiling of 15183 tokens and 84505 bytes without removing shipped tools. The final ceilings are the live measurement of clio mcp schema-export --tools all at this commit: 30004 tokens and 140559 bytes, sha256 f9820131ad2b5f698e08280d0cf5f6226c2aa5e35258a27568d4fb172f592764. The record preserves the initial row, factor, and target. No later run recomputes or replaces the final ceilings, and the preset is still checked: any growth above 30004 tokens or 140559 bytes fails the target arm."
+    }
+  ],
   "targets": [
+    { "preset": "minimal", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
+    { "preset": "minimal", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 84505, "headroom": 21127, "label": "Inferred" },
     { "preset": "coding", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
     { "preset": "coding", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 84505, "headroom": 21127, "label": "Inferred" },
     { "preset": "ops", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
     { "preset": "ops", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 84505, "headroom": 21127, "label": "Inferred" },
-    { "preset": "all", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
-    { "preset": "all", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 84505, "headroom": 21127, "label": "Inferred" }
+    { "preset": "all", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 30004, "headroom": -8313, "label": "Decision" },
+    { "preset": "all", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 140559, "headroom": -34927, "label": "Decision" }
   ]
 }

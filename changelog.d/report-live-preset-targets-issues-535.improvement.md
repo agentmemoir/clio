@@ -1,0 +1,1 @@
+The MCP budget report now compares every tool preset against both its token and byte target using that preset's own live measurement from the built binary, and it records one bounded final ceiling for the `all` preset so the full surface passes at its current size while any later growth still fails.

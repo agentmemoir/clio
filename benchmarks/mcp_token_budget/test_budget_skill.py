@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
@@ -220,11 +221,11 @@ class SkillCommandTests(unittest.TestCase):
     """The command shows the frozen skill rows instead of a zero or a null."""
 
     def run_main(self, argv):
-        out = io.StringIO()
-        err = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = budget_check.main(argv)
-        return code, out.getvalue(), err.getvalue()
+        measured, out, err = {p: {"sha256": "ab" * 32, "bytes": 1, "tokens": 1} for p in budget_targets.TARGET_PRESETS}, io.StringIO(), io.StringIO()
+        with mock.patch.object(budget_check.preset_rows, "measure_presets", return_value=measured), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = budget_check.main([*argv, "--preset-bin", "clio"])
+            return code, out.getvalue(), err.getvalue()
 
     def test_no_skill_path_reports_not_measured_with_the_frozen_rows(self):
         require_tokenizer()
@@ -385,20 +386,24 @@ class ActivatedBodyTests(unittest.TestCase):
         document = json.loads(TARGETS.read_text(encoding="utf-8"))
         document["factor_decision"]["token_factor"]["numerator"] = 1
         for item in document["targets"]:
-            if item["unit"] == "tokens":
+            if item["unit"] == "tokens" and item["preset"] != "all":
                 item["factor"] = 1
                 item["target"] = item["baseline_value"] // 100
                 item["headroom"] = item["baseline_value"] - item["target"]
+        measured = {p: pack_candidate(baseline) for p in budget_targets.TARGET_PRESETS}
         targets = budget_targets.compare(
             budget_targets.validate(document), budget_check.baseline_rows(record),
-            pack_candidate(baseline),
+            measured,
         )
         report = budget_check.check_pack(
             baseline, pack_candidate(baseline), budget_allowances.NONE, record,
             targets=targets,
             activated_body=budget_check.measure_skill(ACTIVATED_PATH, load()),
         )
-        squeezed = [i["target"] for i in targets["comparisons"] if i["unit"] == "tokens"]
+        squeezed = [
+            i["target"] for i in targets["comparisons"]
+            if i["unit"] == "tokens" and i["preset"] != "all"
+        ]
         self.assertLess(max(squeezed), ACTIVATED_TOKENS)
         self.assertEqual(report["activated"]["tokens"], ACTIVATED_TOKENS)
         self.assertEqual(report["activated"]["ceiling"], ACTIVATED_TOKENS)

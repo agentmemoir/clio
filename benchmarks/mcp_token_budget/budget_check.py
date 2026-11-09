@@ -31,9 +31,13 @@ token growth alone, so a body whose bytes or digest moved without growing its
 count passes and the two digests are reported side by side. That row is read from
 the baseline record the run was given, never from a second read of the file.
 
-The preset targets are reported beside the arms. They are not enforced yet, so a
-target miss appears in the report and leaves the exit code alone; a targets file
-that cannot be trusted is an unusable input, not a silent skip.
+The preset targets are reported beside the arms. ``--preset-bin`` names the
+built binary that exports every preset for its own live measurement; without it
+the target arm fails closed instead of reusing one measurement for every preset.
+The ``all`` preset carries one explicit recorded final ceiling. The targets are
+not enforced yet, so a target miss appears in the report and leaves the exit
+code alone; a targets file that cannot be trusted is an unusable input, not a
+silent skip.
 
 The whole report is built in memory and written once, so a failure can never leave
 half a document behind. An unusable input exits 2 with ``mcp-budget-check:
@@ -49,11 +53,11 @@ import sys
 from pathlib import Path
 
 import activated_budget
-import baseline_provenance
 import budget_allowances
 import budget_targets
 import description_bounds
-from measure import _parse_pack, _read_pack
+import preset_rows
+from measure import _parse_pack, _read_pack, measure_candidate, measure_skill
 from offline_tokenizer import BudgetError, load
 
 HERE = Path(__file__).resolve().parent
@@ -160,23 +164,6 @@ def baseline_rows(record) -> dict:
     }
 
 
-def measure_skill(path, tokenizer) -> dict:
-    """Return the digest, raw byte length, and token count of the file at ``path``."""
-    try:
-        raw = Path(path).read_bytes()
-    except OSError as exc:
-        raise BudgetError(f"budget: cannot read skill file: {exc}") from None
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise BudgetError(f"budget: skill file is not valid UTF-8: {exc}") from None
-    return {
-        "sha256": hashlib.sha256(raw).hexdigest(),
-        "bytes": len(raw),
-        "tokens": tokenizer.count(text),
-    }
-
-
 def skill_row_values(record) -> dict:
     """Return the frozen skill row values, read by name so a missing row raises."""
     return {row_id: baseline_value(record, row_id) for _, row_id in SKILL_ARMS}
@@ -224,16 +211,6 @@ def check_skill(record, candidate) -> dict:
         "arms": arms,
         "failures": failures,
         "verdict": "fail" if failures else "pass",
-    }
-
-
-def measure_candidate(pack, tokenizer) -> dict:
-    """Return the digest, canonical byte length, and token count of ``pack``."""
-    canonical = baseline_provenance.canonical_tools(pack["tools"])
-    return {
-        "sha256": hashlib.sha256(canonical).hexdigest(),
-        "bytes": len(canonical),
-        "tokens": tokenizer.count(canonical.decode("utf-8")),
     }
 
 
@@ -308,10 +285,11 @@ def check_pack(
     caller that passes a changed record sees that change. ``skill`` is the
     comparison returned by `check_skill`, ``activated`` the one returned by
     `activated_budget.check`, and ``targets`` the one returned by
-    `budget_targets.compare`; the preset targets stay unenforced, and the
-    activated body is reported even when its digest differs. With no activated
-    comparison, ``activated_body`` is compared against ``record`` here, and with
-    no body either the entry is marked not-measured, never reported as zero.
+    `budget_targets.compare`; every preset target is compared, a miss is
+    reported, and the preset targets stay unenforced, while the activated body
+    is reported even when its digest differs. With no activated comparison,
+    ``activated_body`` is compared against ``record`` here, and with no body
+    either the entry is marked not-measured, never reported as zero.
     When no skill was measured the ``skill`` entry still names both frozen rows
     through ``skill_rows`` — or, when the caller passes none, through ``record``.
     """
@@ -388,6 +366,15 @@ def main(argv=None) -> int:
         help="pack file to measure; reads stdin when omitted",
     )
     parser.add_argument(
+        "--preset-bin",
+        metavar="PATH",
+        default=None,
+        help=(
+            "built clio binary that exports every preset for the target arm; "
+            "required for preset targets, which fail closed without it"
+        ),
+    )
+    parser.add_argument(
         "--allowances",
         metavar="PATH",
         default=None,
@@ -417,6 +404,11 @@ def main(argv=None) -> int:
         baseline = arms_from(record, digest)
         tokenizer = load()
         candidate = measure_candidate(pack, tokenizer)
+        candidates = {}
+        if args.preset_bin:
+            candidates = preset_rows.measure_presets(
+                args.preset_bin, tokenizer, budget_targets.TARGET_PRESETS
+            )
         skill = None
         if args.skill:
             skill = check_skill(record, measure_skill(args.skill, tokenizer))
@@ -426,7 +418,7 @@ def main(argv=None) -> int:
             args.allowances or ALLOWANCES_PATH, digest
         )
         targets = budget_targets.compare(
-            budget_targets.load(TARGETS_FILE), baseline_rows(record), candidate
+            budget_targets.load(TARGETS_FILE), baseline_rows(record), candidates
         )
         report = check_pack(
             baseline, candidate, allowances, record,

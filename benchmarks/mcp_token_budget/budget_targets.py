@@ -7,14 +7,17 @@ record states each ceiling as a factor of the frozen baseline row and carries th
 arithmetic that produced it, so a reader recomputes a target instead of trusting
 it, and a target that no longer follows its own arithmetic is refused.
 
-Not every preset carries a target. The record must hold one row per unit for
-each preset in ``TARGET_PRESETS``, and a row for any other preset is refused;
-the smallest preset carries none, because its size is a chosen value in the
-decision record rather than a ceiling derived from a measured row.
+Every preset carries a target for both units. The record holds one row per unit
+for each preset in ``TARGET_PRESETS``, and a row for any other preset is refused.
+A preset that cannot reach the shared-row derived ceiling carries an explicit
+recorded adjustment instead: the record preserves its initial row, factor, and
+target, names the measured candidate, and fixes a final ceiling that is never
+recomputed by a later run.
 
 Nothing here enforces. ``PRESET_TARGETS_ENFORCED`` is False, so a measured value
 above its target is reported as a miss and never changes an exit code; flipping
-that one constant is the whole enforcement change.
+that one constant is the whole enforcement change. An adjustment is not an
+exemption: an adjusted preset is still compared with both final ceilings.
 
 The record is validated without the tokenizer, so the hermetic job can check it.
 Every error is one line prefixed ``targets:`` and names the rule it broke.
@@ -23,6 +26,18 @@ Every error is one line prefixed ``targets:`` and names the rule it broke.
 import json
 import re
 from pathlib import Path
+
+import target_adjustment
+from target_fields import (
+    TargetError,
+    _expect,
+    _fail,
+    _is_int,
+    _key_message,
+    _nonempty,
+    _object,
+    _repo_relative,
+)
 
 FORMAT = "clio_mcp_preset_targets"
 FORMAT_VERSION = 1
@@ -74,8 +89,8 @@ TARGET_LABEL = "Inferred"
 #: The one switch. True makes a miss a failure; False only reports it.
 PRESET_TARGETS_ENFORCED = False
 
-#: The smallest preset carries no target: its size is a recorded chosen value, not a threshold.
-TARGET_PRESETS = ("coding", "ops", "all")
+#: Every preset carries both targets; ``all`` carries a recorded final ceiling.
+TARGET_PRESETS = ("minimal", "coding", "ops", "all")
 UNITS = ("tokens", "bytes")
 
 TOP_LEVEL = frozenset(
@@ -88,6 +103,7 @@ TOP_LEVEL = frozenset(
         "factor_decision",
         "policy",
         "targets",
+        "target_adjustment",
     }
 )
 BASELINE_KEYS = frozenset({"path", "format", "format_version", "sha256"})
@@ -108,69 +124,6 @@ NUMBER_KEYS = ("baseline_value", "factor", "target", "headroom")
 KIND = "ceiling"
 ROW_TEMPLATE = "client/synthetic-eager-client/turn/1/{unit}"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-
-
-class TargetError(ValueError):
-    """Raised when a preset target record cannot be trusted."""
-
-
-def _fail(message):
-    raise TargetError(f"targets: {message}")
-
-
-def _is_int(value) -> bool:
-    """Return true for a JSON integer and false for a boolean."""
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _key_message(where, keys, allowed) -> str:
-    missing = sorted(allowed - keys)
-    unexpected = sorted(keys - allowed)
-    parts = []
-    if missing:
-        parts.append(f"missing {missing}")
-    if unexpected:
-        parts.append(f"unexpected {unexpected}")
-    return f"{where} keys must be exactly {sorted(allowed)}: " + ", ".join(parts)
-
-
-def _object(value, where, allowed) -> dict:
-    """Return ``value`` as an object with exactly the ``allowed`` keys."""
-    if not isinstance(value, dict):
-        _fail(f"{where} must be an object, got {type(value).__name__}")
-    keys = set(value)
-    if keys != allowed:
-        _fail(_key_message(where, keys, allowed))
-    return value
-
-
-def _nonempty(value, where) -> str:
-    """Return ``value`` as a non-empty string, or refuse it."""
-    if not isinstance(value, str) or not value.strip():
-        _fail(f"{where} must be a nonempty string, got {value!r}")
-    return value
-
-
-def _expect(value, where, expected) -> None:
-    """Refuse ``value`` unless it is exactly ``expected``."""
-    if value != expected or type(value) is not type(expected):
-        _fail(f"{where} is {value!r}, expected {expected!r}")
-
-
-def _repo_relative(path, where) -> str:
-    """Refuse a path that is absolute, climbs out, or names a private segment."""
-    _nonempty(path, where)
-    segments = re.split(r"[/\\]", path)
-    refusals = (
-        (path.startswith(("/", "\\")), "a leading slash or backslash"),
-        (bool(re.match(r"^[A-Za-z]:", path)), "a drive letter"),
-        (".." in segments, "a '..' segment"),
-        ("private" in segments, "a private segment"),
-    )
-    for refused, what in refusals:
-        if refused:
-            _fail(f"{where} is {path!r}, expected a repo-relative path with no {what}")
-    return path
 
 
 def _baseline(value) -> dict:
@@ -258,7 +211,7 @@ def _factor_decision(value) -> dict:
     return factors
 
 
-def _target(item, index, factors) -> dict:
+def _target(item, index, factors, adjustments) -> dict:
     if not isinstance(item, dict):
         _fail(f"target {index} must be an object, got {type(item).__name__}")
     keys = set(item)
@@ -276,35 +229,56 @@ def _target(item, index, factors) -> dict:
     label = f"target {preset}/{unit}"
     if item["kind"] != KIND:
         _fail(f"{label} kind is {item['kind']!r}, expected {KIND!r}")
-    if item["label"] != TARGET_LABEL:
-        _fail(f"{label} label is {item['label']!r}, expected {TARGET_LABEL!r}")
-    for key in NUMBER_KEYS:
+    for key in ("baseline_value", "factor", "target"):
         value = item[key]
         if not _is_int(value) or value <= 0:
             _fail(f"{label} {key} is not a positive integer: {value!r}")
-    expected_factor = factors[unit]
-    if item["factor"] != expected_factor:
-        _fail(
-            f"{label} factor is {item['factor']}, expected {expected_factor} from "
-            f"factor_decision.{UNIT_FACTORS[unit]}.numerator"
-        )
+    headroom = item["headroom"]
+    if not _is_int(headroom):
+        if preset in adjustments:
+            _fail(f"{label} headroom is not an integer: {headroom!r}")
+        _fail(f"{label} headroom is not a positive integer: {headroom!r}")
+    if headroom <= 0 and preset not in adjustments:
+        _fail(f"{label} headroom is not a positive integer: {headroom!r}")
     expected_row = ROW_TEMPLATE.format(unit=unit)
     if item["baseline_row"] != expected_row:
         _fail(
             f"{label} baseline_row is {item['baseline_row']!r}, expected {expected_row!r}"
         )
-    expected_target = item["baseline_value"] * item["factor"] // 100
-    if item["target"] != expected_target:
-        _fail(
-            f"{label} target {item['target']} is not floor({item['baseline_value']} * "
-            f"{item['factor']} / 100) = {expected_target}"
-        )
+    adjusted = adjustments.get(preset)
+    if adjusted is None:
+        if item["label"] != TARGET_LABEL:
+            _fail(f"{label} label is {item['label']!r}, expected {TARGET_LABEL!r}")
+        expected_factor = factors[unit]
+        if item["factor"] != expected_factor:
+            _fail(
+                f"{label} factor is {item['factor']}, expected {expected_factor} from "
+                f"factor_decision.{UNIT_FACTORS[unit]}.numerator"
+            )
+        expected_target = item["baseline_value"] * item["factor"] // 100
+        if item["target"] != expected_target:
+            _fail(
+                f"{label} target {item['target']} is not floor("
+                f"{item['baseline_value']} * {item['factor']} / 100) = "
+                f"{expected_target}"
+            )
+    else:
+        if item["label"] != DECISION_LABEL:
+            _fail(f"{label} label is {item['label']!r}, expected {DECISION_LABEL!r}")
+        expected_target = adjusted["final_target"][unit]
+        if item["target"] != expected_target:
+            _fail(
+                f"{label} target is {item['target']}, expected the recorded final "
+                f"ceiling {expected_target}"
+            )
     expected_headroom = item["baseline_value"] - item["target"]
     if item["headroom"] != expected_headroom:
         _fail(
             f"{label} headroom {item['headroom']} is not baseline_value - target = "
             f"{expected_headroom}"
         )
+    if expected_headroom < 0 and adjusted is None:
+        _fail(f"{label} headroom {expected_headroom} is negative on an unadjusted row")
     return {key: item[key] for key in TARGET_KEYS}
 
 
@@ -324,12 +298,20 @@ def _coverage(targets) -> None:
         _fail("missing targets for " + ", ".join(missing))
 
 
-def _targets(value, factors) -> list:
+def _targets(value, factors, adjustments) -> list:
     if not isinstance(value, list):
         _fail(f"targets must be a list, got {type(value).__name__}")
-    targets = [_target(item, index, factors) for index, item in enumerate(value)]
+    targets = [
+        _target(item, index, factors, adjustments)
+        for index, item in enumerate(value)
+    ]
     _coverage(targets)
     return targets
+
+
+def _adjustments(value, targets) -> dict:
+    """Return the validated adjustment map, or refuse a contradictory record."""
+    return target_adjustment.validate(value, TARGET_PRESETS, UNITS, targets)
 
 
 def validate(document) -> list:
@@ -339,6 +321,10 @@ def validate(document) -> list:
     keys = set(document)
     if keys != TOP_LEVEL:
         _fail(_key_message("top-level", keys, TOP_LEVEL))
+    if not isinstance(document["targets"], list):
+        _fail(
+            f"targets must be a list, got {type(document['targets']).__name__}"
+        )
     _expect(document["format"], "format", FORMAT)
     _expect(document["format_version"], "format_version", FORMAT_VERSION)
     _baseline(document["baseline"])
@@ -346,7 +332,8 @@ def validate(document) -> list:
     _tokenizer(document["tokenizer"])
     _policy(document["policy"])
     factors = _factor_decision(document["factor_decision"])
-    return _targets(document["targets"], factors)
+    adjustments = _adjustments(document["target_adjustment"], document["targets"])
+    return _targets(document["targets"], factors, adjustments)
 
 
 def load(path) -> list:
@@ -383,28 +370,42 @@ def _frozen_value(baseline_rows, target) -> int:
     return value
 
 
-def _measured(candidate, unit) -> int:
+def _measured(candidate, unit, preset) -> int:
     value = candidate.get(unit) if isinstance(candidate, dict) else None
     if not _is_int(value) or value < 0:
-        _fail(f"candidate {unit} is not a non-negative integer: {value!r}")
+        _fail(
+            f"preset {preset!r} candidate {unit} is not a non-negative integer: "
+            f"{value!r}"
+        )
     return value
 
 
-def compare(targets, baseline_rows, candidate) -> dict:
-    """Return the target comparison for one measured candidate.
+def compare(targets, baseline_rows, candidates) -> dict:
+    """Return the target comparison for every preset's measured candidate.
 
     ``baseline_rows`` maps a baseline row id to its frozen integer value and
-    ``candidate`` holds the measured ``sha256``, ``bytes``, and ``tokens``. A row
-    the record names but the baseline does not hold raises instead of comparing
+    ``candidates`` maps a preset name to that preset's measured ``sha256``,
+    ``bytes``, and ``tokens``. Every preset is compared for both units, so a
+    missing preset or a missing unit raises instead of being skipped. A row the
+    record names but the baseline does not hold raises instead of comparing
     against an invented zero.
     """
     if not isinstance(baseline_rows, dict):
         _fail(f"baseline rows must be an object, got {type(baseline_rows).__name__}")
+    if not isinstance(candidates, dict):
+        _fail(f"candidates must be an object, got {type(candidates).__name__}")
     comparisons = []
     failures = []
     for target in targets:
         _frozen_value(baseline_rows, target)
-        measured = _measured(candidate, target["unit"])
+        candidate = candidates.get(target["preset"])
+        if candidate is None:
+            _fail(
+                f"no measured candidate for preset {target['preset']!r}: every "
+                "preset is compared, so pass --preset-bin PATH to measure the "
+                "preset live"
+            )
+        measured = _measured(candidate, target["unit"], target["preset"])
         headroom = target["target"] - measured
         verdict = "pass" if measured <= target["target"] else "miss"
         comparisons.append(

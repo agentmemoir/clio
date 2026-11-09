@@ -3,10 +3,10 @@
 
 The check is driven through `main` on the committed fixture pack, so the document
 the build prints is the one asserted here: both pack arms, the skill truth when
-no path is given, the activated body that is always measured, the preset targets
-that are reported but not enforced yet, and every exit code. A test that measures
-tokens needs the pinned tokenizer and skips with a named reason when tiktoken is
-absent.
+no path is given, the activated body that is always measured, the per-preset
+targets that are reported but not enforced yet, and every exit code. A test that
+measures tokens needs the pinned tokenizer and skips with a named reason when
+tiktoken is absent.
 """
 
 import contextlib
@@ -58,9 +58,27 @@ class CommandTests(unittest.TestCase):
             code = budget_check.main(argv)
         return code, out.getvalue()
 
+    def passing(self):
+        """Return one at-target measurement per preset, so the target arm passes."""
+        return {
+            preset: {
+                "sha256": "ab" * 32,
+                "bytes": 140559 if preset == "all" else 84505,
+                "tokens": 30004 if preset == "all" else 15183,
+            }
+            for preset in budget_targets.TARGET_PRESETS
+        }
+
+    def run_live(self, argv):
+        measured = self.passing()
+        with mock.patch.object(
+            budget_check.preset_rows, "measure_presets", return_value=measured
+        ):
+            return self.run_main(argv)
+
     def test_unchanged_fixture_pack_passes_with_exit_zero(self):
         require_tokenizer()
-        code, text = self.run_main(["--pack", str(PACK)])
+        code, text = self.run_live(["--pack", str(PACK), "--preset-bin", "clio"])
         self.assertEqual(code, 0)
         report = json.loads(text)
         self.assertEqual(report["format"], "clio_mcp_budget_check")
@@ -85,7 +103,7 @@ class CommandTests(unittest.TestCase):
 
     def test_the_report_carries_the_skill_truth_and_the_targets(self):
         require_tokenizer()
-        code, text = self.run_main(["--pack", str(PACK)])
+        code, text = self.run_live(["--pack", str(PACK), "--preset-bin", "clio"])
         self.assertEqual(code, 0)
         report = json.loads(text)
         self.assertEqual(
@@ -105,21 +123,131 @@ class CommandTests(unittest.TestCase):
         )
         targets = report["targets"]
         self.assertFalse(targets["enforced"])
-        self.assertEqual(len(targets["comparisons"]), 6)
+        self.assertEqual(len(targets["comparisons"]), 8)
+        self.assertEqual(
+            {item["preset"] for item in targets["comparisons"]},
+            set(budget_targets.TARGET_PRESETS),
+        )
         self.assertEqual(targets["failures"], [])
-        self.assertTrue(all(item["verdict"] == "miss" for item in targets["comparisons"]))
+        all_rows = [
+            item for item in targets["comparisons"] if item["preset"] == "all"
+        ]
+        self.assertTrue(all(item["verdict"] == "pass" for item in all_rows))
 
     def test_a_preset_miss_changes_the_exit_code_only_when_enforcing(self):
         require_tokenizer()
-        code, text = self.run_main(["--pack", str(PACK)])
-        self.assertEqual(code, 0, text)
-        with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", True):
-            code, text = self.run_main(["--pack", str(PACK)])
+        over = {
+            "sha256": "ab" * 32,
+            "bytes": 90000,
+            "tokens": 20000,
+        }
+        measured = {preset: dict(over) for preset in budget_targets.TARGET_PRESETS}
+        with mock.patch.object(
+            budget_check.preset_rows, "measure_presets", return_value=measured
+        ):
+            code, text = self.run_main(["--pack", str(PACK), "--preset-bin", "clio"])
+            self.assertEqual(code, 0, text)
+            report = json.loads(text)
+            self.assertEqual(report["verdict"], "pass")
+            self.assertEqual(report["targets"]["failures"], [])
+            self.assertTrue(
+                any(
+                    item["verdict"] == "miss"
+                    for item in report["targets"]["comparisons"]
+                )
+            )
+            with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", True):
+                code, text = self.run_main(
+                    ["--pack", str(PACK), "--preset-bin", "clio"]
+                )
         self.assertEqual(code, 1, text)
         report = json.loads(text)
         self.assertEqual(report["verdict"], "fail")
-        self.assertEqual(len(report["failures"]), 6, report["failures"])
-        self.assertTrue(all(item["verdict"] == "miss" for item in report["targets"]["comparisons"]))
+        ops_tokens = next(
+            failure
+            for failure in report["failures"]
+            if "'ops'" in failure and "tokens" in failure
+        )
+        for expected in ("'ops'", "tokens", "15183", "20000"):
+            self.assertIn(expected, ops_tokens)
+
+    def test_every_preset_is_measured(self):
+        require_tokenizer()
+        seen = {}
+
+        def fake(binary, tokenizer, presets):
+            seen["binary"] = binary
+            seen["presets"] = tuple(presets)
+            return {
+                preset: {"sha256": "ab" * 32, "bytes": 1, "tokens": 1}
+                for preset in presets
+            }
+
+        with mock.patch.object(budget_check.preset_rows, "measure_presets", side_effect=fake):
+            code, text = self.run_main(["--pack", str(PACK), "--preset-bin", "clio"])
+        self.assertEqual(code, 0, text)
+        self.assertEqual(seen["binary"], "clio")
+        self.assertEqual(seen["presets"], budget_targets.TARGET_PRESETS)
+
+    def test_a_missing_preset_measurement_exits_two(self):
+        require_tokenizer()
+        measured = {
+            preset: {"sha256": "ab" * 32, "bytes": 1, "tokens": 1}
+            for preset in budget_targets.TARGET_PRESETS
+            if preset != "ops"
+        }
+        err = io.StringIO()
+        with mock.patch.object(
+            budget_check.preset_rows, "measure_presets", return_value=measured
+        ):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                code = budget_check.main(["--pack", str(PACK), "--preset-bin", "clio"])
+        self.assertEqual(code, 2)
+        self.assertIn("targets: no measured candidate for preset 'ops'", err.getvalue())
+
+    def test_the_flip_passes_on_committed_presets(self):
+        require_tokenizer()
+        try:
+            binary = budget_check.preset_rows._binary(None)
+        except budget_check.BudgetError as exc:
+            self.skipTest(f"no usable clio binary: {exc}")
+        with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", True):
+            code, text = self.run_main(["--pack", str(PACK), "--preset-bin", str(binary)])
+        self.assertEqual(code, 0, text)
+        report = json.loads(text)
+        self.assertEqual(report["targets"]["failures"], [])
+        self.assertTrue(
+            all(item["verdict"] == "pass" for item in report["targets"]["comparisons"])
+        )
+
+    def test_target_failures_are_separate_from_growth_failures(self):
+        require_tokenizer()
+        measured = {
+            preset: {"sha256": "ab" * 32, "bytes": 90000, "tokens": 20000}
+            for preset in budget_targets.TARGET_PRESETS
+        }
+        with mock.patch.object(
+            budget_check.preset_rows, "measure_presets", return_value=measured
+        ):
+            code, text = self.run_main(["--pack", str(PACK), "--preset-bin", "clio"])
+        self.assertEqual(code, 0, text)
+        report = json.loads(text)
+        self.assertEqual(report["targets"]["failures"], [])
+        self.assertEqual(report["failures"], [])
+        with mock.patch.object(
+            budget_check.preset_rows, "measure_presets", return_value=measured
+        ), mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", True):
+            code, text = self.run_main(["--pack", str(PACK), "--preset-bin", "clio"])
+        self.assertEqual(code, 1, text)
+        report = json.loads(text)
+        self.assertTrue(report["targets"]["failures"])
+        self.assertFalse(
+            any(
+                failure.startswith(("bytes:", "tokens:"))
+                for failure in report["failures"]
+            )
+        )
+        self.assertTrue(all(arm["verdict"] == "pass" for arm in report["arms"]))
 
     def test_a_grown_pack_fails_with_exit_one(self):
         require_tokenizer()
@@ -127,7 +255,7 @@ class CommandTests(unittest.TestCase):
         pack["tools"][0]["description"] = pack["tools"][0]["description"] + " " + "growth " * 20
         with tempfile.TemporaryDirectory() as tmp:
             path = write_json(tmp, "pack.json", pack)
-            code, text = self.run_main(["--pack", str(path)])
+            code, text = self.run_live(["--pack", str(path), "--preset-bin", "clio"])
         self.assertEqual(code, 1, text)
         report = json.loads(text)
         self.assertEqual(report["verdict"], "fail")
@@ -139,18 +267,40 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "pack.json"
             path.write_text("not json", encoding="utf-8")
-            code, text = self.run_main(["--pack", str(path)])
+            code, text = self.run_main(["--pack", str(path), "--preset-bin", "clio"])
         self.assertEqual(code, 2)
         self.assertEqual(text, "")
+
+    def test_targets_refuse_without_a_preset_binary(self):
+        require_tokenizer()
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = budget_check.main(["--pack", str(PACK)])
+        self.assertEqual(code, 2)
+        message = err.getvalue()
+        self.assertIn("targets:", message)
+        self.assertIn("--preset-bin", message)
 
 
 class ActivatedCommandTests(unittest.TestCase):
     """The activated body is measured on every run, against its frozen row."""
 
     def run_main(self, argv):
+        if "--preset-bin" not in argv:
+            argv = [*argv, "--preset-bin", "clio"]
+        measured = {
+            preset: {
+                "sha256": "ab" * 32,
+                "bytes": 140559 if preset == "all" else 84505,
+                "tokens": 30004 if preset == "all" else 15183,
+            }
+            for preset in budget_targets.TARGET_PRESETS
+        }
         out = io.StringIO()
         err = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with mock.patch.object(
+            budget_check.preset_rows, "measure_presets", return_value=measured
+        ), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = budget_check.main(argv)
         return code, out.getvalue(), err.getvalue()
 
