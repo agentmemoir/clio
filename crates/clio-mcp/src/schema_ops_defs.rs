@@ -30,8 +30,7 @@ use crate::schema_defs::{ToolDef, arr, b, en, s};
 /// to cover that bank or the call is refused. A caller without a credential has
 /// no default to fall back on, so each of those tools states that reach itself,
 /// while `diagnose` publishes its own sentence.
-const OMITTED_BANK: &str =
-    "Bank; omitted=server default the credential grant must cover.";
+const OMITTED_BANK: &str = "Bank; omitted=server default the credential grant must cover.";
 
 /// `diagnose`'s own `bank` clause: the shared omitted-bank sentence, then the
 /// reach only this tool keeps, since its arm reads the argument without ever
