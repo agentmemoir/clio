@@ -3,14 +3,11 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the unit fixtures of the candidate
-//! `2026-07-28` admission path: the conditional headers, JSON syntax, the
-//! required version header, the required metadata, header/body equality, and
-//! the supported revision, in that order.
+//! This module is responsible for the unit fixtures of the candidate `2026-07-28` admission path: the conditional headers, JSON syntax, the required version header, the required metadata, header/body equality, the supported revision, and the required client capability, in that order.
 //!
 //! ## Owns
 //! - Every assertion about `admit` and its refusal mapping
-//! - The claim that a refused request never reaches method dispatch
+//! - The refusal status and body a frame that fails admission answers
 //! - The claim that the served pin and the live route stay off this surface
 //!
 //! ## Does not own
@@ -70,6 +67,15 @@ fn frame(msg: &Value) -> String {
 /// A `tools/list` frame whose metadata declares `version`.
 fn list_frame(version: &str) -> String {
     frame(&request("tools/list", &required_meta(version)))
+}
+
+/// A notification frame for `method`: the request envelope without an `id`.
+fn notification_frame(method: &str, version: &str) -> String {
+    frame(&json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": { "_meta": required_meta(version) }
+    }))
 }
 
 #[test]
@@ -199,7 +205,70 @@ fn a_missing_or_empty_version_header_is_refused() {
             message(&body).contains("MCP-Protocol-Version"),
             "{label}: names the header: {body}"
         );
+        assert!(
+            message(&body).contains("required"),
+            "{label}: answers the required-header branch: {body}"
+        );
     }
+}
+
+#[test]
+fn a_missing_header_is_refused_before_missing_metadata() {
+    let frame = frame(&json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/list" }));
+    let (status, body) = refused(&state(), &[(MCP_METHOD_HEADER, "tools/list")], &frame);
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(code(&body), -32020, "{body}");
+    assert!(
+        message(&body).contains("MCP-Protocol-Version"),
+        "names the header: {body}"
+    );
+}
+
+#[test]
+fn a_notification_is_admitted_without_an_answer() {
+    let served = run(
+        &state(),
+        &[
+            (MCP_METHOD_HEADER, "notifications/initialized"),
+            (PROTOCOL_VERSION_HEADER, CANDIDATE_REVISION),
+        ],
+        &notification_frame("notifications/initialized", CANDIDATE_REVISION),
+    )
+    .expect("the notification is admitted");
+    assert!(
+        served.is_none(),
+        "a notification is not answered: {served:?}"
+    );
+}
+
+#[test]
+fn a_notification_with_an_unequal_header_is_refused() {
+    let (status, body) = refused(
+        &state(),
+        &[
+            (MCP_METHOD_HEADER, "notifications/initialized"),
+            (PROTOCOL_VERSION_HEADER, "2025-11-25"),
+        ],
+        &notification_frame("notifications/initialized", CANDIDATE_REVISION),
+    );
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(code(&body), -32020, "{body}");
+}
+
+#[test]
+fn missing_client_capabilities_is_invalid_params_at_http_400() {
+    let frame = frame(&json!({
+        "jsonrpc": "2.0", "id": 7, "method": "tools/list",
+        "params": { "_meta": { "io.modelcontextprotocol/protocolVersion": CANDIDATE_REVISION } }
+    }));
+    let (status, body) = refused(&state(), &headers(CANDIDATE_REVISION), &frame);
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(code(&body), -32602, "{body}");
+    assert!(
+        message(&body).contains("clientCapabilities"),
+        "names the key: {body}"
+    );
+    assert!(body.get("result").is_none(), "{body}");
 }
 
 #[test]
@@ -241,11 +310,12 @@ fn invalid_json_is_a_parse_error_before_the_header_check() {
 }
 
 #[test]
-fn a_refused_request_never_reaches_dispatch() {
+fn a_refused_request_returns_no_dispatch_result() {
     let state = state();
-    // This frame alone dispatches; the unequal header refuses it first.
     let frame = list_frame(CANDIDATE_REVISION);
-    let (status, body) = refused(&state, &headers("2025-11-25"), &frame);
+    let (status, raw) = run(&state, &headers("2025-11-25"), &frame)
+        .expect_err("the admission returns a refusal and no result to dispatch");
+    let body: Value = serde_json::from_str(&raw).expect("the refusal body is JSON");
     assert_eq!(status, 400, "{body}");
     assert_eq!(code(&body), -32020, "{body}");
     assert!(body.get("result").is_none(), "{body}");
