@@ -9,6 +9,7 @@
 //! ## Owns
 //! - The per-request context a strategy reads
 //! - The dispatch strategy trait
+//! - The body a route answers with: complete JSON, or a stream of frames
 //! - The request-scoped state a bound request runs against
 //!
 //! ## Does not own
@@ -23,14 +24,36 @@
 //!
 //! Keep this module focused on the POST dispatch decision.
 
+use crate::event_stream::EventStream;
 use crate::http_auth::AuthOutcome;
 use crate::http_read::HttpRequest;
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
 use std::sync::Arc;
 
+/// The body one route answers with.
+pub(crate) enum PostBody {
+    /// A buffered JSON body, sent with its length.
+    Buffered(String),
+    /// A streamed SSE body, sent until the peer or the source ends it.
+    ///
+    /// The write path serves it; the tests are the builders until a route
+    /// answers with one.
+    #[cfg_attr(not(test), allow(dead_code))]
+    Stream(EventStream),
+}
+
+impl std::fmt::Debug for PostBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Buffered(body) => f.debug_tuple("Buffered").field(body).finish(),
+            Self::Stream(_) => f.write_str("Stream(..)"),
+        }
+    }
+}
+
 /// The status, body, and extra headers one route answers with.
-pub(crate) type PostResponse = (u16, String, Vec<(String, String)>);
+pub(crate) type PostResponse = (u16, PostBody, Vec<(String, String)>);
 
 /// The inputs one POST dispatch strategy reads.
 pub(crate) struct PostContext<'a> {

@@ -45,6 +45,7 @@ pub mod config_tools;
 mod conn_pool;
 pub mod discovery_tool_defs;
 mod discovery_tools;
+mod event_stream;
 mod export_destination;
 pub mod http;
 pub mod http_auth;

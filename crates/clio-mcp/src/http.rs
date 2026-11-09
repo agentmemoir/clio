@@ -25,6 +25,9 @@
 //!     is not cut off — writes are bounded separately by `WRITE_SLICE`
 //!   - 32 concurrent-connection cap (`conn_pool::MAX_CONNECTIONS`); above the
 //!     cap the accept loop answers 503 and closes
+//!   - A streamed answer runs until the peer or its frame source ends it: it is
+//!     bounded by `WRITE_SLICE` per write and by the connection cap, not by the
+//!     request deadline, which stops at the end of the read
 //!
 //! ## Does not own
 //! - Protocol handling (see `protocol`)
@@ -48,7 +51,7 @@ use crate::http::http_start_guard::{BindRefusal, bind_refusal};
 use crate::http_auth::{CredentialStore, authorize_request};
 use crate::http_candidate::CandidatePost;
 use crate::http_guard::check_origin;
-use crate::http_post::{PostContext, PostRoute, scoped_state};
+use crate::http_post::{PostBody, PostContext, PostResponse, PostRoute, scoped_state};
 use crate::http_read::{HttpRequest, read_request};
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
@@ -88,6 +91,13 @@ const WRITE_SLICE: Duration = Duration::from_secs(5);
 /// Write timeout for the above-cap connection refusal, kept short so a
 /// hostile non-reading peer cannot stall the accept loop.
 const REFUSAL_WRITE_SLICE: Duration = Duration::from_secs(2);
+
+/// The header block a streamed answer sends after the status and extra headers:
+/// the SSE content type, no caching, no proxy buffering, and a close. A stream
+/// carries no `Content-Length`, because its length is unknown when the head is
+/// written.
+const STREAM_HEADERS: &str = "Content-Type: text/event-stream\r\nCache-Control: no-store\r\n\
+     X-Accel-Buffering: no\r\nConnection: close\r\n\r\n";
 
 /// Configuration for the Streamable HTTP transport.
 #[derive(Debug, Clone)]
@@ -248,16 +258,25 @@ where
     for (k, v) in extra {
         let _ = write!(response, "{k}: {v}\r\n");
     }
-    let _ = write!(
-        response,
-        "Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    stream.write_all(response.as_bytes())?;
-    if !body.is_empty() {
-        stream.write_all(body.as_bytes())?;
+    match body {
+        PostBody::Buffered(body) => {
+            let _ = write!(
+                response,
+                "Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes())?;
+            if !body.is_empty() {
+                stream.write_all(body.as_bytes())?;
+            }
+            stream.flush()?;
+        }
+        PostBody::Stream(mut body) => {
+            response.push_str(STREAM_HEADERS);
+            stream.write_all(response.as_bytes())?;
+            body.pump(&mut stream)?;
+        }
     }
-    stream.flush()?;
     finish(&mut stream);
     Ok(())
 }
@@ -269,7 +288,7 @@ fn route<P>(
     cfg: &HttpConfig,
     req: &HttpRequest,
     post: &P,
-) -> (u16, String, Vec<(String, String)>)
+) -> PostResponse
 where
     P: PostRoute,
 {
@@ -282,32 +301,36 @@ where
             .iter()
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
             .collect();
-        return (refusal.status, refusal.body.to_owned(), extra);
+        return (
+            refusal.status,
+            PostBody::Buffered(refusal.body.to_owned()),
+            extra,
+        );
     }
     if let Some(status) = check_origin(cfg, req) {
-        return (status, String::new(), vec![]);
+        return (status, PostBody::Buffered(String::new()), vec![]);
     }
     // Origin first, then credentials: a request from an unapproved Origin never
     // reaches the credential comparison at all.
     let principal = match authorize_request(cfg.credentials.as_deref(), req.get("authorization")) {
         Ok(outcome) => outcome,
-        Err(status) => return (status, String::new(), vec![]),
+        Err(status) => return (status, PostBody::Buffered(String::new()), vec![]),
     };
     if req.path != "/mcp" {
-        return (404, String::new(), vec![]);
+        return (404, PostBody::Buffered(String::new()), vec![]);
     }
     let accepts = req
         .get("accept")
         .map_or_else(String::new, str::to_ascii_lowercase);
     if !accepts_json(&accepts) {
-        return (406, String::new(), vec![]);
+        return (406, PostBody::Buffered(String::new()), vec![]);
     }
     let content_type = req
         .get("content-type")
         .unwrap_or("application/json")
         .to_ascii_lowercase();
     if !content_type.starts_with("application/json") {
-        return (415, String::new(), vec![]);
+        return (415, PostBody::Buffered(String::new()), vec![]);
     }
     // The request-scoped state carries the credential's principal, so dispatch
     // runs through the bound entry point and the shared `Mutex`-held state stays
@@ -408,6 +431,9 @@ mod http_retention_parity_tests;
 #[cfg(test)]
 #[path = "http_start_auth_tests.rs"]
 mod http_start_auth_tests;
+#[cfg(test)]
+#[path = "http_stream_tests.rs"]
+mod http_stream_tests;
 #[cfg(test)]
 #[path = "http_test_support_tests.rs"]
 pub(crate) mod http_test_support_tests;

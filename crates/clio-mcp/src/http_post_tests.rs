@@ -44,6 +44,14 @@ fn request(body: &str, headers: &[(&str, &str)]) -> HttpRequest {
     }
 }
 
+/// The bytes of a buffered answer, which is the only kind the candidate sends.
+fn buffered(body: PostBody) -> String {
+    match body {
+        PostBody::Buffered(bytes) => bytes,
+        PostBody::Stream(_) => panic!("the candidate answers with a buffered body"),
+    }
+}
+
 /// The headers a well-formed stateless request carries.
 fn stateless_headers() -> Vec<(&'static str, &'static str)> {
     vec![
@@ -66,6 +74,7 @@ fn a_notification_is_answered_with_202_and_no_body() {
         state: &state,
         req: &req,
     });
+    let body = buffered(body);
     assert_eq!(status, 202);
     assert!(body.is_empty(), "{body}");
     assert!(extra.is_empty(), "no header is answered with a body alone");
@@ -85,6 +94,7 @@ fn a_removed_method_is_answered_with_404() {
         state: &state,
         req: &req,
     });
+    let body = buffered(body);
     assert_eq!(status, 404, "{body}");
     let value: serde_json::Value = serde_json::from_str(&body).expect("a JSON answer");
     assert_eq!(value["error"]["code"], json!(-32601), "{value}");
@@ -102,6 +112,7 @@ fn a_stateless_listing_is_served_with_200() {
         state: &state,
         req: &req,
     });
+    let body = buffered(body);
     assert_eq!(status, 200, "{body}");
     let value: serde_json::Value = serde_json::from_str(&body).expect("a JSON answer");
     assert!(value["result"]["tools"].is_array(), "{value}");

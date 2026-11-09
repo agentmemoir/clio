@@ -25,7 +25,7 @@
 //!
 //! Keep this module focused on the POST strategy.
 
-use crate::http_post::{PostContext, PostResponse, PostRoute};
+use crate::http_post::{PostBody, PostContext, PostResponse, PostRoute};
 use crate::protocol::ERR_METHOD_NOT_FOUND;
 use serde_json::Value;
 
@@ -47,12 +47,12 @@ impl PostRoute for CandidatePost {
                 let status = method_not_found_status(&response);
                 (
                     status,
-                    serde_json::to_string(&response).unwrap_or_default(),
+                    PostBody::Buffered(serde_json::to_string(&response).unwrap_or_default()),
                     Vec::new(),
                 )
             }
-            Ok(None) => (202, String::new(), Vec::new()),
-            Err((status, body)) => (status, body, Vec::new()),
+            Ok(None) => (202, PostBody::Buffered(String::new()), Vec::new()),
+            Err((status, body)) => (status, PostBody::Buffered(body), Vec::new()),
         }
     }
 }
