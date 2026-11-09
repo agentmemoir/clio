@@ -3,7 +3,7 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the unit fixtures of the candidate `2026-07-28` admission path: the conditional headers, JSON syntax, the required version header, the required metadata, header/body equality, the supported revision, and the required client capability, in that order.
+//! This module is responsible for the unit fixtures of the candidate `2026-07-28` admission path: the conditional headers, JSON syntax, the removed-method rule, the required version header, the required metadata, header/body equality, the supported revision, and the required client capability, in that order.
 //!
 //! ## Owns
 //! - Every assertion about `admit` and its refusal mapping
@@ -23,7 +23,7 @@
 //!
 //! Keep this module focused on the admission path's fixtures.
 
-use super::{PROTOCOL_VERSION_HEADER, SUPPORTED_REVISIONS, admit};
+use super::{PROTOCOL_VERSION_HEADER, REMOVED_METHODS, SUPPORTED_REVISIONS, admit};
 use crate::conditional_http::{MCP_METHOD_HEADER, MCP_NAME_HEADER};
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
@@ -303,6 +303,26 @@ fn both_optional_metadata_fields_may_be_absent() {
     .expect("the request is admitted")
     .expect("a request carrying an id is answered");
     assert!(served.get("error").is_none(), "{served}");
+}
+
+#[test]
+fn a_removed_method_is_answered_before_the_version_header_and_the_metadata() {
+    let state = state();
+    for &method in REMOVED_METHODS {
+        let frame = frame(&json!({
+            "jsonrpc": "2.0", "id": 7, "method": method,
+            "params": { "protocolVersion": "2025-11-25" }
+        }));
+        let served = run(&state, &[(MCP_METHOD_HEADER, method)], &frame)
+            .unwrap_or_else(|(status, body)| panic!("{method}: refused with {status}: {body}"))
+            .unwrap_or_else(|| panic!("{method}: a request carrying an id is answered"));
+        assert_eq!(code(&served), -32601, "{method}: {served}");
+        assert!(message(&served).contains(method), "{method}: {served}");
+        assert!(
+            served.get("result").is_none(),
+            "{method}: never served: {served}"
+        );
+    }
 }
 
 #[test]

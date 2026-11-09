@@ -98,11 +98,13 @@ pub(crate) const CACHE_HINTS: CacheHints = CacheHints {
 
 /// Admit one stateless HTTP request and, when it passes, serve it.
 ///
-/// The checks run in one fixed order and stop at the first failure: the conditional headers, JSON syntax, the required version header, the required metadata, header/body equality, the supported revision, and the client capability the request needs. Only a request that passes every check reaches [`dispatch`].
+/// The checks run in one fixed order and stop at the first failure: the conditional headers, JSON syntax, the removed-method rule, the required version header, the required metadata, header/body equality, the supported revision, and the client capability the request needs. The removed-method rule runs before every metadata rule, so a removed method is answered as an unknown method whether or not the request carries `_meta` or the version header. Every other request that passes every check reaches [`dispatch`].
 ///
-/// `get` reads one header value by its lowercase wire name. A refused request
-/// answers the status and JSON-RPC body [`refusal`] renders; a notification
-/// that passes answers `None`, like [`dispatch`].
+/// `get` reads one header value by its lowercase wire name. A removed method is
+/// answered here rather than refused, so the transport maps its `-32601` to its
+/// own not-found answer. Any other refused request answers the status and
+/// JSON-RPC body [`refusal`] renders; a notification on the admitted path
+/// answers `None`, like [`dispatch`].
 ///
 /// # Errors
 /// The request fails one admission check. The refusal names the header that
@@ -123,6 +125,9 @@ where
         let err = RpcError::new(ERR_PARSE, "Parse error: invalid JSON");
         return Err(refusal(&Value::Null, &err));
     };
+    if let Some(answer) = removed_method_answer(&body) {
+        return Ok(Some(answer));
+    }
     let declared = get(PROTOCOL_VERSION_HEADER)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| missing_version_header(&body))?;
@@ -165,15 +170,46 @@ where
 ///
 /// The stdio transport has no headers, so there is nothing to compare. The
 /// frame is parsed and then answered through [`dispatch`], which applies the
-/// same required-metadata, supported-revision, and client-capability rules the
-/// HTTP admission applies after its header checks. A frame that is not JSON
-/// answers the JSON-RPC parse error.
+/// same removed-method, supported-revision, and client-capability rules the
+/// HTTP admission applies after its header checks, and the required-metadata
+/// rule to every message carrying an `id`. The two transports differ in one
+/// place: [`dispatch`] answers a message without an `id` before it reads that
+/// message's metadata, while the HTTP admission reads the metadata of every
+/// body it parses, so a notification with no `_meta` is silent here and
+/// refused as invalid params there. A frame that is not JSON answers the
+/// JSON-RPC parse error.
 pub(crate) fn admit_stdio(state: &McpState, frame: &str) -> Option<Value> {
     let Ok(body) = serde_json::from_str::<Value>(frame) else {
         let err = RpcError::new(ERR_PARSE, "Parse error: invalid JSON");
         return Some(error_response(None, &err));
     };
     dispatch(state, &body)
+}
+
+/// Answer a removed method, or `None` for any other message.
+///
+/// The rule runs before the metadata, revision, and capability rules on both
+/// transports, in the HTTP admission and in [`dispatch`], so a removed method
+/// is unknown whether or not the request carries `_meta`. A message without an
+/// `id` is a notification and stays unanswered.
+#[must_use]
+fn removed_method_answer(msg: &Value) -> Option<Value> {
+    let id = msg.get("id")?;
+    let method = msg.get("method").and_then(Value::as_str)?;
+    REMOVED_METHODS
+        .contains(&method)
+        .then(|| not_found(id, method))
+}
+
+/// The one answer for a method this revision does not serve.
+#[must_use]
+fn not_found(id: &Value, method: &str) -> Value {
+    reject(
+        id,
+        ERR_METHOD_NOT_FOUND,
+        format!("method `{method}` not found"),
+        None,
+    )
 }
 
 /// The refusal for a request whose version header is absent or empty.
@@ -197,13 +233,8 @@ pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
     };
     // A removed method is answered before any metadata rule: it is unknown
     // whether or not the request carries `_meta`.
-    if REMOVED_METHODS.contains(&method) {
-        return Some(reject(
-            id,
-            ERR_METHOD_NOT_FOUND,
-            format!("method `{method}` not found"),
-            None,
-        ));
+    if let Some(answer) = removed_method_answer(msg) {
+        return Some(answer);
     }
     let (capabilities, requested) = match request_meta(msg) {
         Ok(meta) => meta,
@@ -246,12 +277,7 @@ pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
             None,
         ),
         "tools/call" => delegate(id, state, msg),
-        other => reject(
-            id,
-            ERR_METHOD_NOT_FOUND,
-            format!("method `{other}` not found"),
-            None,
-        ),
+        other => not_found(id, other),
     })
 }
 

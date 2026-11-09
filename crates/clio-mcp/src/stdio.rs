@@ -78,6 +78,10 @@ where
 mod stdio_tests;
 
 #[cfg(test)]
+#[path = "stdio_removed_method_tests.rs"]
+mod stdio_removed_method_tests;
+
+#[cfg(test)]
 #[path = "stdio_candidate_tests.rs"]
 mod stdio_candidate_tests;
 
