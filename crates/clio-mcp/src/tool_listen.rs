@@ -50,20 +50,21 @@ pub(crate) fn intercept(state: &McpState, req: &HttpRequest) -> Option<PostRespo
     if body.get("method").and_then(Value::as_str) != Some(LISTEN_METHOD) {
         return None;
     }
-    let id = match body.get("id") {
-        Some(id @ (Value::String(_) | Value::Number(_))) => id,
-        Some(_) => {
+    let Some(id) = body.get("id") else {
+        return Some(buffered_error(
+            None,
+            ERR_INVALID_REQUEST,
+            "Invalid request: a subscription needs an `id`",
+        ));
+    };
+    let key = match id {
+        Value::String(text) => text.clone(),
+        Value::Number(number) => number.to_string(),
+        _ => {
             return Some(buffered_error(
                 None,
                 ERR_INVALID_REQUEST,
                 "Invalid request: a subscription id must be a string or a number",
-            ));
-        }
-        None => {
-            return Some(buffered_error(
-                None,
-                ERR_INVALID_REQUEST,
-                "Invalid request: a subscription needs an `id`",
             ));
         }
     };
@@ -76,11 +77,6 @@ pub(crate) fn intercept(state: &McpState, req: &HttpRequest) -> Option<PostRespo
         Err(err) => {
             return Some(buffered_error(Some(id), ERR_INTERNAL, err.message));
         }
-    };
-    let key = match id {
-        Value::String(text) => text.clone(),
-        Value::Number(number) => number.to_string(),
-        _ => unreachable!("the id shape is checked above"),
     };
     let subscriber = match state.tool_signals.register(&key, baseline) {
         Ok(subscriber) => subscriber,

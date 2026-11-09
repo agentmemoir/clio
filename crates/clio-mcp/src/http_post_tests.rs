@@ -9,6 +9,7 @@
 //! ## Owns
 //! - The strategy trait's notification, refused-method, and served branches
 //! - `scoped_state` and the principal it carries
+//! - The `Debug` rendering of both body kinds
 //!
 //! ## Does not own
 //! - The strategy trait or the route gates (see `http_post` and `http`)
@@ -20,11 +21,13 @@
 //! require changes here. Changes to a gate or a tool should not.
 
 use super::*;
+use crate::event_stream::{EventStream, FrameSource, frame};
 use crate::http_candidate::CandidatePost;
 use crate::principal::Principal;
 use crate::runtime::McpOpenOptions;
 use clio_types::Actor;
 use serde_json::json;
+use std::time::Duration;
 
 /// A fresh runtime state for one test.
 fn state() -> Arc<McpState> {
@@ -139,5 +142,30 @@ fn scoped_state_carries_the_request_principal() {
     assert!(
         bound.authorize_admin().is_err(),
         "the bound principal's actor decides the administrative rule"
+    );
+}
+
+#[test]
+fn a_buffered_body_renders_its_payload() {
+    let body = PostBody::Buffered("ready".into());
+    assert_eq!(format!("{body:?}"), "Buffered(\"ready\")");
+}
+
+#[test]
+fn a_streamed_body_hides_its_source() {
+    struct Silent;
+    impl FrameSource for Silent {
+        fn next(&mut self, _timeout: Duration) -> Option<Vec<u8>> {
+            None
+        }
+    }
+    let body = PostBody::Stream(EventStream {
+        head: frame("{}"),
+        source: Box::new(Silent),
+    });
+    assert_eq!(
+        format!("{body:?}"),
+        "Stream(..)",
+        "a stream's source is not rendered"
     );
 }
