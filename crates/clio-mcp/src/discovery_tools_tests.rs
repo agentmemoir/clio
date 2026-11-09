@@ -109,7 +109,15 @@ fn the_description_is_the_catalog_definition() {
             .iter()
             .find(|tool| tool["name"] == json!(name))
             .expect("the schema pack publishes the tool");
-        assert_eq!(described(&state, name), *from_pack, "`{name}` pack drift");
+        // The pack ships one shape, so compare the described definition with
+        // the pack in that same shape rather than in the reference form both
+        // other assertions above use.
+        let shape = crate::schema_shape::SHIPPED_PACK_SHAPE;
+        assert_eq!(
+            shape.tool(&described(&state, name)),
+            *from_pack,
+            "`{name}` pack drift"
+        );
     }
     assert!(
         catalog_def("store").expect("store").to_tool()["outputSchema"].is_object(),

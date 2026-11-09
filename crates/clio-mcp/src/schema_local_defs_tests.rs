@@ -32,6 +32,7 @@
 use super::*;
 use crate::protocol::McpHandler;
 use crate::runtime::{McpOpenOptions, McpState};
+use crate::schema_shape::flatten;
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
@@ -122,51 +123,6 @@ fn every_emitted_schema_validates_alone_with_network_denied() {
     }
 }
 
-/// The value one local `#/$defs/...` reference points at, resolved inside
-/// `root`.
-fn pointed<'a>(root: &'a Value, reference: &str) -> Option<&'a Value> {
-    let mut node = root;
-    for token in reference.strip_prefix("#/")?.split('/') {
-        node = node.get(token)?;
-    }
-    Some(node)
-}
-
-/// `node` with every local reference replaced by the definition it points at,
-/// recursively, so the result holds no `$ref`.
-fn flattened(node: &Value, root: &Value) -> Value {
-    match node {
-        Value::Object(map) => {
-            if let Some(target) = map
-                .get("$ref")
-                .and_then(Value::as_str)
-                .and_then(|reference| pointed(root, reference))
-            {
-                return flattened(target, root);
-            }
-            Value::Object(
-                map.iter()
-                    .map(|(key, value)| (key.clone(), flattened(value, root)))
-                    .collect(),
-            )
-        }
-        Value::Array(items) => {
-            Value::Array(items.iter().map(|item| flattened(item, root)).collect())
-        }
-        other => other.clone(),
-    }
-}
-
-/// A schema with its root `$defs` removed: the document a flattener produces,
-/// and the document a resolver would have to fetch into.
-fn without_root_defs(schema: &Value) -> Value {
-    let mut copy = schema.clone();
-    if let Some(map) = copy.as_object_mut() {
-        map.remove("$defs");
-    }
-    copy
-}
-
 /// How many string `$ref` values anywhere in `value` equal `reference`.
 fn count_refs(value: &Value, reference: &str) -> usize {
     match value {
@@ -187,11 +143,11 @@ fn retention_input(name: &str) -> Value {
 }
 
 /// The resolved input schemas of both retention tools: each document with its
-/// local references flattened and root `$defs` removed. This pins the contract
-/// this build publishes, not an earlier commit. To record an intended contract
-/// change, run the guard: a mismatch prints the resolved document to write to
-/// the fixture, and the change names the moved field. Any other difference is
-/// drift.
+/// local references flattened by the production shape pass. This pins the
+/// contract this build publishes, not an earlier commit. To record an intended
+/// contract change, run the guard: a mismatch prints the resolved document to
+/// write to the fixture, and the change names the moved field. Any other
+/// difference is drift.
 const RETENTION_RESOLVED_INPUT_SCHEMAS: &str =
     include_str!("../tests/fixtures/retention_resolved_input_schemas.json");
 
@@ -201,7 +157,7 @@ fn retention_input_schemas_resolve_to_the_published_contract() {
         .expect("the resolved-contract fixture is JSON");
     for name in MISSION_TOOLS {
         let live = retention_input(name);
-        let resolved = without_root_defs(&flattened(&live, &live));
+        let resolved = flatten(&live);
         let expected = &expected_schemas[name];
         assert_eq!(
             &resolved, expected,
@@ -244,7 +200,11 @@ fn a_reference_without_local_definitions_fails() {
         count_refs(schema, "#/$defs/MissionEntry") > 0,
         "the published schema holds a local reference"
     );
-    let dangling = without_root_defs(schema);
+    let mut dangling = schema.clone();
+    dangling
+        .as_object_mut()
+        .expect("an inputSchema object")
+        .remove("$defs");
     jsonschema::options()
         .offline()
         .build(&dangling)
@@ -258,13 +218,12 @@ fn a_reference_without_local_definitions_fails() {
 }
 
 #[test]
-fn reference_based_emission_is_smaller_than_the_flattened_candidate() {
+fn reference_emission_is_smaller_than_its_flattened_form() {
     // `retention_profile_set` references the shared mission entry twice, so one
     // definition plus two pointers is smaller than two inline copies.
     let schema = retention_input("retention_profile_set");
     let emitted = serde_json::to_string(&schema).expect("emitted");
-    let expanded =
-        serde_json::to_string(&without_root_defs(&flattened(&schema, &schema))).expect("flattened");
+    let expanded = serde_json::to_string(&flatten(&schema)).expect("flattened");
     assert!(
         expanded.len() > emitted.len(),
         "retention_profile_set: emitted {} bytes, flattened {} bytes",
@@ -287,8 +246,7 @@ fn reference_based_emission_is_smaller_than_the_flattened_candidate() {
     // `admit_preview_batch` references its candidate definition once behind a
     // `$defs` wrapper, which is larger than the inline copy at this size, so
     // that single-use definition is accepted at its measured cost and its guard
-    // is the reference and definition count. The whole pack still has to pay
-    // for reference emission, and the check below holds it to that.
+    // is the reference and definition count.
     let batch = retention_input("admit_preview_batch");
     let candidate_ref = "#/$defs/AdmissionCandidate";
     assert_eq!(
@@ -305,45 +263,35 @@ fn reference_based_emission_is_smaller_than_the_flattened_candidate() {
     assert!(batch_defs.contains_key("AdmissionCandidate"));
     assert!(batch_defs.contains_key("MissionEntry"));
 
+    // The pack publishes the flattened form, so it carries neither the
+    // reference nor the definitions the reference document above holds, and
+    // every tool costs at least the reference document it was assembled from.
     let pack = schema_pack();
     let published = pack["tools"]
         .as_array()
         .expect("the pack holds tools")
         .iter()
-        .find(|tool| tool["name"] == json!("admit_preview_batch"))
+        .find(|tool| tool["name"] == "admit_preview_batch")
         .expect("the pack publishes the batch preview");
-    assert_eq!(count_refs(published, candidate_ref), 1);
-    assert_eq!(
-        published["inputSchema"]["$defs"]
-            .as_object()
-            .expect("root $defs")
-            .len(),
-        2
-    );
-
-    // Pack-wide: every reference in every tool document resolved back to its
-    // definition must still cost more bytes than the definition emitted once.
-    let emitted = serde_json::to_string(&pack).expect("pack");
-    let mut expanded_pack = pack;
-    for tool in expanded_pack["tools"]
-        .as_array_mut()
-        .expect("the pack holds tools")
-    {
-        if let Some(schema) = tool.get("inputSchema") {
-            tool["inputSchema"] = without_root_defs(&flattened(schema, schema));
-        }
-    }
-    let expanded = serde_json::to_string(&expanded_pack).expect("flattened pack");
+    assert_eq!(count_refs(published, candidate_ref), 0);
     assert!(
-        expanded.len() > emitted.len(),
-        "pack: emitted {} bytes, flattened {} bytes",
-        emitted.len(),
-        expanded.len()
+        published["inputSchema"].get("$defs").is_none(),
+        "the flattened pack ships no definitions: {}",
+        published["inputSchema"]
     );
-    println!(
-        "pack: emitted {} bytes, flattened {} bytes",
-        emitted.len(),
-        expanded.len()
+    let reference_bytes: usize = catalog_defs()
+        .iter()
+        .map(|def| serde_json::to_string(&def.to_tool()).expect("a tool").len())
+        .sum();
+    let shipped_bytes: usize = pack["tools"]
+        .as_array()
+        .expect("the pack holds tools")
+        .iter()
+        .map(|tool| serde_json::to_string(tool).expect("a tool").len())
+        .sum();
+    assert!(
+        shipped_bytes > reference_bytes,
+        "pack: reference {reference_bytes} bytes, flattened {shipped_bytes} bytes"
     );
 }
 

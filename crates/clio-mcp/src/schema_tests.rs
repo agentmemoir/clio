@@ -422,7 +422,8 @@ fn fnv1a64_hex_changes_when_the_input_changes() {
 }
 
 /// The pack hash is FNV-1a over the concatenation of each tool's compact
-/// encoding in registry order, produced by the one shared implementation.
+/// encoding in registry order, produced by the one shared implementation. The
+/// hash covers the tools the pack emits, in the shape the pack ships.
 #[test]
 fn catalog_hash_is_fnv1a64_over_concatenated_compact_tool_bytes() {
     let tools: Vec<Value> = catalog_defs().iter().map(ToolDef::to_tool).collect();
@@ -432,5 +433,6 @@ fn catalog_hash_is_fnv1a64_over_concatenated_compact_tool_bytes() {
         canonical.extend_from_slice(encoded.as_bytes());
     }
     assert_eq!(catalog_hash(&tools), fnv1a64_hex(&canonical));
-    assert_eq!(pack()["catalog_hash"], Value::from(catalog_hash(&tools)));
+    let emitted: Vec<Value> = pack()["tools"].as_array().expect("tools array").clone();
+    assert_eq!(pack()["catalog_hash"], Value::from(catalog_hash(&emitted)));
 }

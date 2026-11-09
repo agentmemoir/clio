@@ -316,14 +316,12 @@ fn admit_preview_batch_candidate_schema_inherits_context() {
         .find(|t| t["name"] == json!("admit_preview_batch"))
         .expect("admit_preview_batch");
     let candidate = &tool["inputSchema"]["properties"]["items"]["items"];
-    // The element is a local reference, so read the definition it resolves to.
-    let reference = candidate["$ref"]
-        .as_str()
-        .expect("the batch element references a local definition");
-    let name = reference
-        .strip_prefix("#/$defs/")
-        .expect("a local definition reference");
-    let candidate = &tool["inputSchema"]["$defs"][name];
+    // The pack ships the flattened shape, so the element is the definition it
+    // references written out, and nothing is left to resolve.
+    assert!(
+        candidate.get("$ref").is_none(),
+        "the flattened pack inlines the batch element: {candidate}"
+    );
     let prop = &candidate["properties"]["context"];
     assert_eq!(prop["type"], json!("string"), "{prop}");
     assert_eq!(prop["maxLength"], json!(4096), "{prop}");

@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - `the_committed_schema_pack_matches_the_registry`
+//! - `the_shipped_pack_holds_no_reference_and_no_definitions`
 //! - The committed fixture's one-tool-per-line layout
 //!
 //! ## Does not own
@@ -84,4 +85,41 @@ fn the_committed_schema_pack_matches_the_registry() {
 
     assert_eq!(committed, schema_pack(), "{REGENERATE}");
     assert_one_tool_per_line(COMMITTED_PACK);
+}
+
+/// How many `keyword` keys appear anywhere in `value`.
+fn count(value: &Value, keyword: &str) -> usize {
+    match value {
+        Value::Object(map) => {
+            usize::from(map.contains_key(keyword))
+                + map
+                    .values()
+                    .map(|child| count(child, keyword))
+                    .sum::<usize>()
+        }
+        Value::Array(items) => items.iter().map(|item| count(item, keyword)).sum(),
+        _ => 0,
+    }
+}
+
+/// The shipped pack resolves every local reference, so it holds neither a
+/// `$ref` nor the `$defs` a reference would resolve against: each tool schema
+/// is complete on its own, and the committed fixture is that same document.
+#[test]
+fn the_shipped_pack_holds_no_reference_and_no_definitions() {
+    let shipped = schema_pack();
+    assert_eq!(
+        count(&shipped, "$ref"),
+        0,
+        "the shipped pack holds no `$ref`"
+    );
+    assert_eq!(
+        count(&shipped, "$defs"),
+        0,
+        "the shipped pack holds no `$defs`"
+    );
+    let committed: Value =
+        serde_json::from_str(COMMITTED_PACK).expect("the committed pack is JSON");
+    assert_eq!(count(&committed, "$ref"), 0, "{REGENERATE}");
+    assert_eq!(count(&committed, "$defs"), 0, "{REGENERATE}");
 }

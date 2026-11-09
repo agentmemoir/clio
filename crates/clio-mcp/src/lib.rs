@@ -94,6 +94,7 @@ mod schema_read_props;
 mod schema_record_defs;
 mod schema_request_defs;
 mod schema_retention_defs;
+pub mod schema_shape;
 mod schema_sync_defs;
 pub mod skill_asset_names;
 pub mod skill_assets;
