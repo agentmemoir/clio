@@ -258,9 +258,7 @@ fn a_request_for_another_method_is_not_intercepted() {
 fn a_listen_request_without_an_id_is_refused() {
     let state = state();
     let body = json!({ "jsonrpc": "2.0", "method": LISTEN_METHOD, "params": {} });
-    let value = refused(
-        intercept(&state, &request(&body)).expect("the refusal is an answer"),
-    );
+    let value = refused(intercept(&state, &request(&body)).expect("the refusal is an answer"));
     assert_eq!(
         value["id"],
         Value::Null,
@@ -285,9 +283,7 @@ fn a_listen_request_without_an_id_is_refused() {
 fn a_listen_request_with_an_object_id_is_refused() {
     let state = state();
     let body = json!({ "jsonrpc": "2.0", "id": { "nested": true }, "method": LISTEN_METHOD });
-    let value = refused(
-        intercept(&state, &request(&body)).expect("the refusal is an answer"),
-    );
+    let value = refused(intercept(&state, &request(&body)).expect("the refusal is an answer"));
     assert_eq!(value["id"], Value::Null);
     assert_eq!(
         value["error"]["code"],
@@ -348,10 +344,7 @@ fn a_view_digest_error_refuses_the_listen() {
             .expect("the refusal is an answer"),
     );
     assert_eq!(value["id"], json!(11));
-    assert_eq!(
-        value["error"]["code"],
-        json!(crate::protocol::ERR_INTERNAL)
-    );
+    assert_eq!(value["error"]["code"], json!(crate::protocol::ERR_INTERNAL));
     let message = value["error"]["message"].as_str().expect("a message");
     assert!(message.contains("not one of"), "{message}");
     assert_eq!(
