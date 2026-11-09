@@ -1,0 +1,1 @@
+The candidate revision's admission and dispatch rules now run through the stdio transport in test builds, with recorded scenarios for required and optional metadata, discovery identity, and the success and error envelopes.
