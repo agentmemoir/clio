@@ -46,7 +46,7 @@ use serde_json::{Value, json};
 pub(crate) fn min_scores_prop() -> Value {
     json!({
         "type": "object",
-        "description": "Optional per-stage score floors. Every floor is inclusive (>=) and an absent or null object imposes no floor at all. Only the four names below are accepted: an unrecognised name is rejected as invalid_argument rather than read as no floor, so a mistyped floor can never return an unfiltered page. `semantic` and `keyword` are arm-local: each prunes only the arm it names, before fusion, so the other arm's candidates are unaffected and a survivor of the other arm reports null for the pruned score. `reranker` and `final` are post-ranking filters, so every returned hit clears them. A floor only removes candidates: it never widens the scope or exceeds the token budget. A floor that prunes before the limit promises no page length: pruning renumbers the survivors, and the limit and the token budget are applied afterwards, so the room a removed hit leaves can go to another hit. Every scale here is relative and never calibrated, so calibrate a cutoff against the observed scores of the same query first; a fixed cutoff can silently drop good results.",
+        "description": "Optional inclusive floors; unknown names refused. Semantic and keyword are arm-local; reranker and final filter hits.",
         "properties": {
             "semantic": num("Floor on the dense arm's cosine similarity, the same scale as scores.semantic, 0..=1. Prunes the dense arm only; a value above 1 is rejected."),
             "keyword": num(&format!("Floor on the lexical arm's raw backend score, the same scale as scores.keyword. Backend-dependent: SQLite FTS5 -bm25 and Postgres ts_rank_cd are different scales, so no cross-backend parity is claimed and one cutoff cannot be carried across backends. Must be <= {MAX_FLOOR}.")),
@@ -69,7 +69,7 @@ pub(crate) fn min_scores_prop() -> Value {
 /// omitted meaning instead.
 pub(crate) fn provenance_floor_prop() -> Value {
     en(
-        "Weakest provenance rung the returned hits may sit at: verified (strictest, keeps facts only), stated (also keeps user_stated beliefs), third_party (also keeps third-party beliefs), inferred (loosest, keeps every rung). The ladder runs from the strictest rung to the loosest, and a hit below the floor is removed from the answer set rather than ranked lower: it is absent from the result and from co-activation reinforcement, so the floor changes set membership and nothing else — no stored field of a surviving hit moves, and no item of an excluded class is ever returned. A stricter floor promises no page length: the limit, the token budget and duplicate suppression all run after the prune, and each of them can take the room a removed hit leaves, so a floored page need not match an unfloored one in length or in ids. `dense_candidates`, `lexical_candidates` and `fused_candidates` count the candidates that survived the floor, so they read lower with a stricter floor. Omit it and the bank's own provenance_floor_default applies, and a bank that states no default means no floor. Only the four names below are accepted: any other value is rejected as invalid_argument rather than read as no floor, so a mistyped floor can never return an unfiltered page.",
+        "Weakest provenance rung kept; hits below it are removed, not ranked lower. Omitted uses the bank default.",
         &["verified", "stated", "third_party", "inferred"],
     )
 }
@@ -97,8 +97,8 @@ pub(crate) fn entity_summary_prop() -> Value {
 /// property states the policy a caller must know to use the field safely.
 pub(crate) fn include_exact_prop() -> Value {
     b(&format!(
-        "Attach a bounded rendering of each hit's authoritative half as `hits[].exact_render` (default false, so the key is absent from every hit unless requested). The rendering is the hit's stored snapshot serialized whole, which makes it content: like `gist`, it never reaches `warnings`, the `explain` trace, telemetry, or the health surfaces. It is bounded and never truncated: a snapshot whose rendering would exceed {EXACT_RENDER_MAX_BYTES} bytes yields no rendering for that hit at all, so the field is never a prefix of a snapshot that reads as the stored value. Its token cost is an upper bound rather than an equality: a rendering of at most that many bytes is at most {} tokens under the same heuristic `budget_tokens` uses, which counts characters rather than bytes, so a rendering within three characters of that byte count reaches that figure even when the text holds multi-byte characters, and only a rendering of fewer characters lands below it. A request that omits the toggle produces no rendering, so nothing changes for a caller who does not ask. It is a rendering and not the stored half: read `get_snapshot` for the exact value, because this field never replaces that read.",
-        EXACT_RENDER_MAX_BYTES / 4
+        "Attach hits[].exact_render, a bounded snapshot (default false, max {} bytes, never truncated); see get_snapshot.",
+        EXACT_RENDER_MAX_BYTES
     ))
 }
 
@@ -109,7 +109,7 @@ pub(crate) fn include_exact_prop() -> Value {
 pub(crate) fn fidelity_prop() -> Value {
     en(
         &format!(
-            "Which half a composed hit contributes: flow (default) packs the narrative channel, reading each hit's gist first and its bounded rendering second, and exact reads the bounded rendering first and the gist second. Only the two names below are accepted: any other value is rejected as invalid_argument rather than packed as flow, so a mistyped channel is never silently downgraded. Omit it and the bank's own pack_fidelity_default applies, and a bank that states none packs flow. A rendering is charged against the same budget_tokens as every other packed text: one that does not fit the remaining budget is dropped whole for that hit rather than shortened, and a rendering is separately bounded at {EXACT_RENDER_MAX_BYTES} bytes, so a snapshot over that byte bound contributes no rendering at all. A hit whose rendering is absent contributes its gist instead; a hit with neither a rendering nor a gist is marked as a reference rather than a bare identifier, and so is a hit whose rendering did not fit the remaining budget, so the packed text and the pack's per-form tally cannot disagree."
+            "Composed hit channel: flow (default) reads gist before rendering, exact the reverse. Omitted uses the bank default."
         ),
         &[
             PackFidelityDefault::Flow.as_str(),

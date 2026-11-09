@@ -406,9 +406,9 @@ fn a_default_call_keeps_the_page_and_omits_the_summary() {
 
 /// The published `inputSchema` is the contract a caller reads before choosing a
 /// value, so it states the arm-local reading, the inclusive bound, the
-/// uncalibrated scales, the `keyword` backend dependence, and the no-backfill
-/// rule for the `final` floor. The two entity toggles are asserted in
-/// `read_entity_controls_tests`.
+/// refusal of an unknown name, the `keyword` backend dependence, and the
+/// no-backfill rule for the `final` floor. The two entity toggles are asserted
+/// in `read_entity_controls_tests`.
 #[test]
 fn the_published_schema_describes_the_floors() {
     let tool = crate::schema_read_defs::read_defs()
@@ -441,8 +441,8 @@ fn the_published_schema_describes_the_floors() {
     for (claim, needle) in [
         ("arm-local", "arm-local"),
         ("inclusive", "inclusive"),
+        ("unknown names are refused", "unknown names refused"),
         ("no backfill for the final floor", "never backfills"),
-        ("uncalibrated", "never calibrated"),
         ("keyword backend dependence", "Backend-dependent"),
     ] {
         assert!(doc.contains(needle), "the schema states {claim}: {doc}");

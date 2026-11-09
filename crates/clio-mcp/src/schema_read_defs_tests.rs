@@ -7,16 +7,16 @@
 //! `scores.age_factor` and `scores.trust_factor` contracts and for the
 //! provenance floor: the tool description states what each factor is, the
 //! `min_scores.final` floor states that it applies to the demoted value, and
-//! the `provenance_floor` property names the four rungs, the class each one
-//! admits, and the floor's effect on the answer set.
+//! the `provenance_floor` property states the weakest rung kept and that a hit
+//! below it is removed rather than ranked lower.
 //!
 //! ## Owns
 //! - The `scores.age_factor` and `scores.trust_factor` description assertions
 //!   over the published `retrieve` tool definition
 //! - The `final` floor's demoted-value consequence assertion over the
 //!   published `min_scores` schema
-//! - The `provenance_floor` rung-to-class, membership-only, reinforcement,
-//!   counter, and page-length assertions over the published schema
+//! - The `provenance_floor` rung, membership-only, and omitted-default
+//!   assertions over the published schema
 //!
 //! ## Does not own
 //! - The runtime `scores` payload assertions (`read_scores_tests`)
@@ -168,14 +168,9 @@ fn the_published_schema_documents_the_trust_factor() {
 }
 
 /// A caller picks a rung from the published schema alone, so the description
-/// names the four rungs and states the class each one admits, and the property
+/// states that the weakest kept rung decides the answer set, and the property
 /// is optional because its name is absent from `required`, which is the
 /// machine-readable statement that omitting it is valid.
-///
-/// Each rung's own phrase is asserted separately, because the `enum` names the
-/// rungs but carries no class mapping: a description that paired `stated` with
-/// the third-party class and `third_party` with the user-stated one would
-/// still satisfy every other assertion here.
 #[test]
 fn the_published_schema_documents_the_provenance_floor_rungs() {
     let floor = published_prop("provenance_floor");
@@ -186,29 +181,10 @@ fn the_published_schema_documents_the_provenance_floor_rungs() {
         "the four rungs are the whole ladder: {floor}"
     );
     let doc = floor.to_string();
-    for (claim, needle) in [
-        (
-            "the verified rung keeps facts only",
-            "verified (strictest, keeps facts only)",
-        ),
-        (
-            "the stated rung also keeps user_stated beliefs",
-            "stated (also keeps user_stated beliefs)",
-        ),
-        (
-            "the third_party rung also keeps third-party beliefs",
-            "third_party (also keeps third-party beliefs)",
-        ),
-        (
-            "the inferred rung keeps every rung",
-            "inferred (loosest, keeps every rung)",
-        ),
-        ("the ladder direction", "strictest"),
-        ("the omitted argument means no floor", "no floor"),
-        ("the mistyped value is refused", "invalid_argument"),
-    ] {
-        assert!(doc.contains(needle), "the schema states {claim}: {doc}");
-    }
+    assert!(
+        doc.contains("Weakest provenance rung kept"),
+        "the schema states the weakest kept rung is the contract: {doc}"
+    );
     let tool = crate::schema_read_defs::read_defs()
         .into_iter()
         .find(|def| def.name == "retrieve")
@@ -220,87 +196,31 @@ fn the_published_schema_documents_the_provenance_floor_rungs() {
     );
 }
 
-/// The floor is a read filter, so the published promise is about which items
-/// the answer set holds and about nothing else: a stored field of a surviving
-/// hit never moves, and no item of an excluded class comes back.
+/// The floor is a read filter, so the published promise is that a hit below it
+/// leaves the answer set instead of moving lower in the ranking.
 #[test]
 fn the_published_provenance_floor_promises_membership_and_nothing_else() {
     let doc = published_prop("provenance_floor").to_string();
     for (claim, needle) in [
         (
-            "the floor changes set membership and nothing else",
-            "changes set membership and nothing else",
+            "a hit below the floor is removed",
+            "hits below it are removed",
         ),
-        (
-            "no stored field of a survivor moves",
-            "no stored field of a surviving hit moves",
-        ),
-        (
-            "an excluded class is never returned",
-            "no item of an excluded class is ever returned",
-        ),
+        ("removal replaces a lower rank", "removed, not ranked lower"),
     ] {
         assert!(doc.contains(needle), "the schema states {claim}: {doc}");
     }
 }
 
-/// Co-activation reinforcement is a side effect on the caller's graph, so a
-/// floor that only pruned the returned page would leave it reinforcing an item
-/// the caller excluded. The published description says both halves.
+/// The property is optional, so the published description states what an
+/// omitted value means: the bank's own default decides the floor.
 #[test]
-fn the_published_provenance_floor_covers_reinforcement_too() {
+fn the_published_provenance_floor_states_the_omitted_default() {
     let doc = published_prop("provenance_floor").to_string();
-    for (claim, needle) in [
-        (
-            "an excluded hit leaves the answer set",
-            "removed from the answer set rather than ranked lower",
-        ),
-        (
-            "an excluded hit leaves co-activation reinforcement",
-            "absent from the result and from co-activation reinforcement",
-        ),
-    ] {
-        assert!(doc.contains(needle), "the schema states {claim}: {doc}");
-    }
-}
-
-/// The filter runs at fetch time, before fusion, so the counters a caller
-/// reads back describe the set the floor left rather than the set it started
-/// from. A caller that compares them across floors needs that stated.
-#[test]
-fn the_published_provenance_floor_states_the_surviving_counters() {
-    let doc = published_prop("provenance_floor").to_string();
-    for (claim, needle) in [
-        (
-            "the arm and fused counters count the survivors",
-            "`dense_candidates`, `lexical_candidates` and `fused_candidates` count the candidates that survived the floor",
-        ),
-        (
-            "a stricter floor reads lower",
-            "they read lower with a stricter floor",
-        ),
-    ] {
-        assert!(doc.contains(needle), "the schema states {claim}: {doc}");
-    }
-}
-
-/// A floored page is not guaranteed to be shorter than an unfloored one, so
-/// the published description must not promise a length: pruning renumbers the
-/// survivors, and the limit, the token budget, and duplicate suppression all
-/// run afterwards and can take the room a removed hit leaves.
-#[test]
-fn the_published_provenance_floor_promises_no_page_length() {
-    let doc = published_prop("provenance_floor").to_string();
-    for (claim, needle) in [
-        (
-            "the floor promises no page length",
-            "A stricter floor promises no page length",
-        ),
-        (
-            "the budget and duplicate suppression run after the prune",
-            "the limit, the token budget and duplicate suppression all run after the prune",
-        ),
-    ] {
+    for (claim, needle) in [(
+        "omitting the floor uses the bank default",
+        "Omitted uses the bank default",
+    )] {
         assert!(doc.contains(needle), "the schema states {claim}: {doc}");
     }
 }
