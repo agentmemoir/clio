@@ -25,7 +25,8 @@
 //!
 //! Keep this module focused on the candidate dispatcher's fixtures.
 
-use super::{CACHE_HINTS, CANDIDATE_REVISION, SUPPORTED_REVISIONS, dispatch, required_capability};
+use super::{CACHE_HINTS, SUPPORTED_REVISIONS, dispatch, required_capability};
+use crate::MCP_PROTOCOL_REVISION as REVISION;
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
 use crate::stateless_fixtures::{
@@ -61,13 +62,13 @@ fn assert_invalid_params(meta: Option<Value>, key: &str) {
 fn discover_reports_the_candidate_revision_and_its_capabilities() {
     let res = answer(
         &state(),
-        &request("server/discover", &required_meta(CANDIDATE_REVISION)),
+        &request("server/discover", &required_meta(REVISION)),
     );
     let result = &res["result"];
     assert_eq!(res["jsonrpc"], json!("2.0"));
     assert_eq!(res["id"], json!(7));
     assert_eq!(result["resultType"], json!("complete"));
-    assert_eq!(result["supportedVersions"], json!([CANDIDATE_REVISION]));
+    assert_eq!(result["supportedVersions"], json!([REVISION]));
     assert_eq!(
         result["capabilities"]["tools"],
         json!({ "listChanged": false })
@@ -80,7 +81,7 @@ fn discover_reports_the_candidate_revision_and_its_capabilities() {
 fn identity_is_never_a_top_level_result_field() {
     let state = state();
     for method in ["server/discover", "tools/list"] {
-        let res = answer(&state, &request(method, &required_meta(CANDIDATE_REVISION)));
+        let res = answer(&state, &request(method, &required_meta(REVISION)));
         let result = &res["result"];
         assert!(result.get("serverInfo").is_none(), "{method}: {res}");
         let info = server_info(result);
@@ -120,7 +121,7 @@ fn non_string_protocol_version_is_invalid_params() {
 #[test]
 fn absent_client_capabilities_is_invalid_params() {
     assert_invalid_params(
-        Some(json!({ "io.modelcontextprotocol/protocolVersion": CANDIDATE_REVISION })),
+        Some(json!({ "io.modelcontextprotocol/protocolVersion": REVISION })),
         "clientCapabilities",
     );
 }
@@ -129,7 +130,7 @@ fn absent_client_capabilities_is_invalid_params() {
 fn non_object_client_capabilities_is_invalid_params() {
     assert_invalid_params(
         Some(json!({
-            "io.modelcontextprotocol/protocolVersion": CANDIDATE_REVISION,
+            "io.modelcontextprotocol/protocolVersion": REVISION,
             "io.modelcontextprotocol/clientCapabilities": []
         })),
         "clientCapabilities",
@@ -140,8 +141,8 @@ fn non_object_client_capabilities_is_invalid_params() {
 fn optional_metadata_never_changes_the_discovery_result() {
     let state = state();
     for (label, meta) in [
-        ("omitted", required_meta(CANDIDATE_REVISION)),
-        ("present", full_meta(CANDIDATE_REVISION)),
+        ("omitted", required_meta(REVISION)),
+        ("present", full_meta(REVISION)),
     ] {
         let res = answer(&state, &request("server/discover", &meta));
         assert!(
@@ -152,7 +153,7 @@ fn optional_metadata_never_changes_the_discovery_result() {
         assert_eq!(result["resultType"], json!("complete"), "{label}: {res}");
         assert_eq!(
             result["supportedVersions"],
-            json!([CANDIDATE_REVISION]),
+            json!([REVISION]),
             "{label}: {res}"
         );
         assert_eq!(
@@ -211,7 +212,7 @@ fn only_a_tool_call_that_answers_input_requests_needs_a_capability() {
 
 #[test]
 fn answering_input_requests_without_elicitation_is_refused() {
-    let msg = tool_call(&required_meta(CANDIDATE_REVISION), elicitation_answer());
+    let msg = tool_call(&required_meta(REVISION), elicitation_answer());
     let res = answer(&state(), &msg);
     assert_eq!(code(&res), -32021, "{res}");
     assert!(message(&res).contains("elicitation"), "{res}");
@@ -224,7 +225,7 @@ fn answering_input_requests_without_elicitation_is_refused() {
 
 #[test]
 fn a_tool_call_that_answers_input_is_refused_as_invalid_params() {
-    let msg = tool_call(&eliciting_meta(CANDIDATE_REVISION), elicitation_answer());
+    let msg = tool_call(&eliciting_meta(REVISION), elicitation_answer());
     let res = answer(&state(), &msg);
     assert_eq!(code(&res), -32602, "{res}");
     assert!(
@@ -239,7 +240,7 @@ fn a_tool_call_that_answers_input_is_refused_as_invalid_params() {
 
 #[test]
 fn a_sampling_answer_demands_no_capability_and_is_refused_as_invalid_params() {
-    let msg = tool_call(&required_meta(CANDIDATE_REVISION), sampling_answer());
+    let msg = tool_call(&required_meta(REVISION), sampling_answer());
     let res = answer(&state(), &msg);
     assert_ne!(code(&res), -32021, "sampling demands no capability: {res}");
     assert_eq!(code(&res), -32602, "{res}");
@@ -252,7 +253,7 @@ fn a_sampling_answer_demands_no_capability_and_is_refused_as_invalid_params() {
 #[test]
 fn a_tool_call_carrying_request_state_is_refused_as_invalid_params() {
     let msg = tool_call(
-        &eliciting_meta(CANDIDATE_REVISION),
+        &eliciting_meta(REVISION),
         json!({ "requestState": "opaque-state" }),
     );
     let res = answer(&state(), &msg);
@@ -265,10 +266,7 @@ fn a_tool_call_carrying_request_state_is_refused_as_invalid_params() {
 
 #[test]
 fn ordinary_tool_calls_need_no_client_capability() {
-    let res = answer(
-        &state(),
-        &tool_call(&required_meta(CANDIDATE_REVISION), json!({})),
-    );
+    let res = answer(&state(), &tool_call(&required_meta(REVISION), json!({})));
     assert!(res.get("error").is_none(), "no invented requirement: {res}");
     assert_eq!(res["result"]["isError"], json!(false), "{res}");
 }
@@ -278,7 +276,7 @@ fn a_delegated_tool_call_error_is_passed_through_unstamped() {
     let msg = json!({
         "jsonrpc": "2.0", "id": 7, "method": "tools/call",
         "params": {
-            "_meta": required_meta(CANDIDATE_REVISION),
+            "_meta": required_meta(REVISION),
             "name": "no-such-tool",
             "arguments": {}
         }
@@ -295,10 +293,7 @@ fn a_delegated_tool_call_error_is_passed_through_unstamped() {
 #[test]
 fn tools_list_serves_the_production_catalogue_for_the_revision() {
     let state = state();
-    let res = answer(
-        &state,
-        &request("tools/list", &required_meta(CANDIDATE_REVISION)),
-    );
+    let res = answer(&state, &request("tools/list", &required_meta(REVISION)));
     let result = &res["result"];
     let visible = McpHandler::tools_list_visible(&state).expect("a known profile");
     assert_eq!(result["tools"], visible["tools"]);
@@ -326,7 +321,7 @@ fn initialize_without_metadata_is_a_removed_method() {
 fn logging_set_level_is_a_removed_method() {
     let res = answer(
         &state(),
-        &request("logging/setLevel", &required_meta(CANDIDATE_REVISION)),
+        &request("logging/setLevel", &required_meta(REVISION)),
     );
     assert_eq!(code(&res), -32601, "{res}");
     assert!(message(&res).contains("logging/setLevel"), "{res}");
@@ -336,7 +331,7 @@ fn logging_set_level_is_a_removed_method() {
 fn initialize_and_ping_are_unknown_methods() {
     let state = state();
     for method in ["initialize", "ping"] {
-        let res = answer(&state, &request(method, &required_meta(CANDIDATE_REVISION)));
+        let res = answer(&state, &request(method, &required_meta(REVISION)));
         assert_eq!(code(&res), -32601, "{method}: {res}");
         assert!(message(&res).contains(method), "{method}: {res}");
     }
@@ -346,7 +341,7 @@ fn initialize_and_ping_are_unknown_methods() {
 fn unknown_method_is_an_unknown_method() {
     let res = answer(
         &state(),
-        &request("resources/list", &required_meta(CANDIDATE_REVISION)),
+        &request("resources/list", &required_meta(REVISION)),
     );
     assert_eq!(code(&res), -32601);
 }
@@ -373,17 +368,14 @@ fn a_message_without_an_id_is_a_notification_and_is_never_answered() {
     );
     let msg = json!({
         "jsonrpc": "2.0", "method": "tools/list",
-        "params": { "_meta": required_meta(CANDIDATE_REVISION) }
+        "params": { "_meta": required_meta(REVISION) }
     });
     assert!(dispatch(&state, &msg).is_none());
 }
 
 #[test]
 fn first_message_is_served_without_a_handshake() {
-    let res = answer(
-        &state(),
-        &request("tools/list", &required_meta(CANDIDATE_REVISION)),
-    );
+    let res = answer(&state(), &request("tools/list", &required_meta(REVISION)));
     assert!(res.get("error").is_none(), "no prior initialize: {res}");
     assert!(
         !res["result"]["tools"]
@@ -399,7 +391,7 @@ fn dispatch_takes_one_message_and_no_session_handle() {
     let entry: fn(&McpState, &Value) -> Option<Value> = dispatch;
     let res = entry(
         &state(),
-        &request("server/discover", &required_meta(CANDIDATE_REVISION)),
+        &request("server/discover", &required_meta(REVISION)),
     )
     .expect("a request carrying an id is answered");
     assert_eq!(res["result"]["resultType"], json!("complete"), "{res}");
@@ -408,7 +400,7 @@ fn dispatch_takes_one_message_and_no_session_handle() {
 #[test]
 fn answer_envelopes_carry_no_session_key() {
     let state = state();
-    let args = required_meta(CANDIDATE_REVISION);
+    let args = required_meta(REVISION);
     let requests = ["server/discover", "tools/list"].map(|method| request(method, &args));
     for msg in requests.into_iter().chain([tool_call(&args, json!({}))]) {
         let res = answer(&state, &msg);
@@ -423,7 +415,7 @@ fn answer_envelopes_carry_no_session_key() {
 #[test]
 fn repeated_calls_in_two_states_answer_identically() {
     let (first, second) = (state(), state());
-    let args = required_meta(CANDIDATE_REVISION);
+    let args = required_meta(REVISION);
     let list = request("tools/list", &args);
     assert_states_agree(&first, &second, &request("server/discover", &args));
     let before = assert_states_agree(&first, &second, &list);
@@ -434,13 +426,12 @@ fn repeated_calls_in_two_states_answer_identically() {
 }
 
 #[test]
-fn the_pin_is_untouched_by_the_candidate() {
-    assert_eq!(crate::MCP_PROTOCOL_REVISION, "2025-11-25");
+fn the_pin_is_the_one_supported_revision() {
+    assert_eq!(REVISION, "2026-07-28");
     assert_eq!(
         crate::schema::schema_pack()["mcp_protocol_revision"],
-        json!("2025-11-25")
+        json!("2026-07-28")
     );
     assert_eq!(SUPPORTED_REVISIONS.len(), 1);
-    assert_eq!(SUPPORTED_REVISIONS[0], CANDIDATE_REVISION);
-    assert_ne!(CANDIDATE_REVISION, crate::MCP_PROTOCOL_REVISION);
+    assert_eq!(SUPPORTED_REVISIONS[0], REVISION);
 }

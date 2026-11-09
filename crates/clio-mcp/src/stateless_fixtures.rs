@@ -40,13 +40,11 @@ use crate::tools_page::PAGE_SIZE_KEY;
 
 pub(super) const BANK: &str = "fixture-bank";
 
-/// The candidate fixture pin: the revision the candidate scenarios send.
+/// The revision the conformance scenarios send.
 ///
-/// It is the dispatcher's own pin rather than a restated literal, so an
-/// activation bump moves the fixtures with it and cannot leave a scenario on a
-/// stale revision that still passes. This is a test expectation, not a live
-/// protocol setting; the active pin stays [`crate::MCP_PROTOCOL_REVISION`].
-pub(crate) const CANDIDATE_FIXTURE_REVISION: &str = crate::stateless::CANDIDATE_REVISION;
+/// It is the crate's own pin rather than a restated literal, so a scenario can
+/// never sit on a stale revision that still passes.
+pub(crate) const CANDIDATE_FIXTURE_REVISION: &str = crate::MCP_PROTOCOL_REVISION;
 
 /// The one stored item the domain-read fixtures seed: its id, the gist its read
 /// carries, and the category and epistemic kind its listing row carries.

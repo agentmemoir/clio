@@ -20,7 +20,6 @@
 //! Keep this module focused on stdio transport tests.
 
 use super::serve;
-use crate::protocol::McpHandler;
 use crate::runtime::{McpOpenOptions, McpState};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Cursor, Read};
@@ -107,36 +106,49 @@ fn assert_compact_json(line: &str) {
     assert!(!in_string && !escaped, "unterminated JSON string: {line:?}");
 }
 
+/// The request metadata the stateless revision requires on every request.
+fn meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": crate::MCP_PROTOCOL_REVISION,
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
+}
+
 fn frames() -> String {
-    let init = json!({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {"protocolVersion": "2025-11-25", "capabilities": {}}
+    let discover = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+        "params": {"_meta": meta()}
     });
-    let list = json!({"jsonrpc":"2.0","id":2,"method":"tools/list"});
+    let list = json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/list",
+        "params": {"_meta": meta()}
+    });
     let store = json!({
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": "store", "arguments": {
+        "params": {"_meta": meta(), "name": "store", "arguments": {
             "item": {"id": "itm-s1", "subject_id": "subj-s1", "gist": "prefers terse answers"},
             "category": "persona", "epistemic_kind": "fact",
             "bank": "bank-a"
         }}
     });
-    let notify = json!({"jsonrpc":"2.0","method":"notifications/initialized"});
+    let notify = json!({
+        "jsonrpc": "2.0", "method": "notifications/initialized",
+        "params": {"_meta": meta()}
+    });
     let empty_line = "";
-    format!("{init}\n{list}\n{notify}\n{empty_line}\n{store}\n")
+    format!("{discover}\n{list}\n{notify}\n{empty_line}\n{store}\n")
 }
 
 #[test]
-fn t04_stdio_session_flows_end_to_end() {
+fn t04_stdio_discovery_listing_and_call_end_to_end() {
     let state = crate::runtime::McpState::open_with_effective(
         &McpOpenOptions::default(),
         &serde_json::json!({}),
     )
     .expect("state");
-    let handler = McpHandler::new(state);
     let input = Cursor::new(frames().into_bytes());
     let mut out: Vec<u8> = Vec::new();
-    serve(&handler, input, &mut out).expect("serve");
+    serve(&state, input, &mut out).expect("serve");
     let text = String::from_utf8(out).expect("utf8");
     // Every output line is exactly one JSON-RPC response (no embedded newlines).
     let lines: Vec<&str> = text.lines().collect();
@@ -149,8 +161,11 @@ fn t04_stdio_session_flows_end_to_end() {
         let v: Value = serde_json::from_str(line).expect("valid single-line JSON");
         assert_eq!(v["jsonrpc"], json!("2.0"));
     }
-    let init: Value = serde_json::from_str(lines[0]).expect("init");
-    assert_eq!(init["result"]["protocolVersion"], json!("2025-11-25"));
+    let discover: Value = serde_json::from_str(lines[0]).expect("discover");
+    assert_eq!(
+        discover["result"]["supportedVersions"],
+        json!([crate::MCP_PROTOCOL_REVISION])
+    );
     let list: Value = serde_json::from_str(lines[1]).expect("list");
     assert!(list["result"]["tools"].as_array().is_some());
     let store: Value = serde_json::from_str(lines[2]).expect("store");
@@ -169,10 +184,9 @@ fn t13_stdout_purity_no_log_lines() {
         &serde_json::json!({}),
     )
     .expect("state");
-    let handler = McpHandler::new(state);
     let input = Cursor::new(frames().into_bytes());
     let mut out: Vec<u8> = Vec::new();
-    serve(&handler, input, &mut out).expect("serve");
+    serve(&state, input, &mut out).expect("serve");
     let text = String::from_utf8(out).expect("utf8");
     for line in text.lines() {
         let parsed = serde_json::from_str::<Value>(line);
@@ -188,10 +202,9 @@ fn eof_terminates_cleanly() {
         &serde_json::json!({}),
     )
     .expect("state");
-    let handler = McpHandler::new(state);
     let input = Cursor::new(Vec::<u8>::new());
     let mut out: Vec<u8> = Vec::new();
-    serve(&handler, input, &mut out).expect("clean EOF");
+    serve(&state, input, &mut out).expect("clean EOF");
     assert!(out.is_empty(), "stdout was not empty: {out:?}");
 }
 
@@ -199,11 +212,10 @@ fn eof_terminates_cleanly() {
 fn stdio_store_retrieve_end_to_end() {
     let state =
         McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
-    let handler = McpHandler::new(state.clone());
     let item_id = "itm-stdio-e2e";
     let store = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": "store", "arguments": {
+        "params": {"_meta": meta(), "name": "store", "arguments": {
             "item": {
                 "id": item_id,
                 "subject_id": item_id,
@@ -224,16 +236,17 @@ fn stdio_store_retrieve_end_to_end() {
     });
     let retrieve = json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "retrieve", "arguments": {
+        "params": {"_meta": meta(), "name": "retrieve", "arguments": {
             "bank": "bank-a",
             "query": "terse answers",
             "limit": 5
         }}
     });
     // Drain between frames so retrieval does not depend on sweeper scheduling.
-    let mut input = DrainBeforeRetrieve::new(state, format!("{store}\n{retrieve}\n").into_bytes());
+    let mut input =
+        DrainBeforeRetrieve::new(state.clone(), format!("{store}\n{retrieve}\n").into_bytes());
     let mut out: Vec<u8> = Vec::new();
-    serve(&handler, &mut input, &mut out).expect("store then retrieve over stdio");
+    serve(&state, &mut input, &mut out).expect("store then retrieve over stdio");
 
     let text = String::from_utf8(out).expect("utf8");
     let lines: Vec<&str> = text.lines().collect();
@@ -282,29 +295,28 @@ fn stdio_store_retrieve_end_to_end() {
 fn stdio_retrieve_rejects_wrongly_typed_optional_arguments() {
     let state =
         McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
-    let handler = McpHandler::new(state);
     let store = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": "store", "arguments": {
+        "params": {"_meta": meta(), "name": "store", "arguments": {
             "item": {"gist": "prefers terse answers"},
             "category": "persona", "epistemic_kind": "fact", "bank": "repro-bank"
         }}
     });
     let bad_limit = json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "retrieve", "arguments": {
+        "params": {"_meta": meta(), "name": "retrieve", "arguments": {
             "bank": "repro-bank", "query": "terse", "limit": "1"
         }}
     });
     let bad_anchor = json!({
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": "retrieve", "arguments": {
+        "params": {"_meta": meta(), "name": "retrieve", "arguments": {
             "bank": "repro-bank", "query": "terse", "query_anchor": 5
         }}
     });
     let input = Cursor::new(format!("{store}\n{bad_limit}\n{bad_anchor}\n").into_bytes());
     let mut out = Vec::new();
-    serve(&handler, input, &mut out).expect("rejected calls serve over stdio");
+    serve(&state, input, &mut out).expect("rejected calls serve over stdio");
 
     let text = String::from_utf8(out).expect("utf8");
     let lines: Vec<&str> = text.lines().collect();

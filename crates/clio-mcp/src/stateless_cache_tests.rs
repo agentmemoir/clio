@@ -28,7 +28,7 @@
 //!
 //! Keep this module focused on the result fields a revision adds.
 
-use super::{CACHE_HINTS, CANDIDATE_REVISION, dispatch};
+use super::{CACHE_HINTS, dispatch};
 use crate::protocol::{ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
 use crate::runtime::McpState;
 use crate::stateless_fixtures::{
@@ -72,7 +72,7 @@ fn the_chosen_hint_pair_is_pinned() {
 fn the_hint_pair_reaches_the_wire_with_the_declared_types() {
     let res = answer(
         &state(),
-        &request("tools/list", &required_meta(CANDIDATE_REVISION)),
+        &request("tools/list", &required_meta(crate::MCP_PROTOCOL_REVISION)),
     );
     assert!(res.get("error").is_none(), "the listing is served: {res}");
     let result = &res["result"];
@@ -94,7 +94,7 @@ fn the_hint_pair_reaches_the_wire_with_the_declared_types() {
 fn a_failing_tool_call_carries_a_complete_result_type() {
     let res = answer(
         &state(),
-        &failing_tool_call(&required_meta(CANDIDATE_REVISION)),
+        &failing_tool_call(&required_meta(crate::MCP_PROTOCOL_REVISION)),
     );
     assert!(
         res.get("error").is_none(),
@@ -110,7 +110,7 @@ fn a_failing_tool_call_carries_a_complete_result_type() {
 #[test]
 fn every_page_of_a_listing_carries_the_one_hint_pair() {
     let state = state();
-    let meta = required_meta(CANDIDATE_REVISION);
+    let meta = required_meta(crate::MCP_PROTOCOL_REVISION);
     let mut pages: Vec<(Value, Value)> = Vec::new();
     let mut cursor: Option<String> = None;
     loop {
@@ -147,7 +147,7 @@ fn every_page_of_a_listing_carries_the_one_hint_pair() {
 fn a_complete_tool_call_result_carries_no_cache_hints() {
     let res = answer(
         &state(),
-        &tool_call(&required_meta(CANDIDATE_REVISION), json!({})),
+        &tool_call(&required_meta(crate::MCP_PROTOCOL_REVISION), json!({})),
     );
     assert!(
         res.get("error").is_none(),
@@ -177,7 +177,7 @@ fn a_complete_tool_call_result_carries_no_cache_hints() {
 fn a_failing_tool_call_result_carries_no_cache_hints() {
     let res = answer(
         &state(),
-        &failing_tool_call(&required_meta(CANDIDATE_REVISION)),
+        &failing_tool_call(&required_meta(crate::MCP_PROTOCOL_REVISION)),
     );
     let result = res["result"]
         .as_object()
@@ -202,7 +202,7 @@ fn a_failing_tool_call_result_carries_no_cache_hints() {
 #[test]
 fn a_parameter_error_carries_no_result_type() {
     let state = state();
-    let meta = required_meta(CANDIDATE_REVISION);
+    let meta = required_meta(crate::MCP_PROTOCOL_REVISION);
     let cases = [
         (
             "absent name",
@@ -231,7 +231,10 @@ fn a_parameter_error_carries_no_result_type() {
 fn a_method_error_carries_no_result_type() {
     let res = answer(
         &state(),
-        &request("resources/list", &required_meta(CANDIDATE_REVISION)),
+        &request(
+            "resources/list",
+            &required_meta(crate::MCP_PROTOCOL_REVISION),
+        ),
     );
     assert_eq!(code(&res), ERR_METHOD_NOT_FOUND, "{res}");
     assert!(message(&res).contains("resources/list"), "{res}");

@@ -93,7 +93,6 @@ fn the_derived_names_keep_each_surfaces_accepted_set() {
             "discovery",
             "insecure-bind-any",
             "insecure-no-auth",
-            "sessions",
             "shared-bank",
             "token-file",
             "tools"

@@ -31,6 +31,7 @@
 //! outcomes and generous bounds, never precise durations.
 
 use crate::conn_pool::MAX_CONNECTIONS;
+use crate::http::http_test_support_tests::{admission, served_body};
 use crate::http::{HttpConfig, serve_with_listener};
 use crate::http_auth::CredentialStore;
 use crate::runtime::{McpOpenOptions, McpState};
@@ -40,8 +41,6 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Barrier, mpsc};
 use std::time::{Duration, Instant};
-
-const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"#;
 
 /// Ceiling on the full-cap barrier. A barrier that cannot fill within this
 /// bound means a slot is missing, which is exactly the failure this check
@@ -71,20 +70,22 @@ fn connect(port: u16) -> TcpStream {
     TcpStream::connect(("127.0.0.1", port)).expect("connect")
 }
 
-fn init_request(extra: &str) -> String {
+fn served_request(extra: &str) -> String {
+    let body = served_body("server/discover");
     format!(
         "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
-         Accept: application/json\r\nContent-Length: {}\r\n{extra}\r\n{INIT}",
-        INIT.len()
+         Accept: application/json\r\nContent-Length: {}\r\n{}{extra}\r\n{body}",
+        body.len(),
+        admission("server/discover")
     )
 }
 
-/// One `initialize` POST over a fresh connection; returns `(status, body)` when
+/// One admitted discovery POST over a fresh connection; returns `(status, body)` when
 /// a complete response arrived. A failed write does not bail: the server may
 /// already have answered (for example with the above-cap refusal).
-fn probe_init(port: u16, extra: &str) -> Option<(u16, String)> {
+fn probe_served(port: u16, extra: &str) -> Option<(u16, String)> {
     let mut stream = connect(port);
-    let _ = stream.write_all(init_request(extra).as_bytes());
+    let _ = stream.write_all(served_request(extra).as_bytes());
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut buf = Vec::new();
     let _ = stream.read_to_end(&mut buf);
@@ -147,7 +148,7 @@ fn park_accepted_idle_connections(port: u16, count: usize) -> Vec<TcpStream> {
     // at least `count` of the sockets above are accepted and holding.
     let refused = retry_until(Duration::from_secs(10), || {
         matches!(
-            probe_init(port, ""),
+            probe_served(port, ""),
             Some((503, body)) if body.contains("connection limit reached (32)")
         )
     });
@@ -210,7 +211,7 @@ fn full_cap_is_reacquirable_concurrently(port: u16, auth: &str) -> bool {
         let barrier = Arc::clone(&barrier);
         handles.push(std::thread::spawn(move || {
             let mut stream = connect(port);
-            if stream.write_all(init_request(&auth).as_bytes()).is_err() {
+            if stream.write_all(served_request(&auth).as_bytes()).is_err() {
                 return None;
             }
             // Block here with the request outstanding until every sibling is
@@ -380,7 +381,7 @@ fn mid_request_disconnect_releases_the_slot() {
     let partials = saturate_with_partials(port, MAX_CONNECTIONS + 8);
     let saturated = retry_until(Duration::from_secs(10), || {
         matches!(
-            probe_init(port, ""),
+            probe_served(port, ""),
             Some((503, body)) if body.contains("connection limit reached (32)")
         )
     });

@@ -143,19 +143,13 @@ pub(crate) fn run_mcp_export(target: &Target, destination: &Path) {
             }
         }
     });
-    let init = json!({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {"protocolVersion": "2025-11-25", "capabilities": {},
-                   "clientInfo": {"name": "cross-path", "version": "0"}}
-    });
-    mcp_exchange(&mut stdin, &responses, 1, &init);
-    mcp_write(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-    );
     let call = json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "review_export",
+        "params": {"_meta": {
+                       "io.modelcontextprotocol/protocolVersion": clio_mcp::MCP_PROTOCOL_REVISION,
+                       "io.modelcontextprotocol/clientCapabilities": {}
+                   },
+                   "name": "review_export",
                    "arguments": {"destination": destination.display().to_string(),
                                  "limit": 1000, "actor": "harness"}}
     });

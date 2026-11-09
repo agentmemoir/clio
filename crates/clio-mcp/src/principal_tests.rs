@@ -145,24 +145,3 @@ fn the_shared_gate_is_the_credential_list_not_a_replacement_for_it() {
         "an unlisted bank is refused here regardless of the deployment gate"
     );
 }
-
-#[test]
-fn two_records_with_different_labels_have_different_identities() {
-    let first = Principal::new("ci".into(), Actor::Harness, vec!["demo".into()]);
-    let second = Principal::new("bot".into(), Actor::Agent, vec!["demo".into()]);
-    assert_ne!(
-        first.session_identity(),
-        second.session_identity(),
-        "two records are two principals"
-    );
-}
-
-/// The identity is the label itself, and the store refuses a repeated label, so
-/// equal labels mean the same credential and must compare equal. Uniqueness is
-/// the store's own guarantee; this pins what the identity does with it.
-#[test]
-fn two_records_with_one_label_share_an_identity() {
-    let first = Principal::new("ci".into(), Actor::Harness, vec!["demo".into()]);
-    let second = Principal::new("ci".into(), Actor::Harness, vec!["other".into()]);
-    assert_eq!(first.session_identity(), second.session_identity());
-}

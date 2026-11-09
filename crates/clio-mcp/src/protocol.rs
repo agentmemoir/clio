@@ -4,7 +4,7 @@
 //! # Responsibility
 //!
 //! This module is responsible for the shared MCP JSON-RPC message handling
-//! (initialize handshake, tools/list, tools/call) used by both transports.
+//! (tools/list, tools/call) used by both transports.
 //!
 //! ## Owns
 //! - JSON-RPC 2.0 envelope parsing and response shaping
@@ -60,7 +60,7 @@ impl McpHandler {
         &self.state
     }
 
-    /// Pinned protocol revision advertised in initialize responses.
+    /// The protocol revision this server advertises.
     #[must_use]
     pub fn protocol_revision(&self) -> &'static str {
         MCP_PROTOCOL_REVISION
@@ -116,8 +116,6 @@ impl McpHandler {
             .and_then(serde_json::Value::as_str)
             .ok_or(invalid_request("method is required"))?;
         match method {
-            "initialize" => Ok(Self::initialize(msg)),
-            "ping" => Ok(json!({})),
             "tools/list" => Self::tools_list_page(state, msg.get("params")),
             "tools/call" => Self::tools_call(state, msg.get("params")),
             other => Err(RpcError::new(
@@ -125,28 +123,6 @@ impl McpHandler {
                 format!("method `{other}` not found"),
             )),
         }
-    }
-
-    fn initialize(msg: &Value) -> Value {
-        let requested = msg
-            .pointer("/params/protocolVersion")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
-        if !requested.is_empty() && requested != MCP_PROTOCOL_REVISION {
-            // Per the pinned-revision rule we answer with our own revision; a
-            // client requiring a different revision aborts the handshake.
-            eprintln!(
-                "mcp: client requested revision `{requested}`, serving pin `{MCP_PROTOCOL_REVISION}`"
-            );
-        }
-        json!({
-            "protocolVersion": MCP_PROTOCOL_REVISION,
-            "capabilities": { "tools": { "listChanged": false } },
-            "serverInfo": {
-                "name": env!("CARGO_PKG_NAME"),
-                "version": env!("CARGO_PKG_VERSION")
-            }
-        })
     }
 
     /// The full bound write + read set, which dispatch and the argument

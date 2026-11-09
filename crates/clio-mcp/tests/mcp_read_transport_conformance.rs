@@ -32,7 +32,6 @@
 mod support;
 
 use clio_mcp::MCP_PROTOCOL_REVISION;
-use clio_mcp::protocol::McpHandler;
 use clio_mcp::read_explain::TRACE_HIT_KEYS;
 use clio_mcp::runtime::McpState;
 use serde_json::{Value, json};
@@ -81,22 +80,33 @@ fn rpc(id: u64, method: &str, params: Value) -> String {
     json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}).to_string()
 }
 
-fn init_frame() -> String {
+/// The metadata block the served revision requires on every request.
+fn meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_REVISION,
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
+}
+
+/// One admitted `tools/call` frame.
+fn call_frame(id: u64, name: &str, args: &Value) -> String {
+    rpc(
+        id,
+        "tools/call",
+        json!({"_meta": meta(), "name": name, "arguments": args}),
+    )
+}
+
+/// The conditional headers the HTTP admission requires for one tool call.
+fn call_headers(name: &str) -> String {
     format!(
-        "{}\n{}\n",
-        rpc(
-            1,
-            "initialize",
-            json!({"protocolVersion": MCP_PROTOCOL_REVISION, "capabilities": {}})
-        ),
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#
+        "Mcp-Protocol-Version: {MCP_PROTOCOL_REVISION}\r\nMcp-Method: tools/call\r\nMcp-Name: {name}\r\n"
     )
 }
 
 fn run_stdio(state: &Arc<McpState>, frames: &str) -> Vec<Value> {
-    let handler = McpHandler::new(Arc::clone(state));
     let mut out: Vec<u8> = Vec::new();
-    clio_mcp::stdio::serve(&handler, Cursor::new(frames.as_bytes().to_vec()), &mut out)
+    clio_mcp::stdio::serve(state, Cursor::new(frames.as_bytes().to_vec()), &mut out)
         .expect("stdio");
     String::from_utf8(out)
         .expect("utf8")
@@ -204,17 +214,13 @@ fn stdio_read_matrix_with_parity() {
         .iter()
         .map(|(name, args)| clio_mcp::write_tools::dispatch(&direct_state, name, args))
         .collect();
-    let mut frames = init_frame();
+    let mut frames = String::new();
     for (i, (name, args)) in fixtures.iter().enumerate() {
-        frames.push_str(&rpc(
-            100 + i as u64,
-            "tools/call",
-            json!({"name": name, "arguments": args}),
-        ));
+        frames.push_str(&call_frame(100 + i as u64, name, args));
         frames.push('\n');
     }
     let responses = run_stdio(&read_state(), &frames);
-    assert_eq!(responses.len(), fixtures.len() + 1, "stdout purity");
+    assert_eq!(responses.len(), fixtures.len(), "stdout purity");
     for (i, (name, _)) in fixtures.iter().enumerate() {
         let response = responses
             .iter()
@@ -237,12 +243,8 @@ fn http_read_matrix_with_parity() {
     let direct_state = read_state();
     for (i, (name, args)) in fixtures.iter().enumerate() {
         let direct = clio_mcp::write_tools::dispatch(&direct_state, name, args);
-        let body = rpc(
-            100 + i as u64,
-            "tools/call",
-            json!({"name": name, "arguments": args}),
-        );
-        let (status, resp) = http_post(&addr, &body, "");
+        let body = call_frame(100 + i as u64, name, args);
+        let (status, resp) = http_post(&addr, &body, &call_headers(name));
         assert_eq!(status, 200, "read call `{name}`");
         assert_eq!(
             mask_volatile(resp["result"]["structuredContent"].clone()),
@@ -261,12 +263,8 @@ fn http_read_matrix_with_parity() {
 fn explain_trace_key_contract_over_stdio_and_http() {
     let args = json!({"query": "terse answers", "explain": true});
 
-    let mut frames = init_frame();
-    frames.push_str(&rpc(
-        100,
-        "tools/call",
-        json!({"name": "retrieve", "arguments": args}),
-    ));
+    let mut frames = String::new();
+    frames.push_str(&call_frame(100, "retrieve", &args));
     frames.push('\n');
     let responses = run_stdio(&read_state(), &frames);
     let stdio = responses
@@ -278,12 +276,8 @@ fn explain_trace_key_contract_over_stdio_and_http() {
     let addr = spawn_http(read_state(), clio_mcp::http::HttpConfig::default());
     let (status, resp) = http_post(
         &addr,
-        &rpc(
-            100,
-            "tools/call",
-            json!({"name": "retrieve", "arguments": args}),
-        ),
-        "",
+        &call_frame(100, "retrieve", &args),
+        &call_headers("retrieve"),
     );
     assert_eq!(status, 200, "retrieve over HTTP");
     let http = resp["result"]["structuredContent"].clone();
@@ -351,11 +345,10 @@ fn floor_and_entity_controls_over_stdio_and_http() {
         ("entities off", off_args),
         ("summary on", on_args),
     ];
-    let mut frames = init_frame();
+    let mut frames = String::new();
     let mut bodies: Vec<String> = Vec::new();
     for (i, (_, args)) in calls.iter().enumerate() {
-        let params = json!({"name": "retrieve", "arguments": args});
-        let body = rpc(200 + i as u64, "tools/call", params);
+        let body = call_frame(200 + i as u64, "retrieve", args);
         bodies.push(body.clone());
         frames.push_str(&body);
         frames.push('\n');
@@ -369,7 +362,7 @@ fn floor_and_entity_controls_over_stdio_and_http() {
             .find(|r| r["id"].as_u64() == Some(200 + i as u64))
             .unwrap_or_else(|| panic!("{label}: stdio response"))["result"]["structuredContent"]
             .clone();
-        let (status, resp) = http_post(&addr, &bodies[i], "");
+        let (status, resp) = http_post(&addr, &bodies[i], &call_headers("retrieve"));
         assert_eq!(status, 200, "{label}: HTTP status");
         let http = resp["result"]["structuredContent"].clone();
         for (transport, out) in [("stdio", &stdio), ("HTTP", &http)] {
@@ -430,16 +423,12 @@ fn floor_and_entity_controls_over_stdio_and_http() {
 #[test]
 fn t17_07_stdout_purity_on_reads() {
     let frames = format!(
-        "{}{}",
-        init_frame(),
-        rpc(
-            50,
-            "tools/call",
-            json!({"name": "inspect", "arguments": {}})
-        )
+        "{}{}\n",
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        call_frame(50, "inspect", &json!({}))
     );
     let responses = run_stdio(&read_state(), &frames);
-    assert_eq!(responses.len(), 2, "notification produces no frame");
+    assert_eq!(responses.len(), 1, "notification produces no frame");
     for r in responses {
         assert!(r.get("jsonrpc").is_some(), "not a JSON-RPC frame: {r}");
     }

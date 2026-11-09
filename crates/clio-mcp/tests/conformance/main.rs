@@ -4,17 +4,17 @@
 //! # Responsibility
 //!
 //! This module is responsible for the entry point of the MCP conformance
-//! integration-test target for the pinned "2025-11-25" revision and for the
+//! integration-test target for the activated `2026-07-28` revision and for the
 //! shared in-process harness every transport suite builds on.
 //!
 //! ## Owns
 //! - The `conformance` Cargo test target and its module declarations.
-//! - The shared `McpState` and `McpHandler` builders, the JSON-RPC frame helper,
-//!   the initialize frames, and the write-set fixture.
+//! - The shared `McpState` builder, the JSON-RPC frame helper, the per-request
+//!   metadata every frame carries, and the write-set fixture.
 //! - `mask_volatile`, the parity mask over process-unique generated ids.
 //!
 //! ## Does not own
-//! - The pinned-revision assertions (`revision`).
+//! - The revision contract (`revision`).
 //! - The stdio transport suite (`stdio`).
 //! - The HTTP transport suite (`http`).
 //!
@@ -29,7 +29,6 @@
 // Run locally with `cargo test -p clio-mcp --test conformance`.
 
 use clio_mcp::MCP_PROTOCOL_REVISION;
-use clio_mcp::protocol::McpHandler;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -37,6 +36,15 @@ use std::sync::Arc;
 mod http;
 mod revision;
 mod stdio;
+
+/// The metadata block the revision requires on every request: the version the
+/// client is using and the capabilities it declares.
+fn required_meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_REVISION,
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
+}
 
 fn state() -> Arc<McpState> {
     McpState::open_with_effective(
@@ -49,33 +57,32 @@ fn state() -> Arc<McpState> {
     .expect("state")
 }
 
-fn handler() -> McpHandler {
-    McpHandler::new(state())
-}
-
 #[allow(clippy::needless_pass_by_value)]
 fn rpc(id: u64, method: &str, params: Value) -> String {
     json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}).to_string()
 }
 
-/// The initialize POST body (a single JSON-RPC message).
-fn init_only() -> String {
+/// One admitted request frame: `params` carries the required metadata and
+/// nothing else.
+fn request(id: u64, method: &str) -> String {
+    rpc(id, method, json!({"_meta": required_meta()}))
+}
+
+/// One `tools/call` frame for `name`.
+fn tool_call(id: u64, name: &str, arguments: &Value) -> String {
     rpc(
-        1,
-        "initialize",
-        json!({"protocolVersion": MCP_PROTOCOL_REVISION, "capabilities": {}}),
+        id,
+        "tools/call",
+        json!({"_meta": required_meta(), "name": name, "arguments": arguments}),
     )
 }
 
-fn init_frame() -> String {
-    format!(
-        "{}\n{}\n",
-        rpc(
-            1,
-            "initialize",
-            json!({"protocolVersion": MCP_PROTOCOL_REVISION, "capabilities": {}})
-        ),
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#
+/// The whole catalogue in one page.
+fn tools_list(id: u64) -> String {
+    rpc(
+        id,
+        "tools/list",
+        json!({"_meta": required_meta(), "com.agentmemoir/pageSize": 100}),
     )
 }
 

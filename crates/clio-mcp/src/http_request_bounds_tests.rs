@@ -37,7 +37,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"#;
+use crate::http::http_test_support_tests::{admission, served_body};
 
 /// Serve through the real `serve_with_listener` in a background thread. The
 /// thread runs until the per-test process exits, which matches the production
@@ -61,11 +61,14 @@ fn connect(port: u16) -> TcpStream {
     TcpStream::connect(("127.0.0.1", port)).expect("connect")
 }
 
-fn init_request() -> String {
+fn served_request() -> String {
+    let body = served_body("server/discover");
     format!(
         "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
-         Accept: application/json\r\nContent-Length: {}\r\n\r\n{INIT}",
-        INIT.len()
+         Accept: application/json\r\nContent-Length: {}\r\n{}\r\n{}",
+        body.len(),
+        admission("server/discover"),
+        body
     )
 }
 
@@ -109,7 +112,7 @@ fn slow_drip_request_is_cut_at_the_total_deadline() {
         let _ = reader.read_to_end(&mut buf);
         buf
     });
-    let req = init_request();
+    let req = served_request();
     // Drip one byte at a time. Each drip is far inside the read slice, and
     // the full drip (about 5.3 s at 20 ms per byte) is far past the 2 s
     // deadline, so the cut point is the server's total deadline; scheduler
@@ -200,15 +203,17 @@ fn header_block_over_head_cap_rejected() {
     );
 }
 
-/// One `initialize` request whose whole header block, terminator included, is
+/// One admitted discovery request whose whole header block, terminator included, is
 /// exactly `MAX_HEAD_BYTES`. The filler absorbs the length of everything else,
 /// so the total is exact by construction rather than by arithmetic a later edit
 /// could drift from, and independent of the port the OS assigns.
 fn head_on_the_cap() -> String {
+    let body = served_body("server/discover");
     let bare = format!(
         "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
-         Accept: application/json\r\nContent-Length: {}\r\nX-Filler: \r\n\r\n",
-        INIT.len()
+         Accept: application/json\r\nContent-Length: {}\r\n{}X-Filler: \r\n\r\n",
+        body.len(),
+        admission("server/discover")
     );
     let filler = "a".repeat(MAX_HEAD_BYTES - bare.len());
     bare.replace("X-Filler: \r\n", &format!("X-Filler: {filler}\r\n"))
@@ -260,7 +265,9 @@ fn header_block_exactly_on_head_cap_is_served() {
     // exactly on the cap.
     let mut stream = connect(port);
     stream.write_all(head.as_bytes()).expect("write head");
-    stream.write_all(INIT.as_bytes()).expect("write body");
+    stream
+        .write_all(served_body("server/discover").as_bytes())
+        .expect("write body");
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .expect("read timeout");
@@ -287,7 +294,7 @@ fn header_block_exactly_on_head_cap_is_served() {
         "the first half must hold no terminator, or the split proves nothing"
     );
     let mut tail = second.as_bytes().to_vec();
-    tail.extend_from_slice(INIT.as_bytes());
+    tail.extend_from_slice(served_body("server/discover").as_bytes());
     let (status, body) = exchange_split(port, first, &tail)
         .expect("a head on the cap must be answered, not silently dropped");
     assert_eq!(

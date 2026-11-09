@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on the event-id header.
 
-use super::{ERR_HEADER_MISMATCH, MCP_METHOD_HEADER, MCP_NAME_HEADER, refuse};
+use super::{ERR_HEADER_MISMATCH, MCP_METHOD_HEADER, MCP_NAME_HEADER, check_headers};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -51,7 +51,8 @@ fn tool_call(name: &str) -> Value {
 /// `None` is a request the guard accepts.
 fn refusal(headers: &[(&str, &str)], body: &Value) -> Option<(u16, Value)> {
     let supplied: HashMap<&str, &str> = headers.iter().copied().collect();
-    let (status, text) = refuse(|name: &str| supplied.get(name).copied(), body)?;
+    let err = check_headers(|name: &str| supplied.get(name).copied(), body).err()?;
+    let (status, text) = super::refusal(body, &err);
     Some((
         status,
         serde_json::from_str(&text).expect("the refusal body is JSON"),

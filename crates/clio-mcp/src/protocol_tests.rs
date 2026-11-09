@@ -24,20 +24,44 @@ fn init_msg() -> Value {
     })
 }
 
+/// The request metadata the stateless revision requires on every request.
+fn meta(version: &str) -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": version,
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
+}
+
+/// The stateless dispatcher's answer to one frame, through the same admission
+/// the headerless transport uses.
+fn dispatch_frame(state: &McpState, frame: &Value) -> Value {
+    crate::stateless::admit_stdio(state, &serde_json::to_string(frame).expect("frame"))
+        .expect("a request carrying an id is answered")
+}
+
 #[test]
-fn initialize_echoes_pinned_revision() {
-    let (h, _) = handler();
-    let res = h.handle_message(&init_msg()).expect("response");
-    assert_eq!(res["jsonrpc"], json!("2.0"));
-    assert_eq!(res["id"], json!(1));
+fn discovery_reports_the_pinned_revision_and_initialize_is_removed() {
+    let (h, state) = handler();
+    let discover = dispatch_frame(
+        &state,
+        &json!({
+            "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+            "params": {"_meta": meta(MCP_PROTOCOL_REVISION)}
+        }),
+    );
+    assert_eq!(discover["jsonrpc"], json!("2.0"));
+    assert_eq!(discover["id"], json!(1));
     assert_eq!(
-        res["result"]["protocolVersion"],
-        json!(MCP_PROTOCOL_REVISION)
+        discover["result"]["supportedVersions"],
+        json!([MCP_PROTOCOL_REVISION])
     );
     assert_eq!(
-        res["result"]["serverInfo"]["name"],
+        discover["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
         json!(env!("CARGO_PKG_NAME"))
     );
+    // The handshake this revision removed is an unknown method now.
+    let removed = h.handle_message(&init_msg()).expect("response");
+    assert_eq!(removed["error"]["code"], json!(ERR_METHOD_NOT_FOUND));
 }
 
 #[test]
@@ -239,11 +263,30 @@ fn unknown_method_is_method_not_found() {
 
 #[test]
 fn ping_and_notifications() {
-    let (h, _) = handler();
+    let (h, state) = handler();
+    // `ping` is one of the methods this revision removed.
     let res = h
         .handle_message(&json!({"jsonrpc":"2.0","id":8,"method":"ping"}))
         .expect("response");
-    assert_eq!(res["result"], json!({}));
+    assert_eq!(res["error"]["code"], json!(ERR_METHOD_NOT_FOUND));
+    // A request carrying the retired revision is refused with the
+    // unsupported-version code and the versions this server does serve.
+    let unsupported = dispatch_frame(
+        &state,
+        &json!({
+            "jsonrpc": "2.0", "id": 9, "method": "server/discover",
+            "params": {"_meta": meta("2025-11-25")}
+        }),
+    );
+    assert_eq!(unsupported["error"]["code"], json!(-32022), "{unsupported}");
+    assert_eq!(
+        unsupported["error"]["data"]["requested"],
+        json!("2025-11-25")
+    );
+    assert_eq!(
+        unsupported["error"]["data"]["supported"],
+        json!([MCP_PROTOCOL_REVISION])
+    );
     // Notifications get no response.
     assert!(
         h.handle_message(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
@@ -298,17 +341,20 @@ fn handler_accessors_and_default_arguments() {
 
 #[test]
 fn initialize_reports_pin_for_mismatched_client_revision() {
-    let (h, _) = handler();
-    let res = h
-        .handle_message(&json!({
-            "jsonrpc":"2.0","id":11,"method":"initialize",
-            "params":{"protocolVersion":"2026-07-28","capabilities":{}}
-        }))
-        .expect("response");
-    assert_eq!(
-        res["result"]["protocolVersion"],
-        json!(MCP_PROTOCOL_REVISION)
+    let (_, state) = handler();
+    // A client that asks for a retired revision is told which one this server
+    // serves, and is served nothing.
+    let res = dispatch_frame(
+        &state,
+        &json!({
+            "jsonrpc":"2.0","id":11,"method":"server/discover",
+            "params":{"_meta": meta("2025-11-25")}
+        }),
     );
+    assert_eq!(res["error"]["code"], json!(-32022), "{res}");
+    let supported = json!([MCP_PROTOCOL_REVISION]);
+    assert_eq!(res["error"]["data"]["supported"], supported, "{res}");
+    assert!(res.get("result").is_none(), "{res}");
 }
 
 /// A co-activation handoff failure maps to JSON-RPC `-32001` with the

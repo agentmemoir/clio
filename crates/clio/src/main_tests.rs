@@ -98,19 +98,19 @@ fn unknown_command_exits_2() {
 
 #[test]
 fn parse_flags_pairs_and_bare_flags() {
-    let flags = flags_of(&["--db", "x", "--sessions"]);
+    let flags = flags_of(&["--db", "x", "--shared-bank"]);
     assert_eq!(flags.get("db").map(String::as_str), Some("x"));
-    assert_eq!(flags.get("sessions").map(String::as_str), Some("true"));
+    assert_eq!(flags.get("shared-bank").map(String::as_str), Some("true"));
     assert!(!flags.contains_key("missing"));
 }
 
 #[test]
 fn parse_flags_bare_flag_before_another_flag() {
     // `--bind` has no value; `--db` must not be consumed as that value.
-    let flags = flags_of(&["--bind", "--db", "sqlite::memory:", "--sessions"]);
+    let flags = flags_of(&["--bind", "--db", "sqlite::memory:", "--shared-bank"]);
     assert_eq!(flags.get("bind").map(String::as_str), Some("true"));
     assert_eq!(flags.get("db").map(String::as_str), Some("sqlite::memory:"));
-    assert_eq!(flags.get("sessions").map(String::as_str), Some("true"));
+    assert_eq!(flags.get("shared-bank").map(String::as_str), Some("true"));
 }
 
 #[test]
@@ -119,14 +119,14 @@ fn parse_flags_equals_syntax() {
     let flags = flags_of(&[
         "--bind=127.0.0.1:34305",
         "--db=sqlite::memory:",
-        "--sessions",
+        "--shared-bank",
     ]);
     assert_eq!(
         flags.get("bind").map(String::as_str),
         Some("127.0.0.1:34305")
     );
     assert_eq!(flags.get("db").map(String::as_str), Some("sqlite::memory:"));
-    assert_eq!(flags.get("sessions").map(String::as_str), Some("true"));
+    assert_eq!(flags.get("shared-bank").map(String::as_str), Some("true"));
 }
 
 #[test]

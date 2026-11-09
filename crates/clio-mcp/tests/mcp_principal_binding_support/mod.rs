@@ -41,17 +41,19 @@
 //! (`bound_server_without_journal`), so a served confirmed erasure never writes
 //! the deployment's resolved journal file. Nothing reads the host environment.
 
+mod wire;
+
+pub use wire::{bearer, call, post};
+
 use clio_mcp::http::HttpConfig;
 use clio_mcp::http_auth::CredentialStore;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
 use clio_types::Actor;
 use serde_json::{Value, json};
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
 
 /// Calls served so far, so no two tests share a scratch name.
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -334,52 +336,6 @@ pub fn bound_server_without_journal(store: &CredentialStore, default_bank: &str)
         },
         &json!({}),
     )
-}
-
-/// One `POST /mcp` and the status plus body that came back.
-///
-/// The write side is half-closed once the request is sent, so the server's read
-/// of the declared body completes rather than waiting for a close.
-pub fn post(port: u16, body: &str, extra: &str) -> (u16, String) {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-    let request = format!(
-        "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
-         Accept: application/json, text/event-stream\r\nContent-Length: {}\r\n{extra}\r\n{body}",
-        body.len()
-    );
-    stream.write_all(request.as_bytes()).expect("write");
-    let _ = stream.shutdown(std::net::Shutdown::Write);
-    let mut buf = Vec::new();
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let _ = stream.read_to_end(&mut buf);
-    let pos = buf
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .unwrap_or(buf.len());
-    let head = String::from_utf8_lossy(&buf[..pos.min(buf.len())]);
-    let status = head
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let from = (pos + 4).min(buf.len());
-    (status, String::from_utf8_lossy(&buf[from..]).into_owned())
-}
-
-/// The `Authorization` header carrying `secret`.
-pub fn bearer(secret: &str) -> String {
-    format!("Authorization: Bearer {secret}\r\n")
-}
-
-/// One JSON-RPC `tools/call` frame for `tool` with `arguments`.
-#[allow(clippy::needless_pass_by_value)]
-pub fn call(tool: &str, arguments: Value) -> String {
-    json!({
-        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": tool, "arguments": arguments}
-    })
-    .to_string()
 }
 
 /// An `export` call at `bank`, the compliance verb whose authorization depends

@@ -22,7 +22,6 @@
 //!
 //! Keep this module focused on the recorded session guard.
 
-use clio_mcp::protocol::McpHandler;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
 use clio_mcp::stdio::serve;
 use serde_json::{Value, json};
@@ -49,24 +48,30 @@ crates/clio-mcp/tests/fixtures/tools_call_session_before.json`; regenerate the c
 with `touch` on every `*.rs` under `crates/`, the same build from the working tree, and the same \
 capture without `--source-dir` to `crates/clio-mcp/tests/fixtures/tools_call_session.json`";
 
-/// The two request frames the recorded session holds, rebuilt in code.
+/// The metadata block the served revision requires on every request.
+fn meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": clio_mcp::MCP_PROTOCOL_REVISION,
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
+}
+
+/// The two request frames the recorded session holds, rebuilt in code: the
+/// revision is discovered rather than negotiated, so the session opens with
+/// `server/discover` and then makes its one tool call.
 fn request_frames() -> Vec<Value> {
     vec![
         json!({
             "jsonrpc": "2.0",
             "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-11-25",
-                "capabilities": {},
-                "clientInfo": {"name": "clio-mcp-transcript", "version": "1"},
-            },
+            "method": "server/discover",
+            "params": {"_meta": meta()},
         }),
         json!({
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
-            "params": {"name": "ranking_env_get", "arguments": {}},
+            "params": {"_meta": meta(), "name": "ranking_env_get", "arguments": {}},
         }),
     ]
 }
@@ -85,9 +90,8 @@ fn session_input(frames: &[Value]) -> String {
 fn responses(input: &str) -> Vec<String> {
     let state = McpState::open_with_effective(&McpOpenOptions::default(), &json!({}))
         .expect("open the in-memory state");
-    let handler = McpHandler::new(state);
     let mut out = Vec::new();
-    serve(&handler, Cursor::new(input.as_bytes().to_vec()), &mut out).expect("serve the session");
+    serve(&state, Cursor::new(input.as_bytes().to_vec()), &mut out).expect("serve the session");
     String::from_utf8(out)
         .expect("responses are UTF-8")
         .lines()

@@ -350,16 +350,6 @@ fn http_help_names_the_store_source_without_printing_a_secret_value() {
     assert!(!help.contains(secret), "help printed the secret: {help}");
 }
 
-#[test]
-fn http_config_reads_the_sessions_flag_and_leaves_the_bind_to_the_listener() {
-    let cfg = config_with(&["--sessions"]);
-    assert!(cfg.sessions_enabled);
-    // The address actually bound is filled in by the serving path, so the
-    // config keeps the transport default until a listener is chosen.
-    assert_eq!(cfg.bind, "127.0.0.1:0");
-    assert!(cfg.credentials.is_none());
-}
-
 // The credential-store load has its own file, because a module's own tests
 // are not limited to one file: see `mcp_cli_credentials_tests`.
 
@@ -401,7 +391,9 @@ fn the_stdio_session_serves_until_end_of_input() {
 #[test]
 fn a_stdio_session_stops_with_one_when_its_output_stream_refuses() {
     let opts = opts_with(memory(&[]), &[]);
-    let frame = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{}}}"#;
+    // One stateless request: the revision has no handshake, so the frame carries
+    // its own version metadata and is answered on its own.
+    let frame = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#;
     let input = std::io::Cursor::new(format!("{frame}\n").into_bytes());
     assert_eq!(
         mcp_stdio_serve(

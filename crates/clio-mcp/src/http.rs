@@ -3,14 +3,14 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the Streamable HTTP MCP transport per the
-//! pinned `2025-11-25` revision: one JSON-RPC endpoint, optional
-//! `MCP-Session-Id` lifecycle, Origin validation, and token auth.
+//! This module is responsible for the Streamable HTTP MCP transport under the
+//! one stateless revision this server implements: one JSON-RPC endpoint, Origin
+//! validation, and token auth.
 //!
 //! ## Owns
 //! - Minimal HTTP/1.1 request parsing and response writing for `/mcp`
 //! - The accept loop, connection cap, and per-request dispatch through the
-//!   bound protocol entry point
+//!   stateless admission (see `http_candidate`)
 //! - The credential source this server accepts (the operator's token store);
 //!   the startup rule that requires one on every bind unless the operator
 //!   explicitly opted out lives in `http_start_guard`
@@ -30,14 +30,14 @@
 //! - Protocol handling (see `protocol`)
 //! - Legacy HTTP+SSE (optional compatibility, not implemented as primary)
 //! - Request byte reading under those bounds (see `http_read`)
-//! - Origin validation and session lifecycle (see `http_guard`)
+//! - Origin validation (see `http_guard`)
 //! - Reading the credential store and resolving a presented secret (see
 //!   `http_auth`)
 //! - Slot counting and release (see `conn_pool`)
 //!
 //! ## Boundary
 //!
-//! Changes to HTTP transport security or session handling should normally
+//! Changes to HTTP transport security or request gating should normally
 //! require changes here or in `http_guard`. Changes to tool behavior should not
 //! require changes here.
 //!
@@ -45,13 +45,13 @@
 
 use crate::conn_pool::{ConnPool, MAX_CONNECTIONS};
 use crate::http::http_start_guard::{BindRefusal, bind_refusal};
-use crate::http_auth::{AuthOutcome, CredentialStore, authorize_request};
-use crate::http_guard::{HttpShared, check_origin, handle_delete};
-use crate::http_post::{LivePost, PostContext, PostRoute, scoped_state};
+use crate::http_auth::{CredentialStore, authorize_request};
+use crate::http_candidate::CandidatePost;
+use crate::http_guard::check_origin;
+use crate::http_post::{PostContext, PostRoute, scoped_state};
 use crate::http_read::{HttpRequest, read_request};
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
-use serde_json::Value;
 use std::fmt::Write as _;
 use std::io::Write;
 use std::net::{TcpListener, TcpStream};
@@ -100,8 +100,6 @@ pub struct HttpConfig {
     /// `Some` with an empty store authorizes nothing, which is why a bind that
     /// requires a credential treats it as no credential source at all.
     pub credentials: Option<Arc<CredentialStore>>,
-    /// Mint and enforce `MCP-Session-Id` sessions.
-    pub sessions_enabled: bool,
     /// Serve without requiring any credential, even on loopback.
     ///
     /// Off by default: every bind requires a credential store unless this is
@@ -126,7 +124,6 @@ impl Default for HttpConfig {
         Self {
             bind: "127.0.0.1:0".into(),
             credentials: None,
-            sessions_enabled: false,
             insecure_no_auth: false,
             insecure_bind_any: false,
             allowed_origins: vec![],
@@ -152,7 +149,7 @@ pub fn serve_with_listener(
     cfg: HttpConfig,
     listener: TcpListener,
 ) -> std::io::Result<()> {
-    serve_with_listener_and(state, cfg, listener, Arc::new(LivePost))
+    serve_with_listener_and(state, cfg, listener, Arc::new(CandidatePost))
 }
 
 /// Serve over an already-bound listener with the given POST dispatch strategy.
@@ -186,7 +183,6 @@ where
         return Err(std::io::Error::other(message));
     }
     let handler = Arc::new(McpHandler::new(state));
-    let shared = Arc::new(HttpShared::default());
     let pool = Arc::new(ConnPool::default());
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else { continue };
@@ -198,14 +194,13 @@ where
         };
         let handler = Arc::clone(&handler);
         let cfg = cfg.clone();
-        let shared = Arc::clone(&shared);
         let post = Arc::clone(&post);
         std::thread::spawn(move || {
             // The slot guard is held for the whole connection and released by
             // Drop on every exit path: success, client error, server error,
             // write failure, timeout, or panic.
             let _slot = slot;
-            let _ = handle_conn(handler, cfg, shared, post, stream);
+            let _ = handle_conn(handler, cfg, post, stream);
         });
     }
     Ok(())
@@ -225,7 +220,6 @@ fn refuse_over_cap(stream: &mut TcpStream) {
 fn handle_conn<P>(
     handler: Arc<McpHandler>,
     cfg: HttpConfig,
-    shared: Arc<HttpShared>,
     post: Arc<P>,
     mut stream: TcpStream,
 ) -> std::io::Result<()>
@@ -248,7 +242,7 @@ where
             return write_simple(&mut stream, status, &message);
         }
     };
-    let (status, body, extra) = route(&handler, &cfg, &shared, &req, &*post);
+    let (status, body, extra) = route(&handler, &cfg, &req, &*post);
     let mut response = String::new();
     let _ = write!(response, "HTTP/1.1 {status}\r\n");
     for (k, v) in extra {
@@ -273,20 +267,22 @@ where
 fn route<P>(
     handler: &Arc<McpHandler>,
     cfg: &HttpConfig,
-    shared: &HttpShared,
     req: &HttpRequest,
     post: &P,
 ) -> (u16, String, Vec<(String, String)>)
 where
     P: PostRoute,
 {
-    if req.method == "GET" {
-        // Server-initiated SSE stream is not offered under this write surface;
-        // the pinned revision allows a 405 refusal.
-        return (405, String::new(), vec![]);
-    }
-    if req.method != "POST" && req.method != "DELETE" {
-        return (405, String::new(), vec![]);
+    // One verb is served. A `GET` is refused with the same 405 as any other
+    // verb: no server-initiated SSE stream is offered, so there is nothing for
+    // it to open.
+    if let Some(refusal) = crate::method_guard::refuse(&req.method) {
+        let extra = refusal
+            .headers
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect();
+        return (refusal.status, refusal.body.to_owned(), extra);
     }
     if let Some(status) = check_origin(cfg, req) {
         return (status, String::new(), vec![]);
@@ -297,16 +293,6 @@ where
         Ok(outcome) => outcome,
         Err(status) => return (status, String::new(), vec![]),
     };
-    // Auth already decided this request's principal; the session gate below
-    // compares the presenting principal's identity, so it is read before
-    // `scoped_state` consumes the outcome. The identity is not a secret.
-    let identity = match &principal {
-        AuthOutcome::Bound(principal) => Some(principal.session_identity()),
-        AuthOutcome::Unbound => None,
-    };
-    if req.method == "DELETE" {
-        return handle_delete(shared, req, identity.as_deref());
-    }
     if req.path != "/mcp" {
         return (404, String::new(), vec![]);
     }
@@ -323,34 +309,14 @@ where
     if !content_type.starts_with("application/json") {
         return (415, String::new(), vec![]);
     }
-    let parsed = serde_json::from_str::<Value>(req.body.trim()).ok();
-    let request_method = parsed
-        .as_ref()
-        .and_then(|v| v.get("method"))
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    if cfg.sessions_enabled && request_method != "initialize" {
-        let known = req
-            .get("mcp-session-id")
-            .is_some_and(|id| shared.is_live(id, identity.as_deref()));
-        if !known {
-            return (404, String::new(), vec![]);
-        }
-    }
     // The request-scoped state carries the credential's principal, so dispatch
     // runs through the bound entry point and the shared `Mutex`-held state stays
     // one instance rather than a per-request fork. `Unbound` is the loopback dev
     // default: the base state, unchanged.
     let request_state = scoped_state(handler, principal);
     post.respond(PostContext {
-        handler,
         state: &request_state,
-        cfg,
-        shared,
         req,
-        identity: identity.as_deref(),
-        request_method: &request_method,
     })
 }
 
@@ -433,11 +399,12 @@ fn status_text(status: u16) -> &'static str {
 }
 
 #[cfg(test)]
-#[path = "http_binding_tests.rs"]
-mod http_binding_tests;
-#[cfg(test)]
 #[path = "http_request_bounds_tests.rs"]
 mod http_request_bounds_tests;
+
+#[cfg(test)]
+#[path = "http_retention_parity_tests.rs"]
+mod http_retention_parity_tests;
 #[cfg(test)]
 #[path = "http_start_auth_tests.rs"]
 mod http_start_auth_tests;

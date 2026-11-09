@@ -199,7 +199,7 @@ fn published_pack_carries_mission_fields_and_rule_ids() {
 #[test]
 fn retention_tools_are_in_the_published_pack_with_the_pinned_revision() {
     let pack = schema_pack();
-    assert_eq!(pack["mcp_protocol_revision"], "2025-11-25");
+    assert_eq!(pack["mcp_protocol_revision"], "2026-07-28");
     let names: Vec<&str> = pack["tools"]
         .as_array()
         .expect("tools")

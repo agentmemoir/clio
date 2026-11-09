@@ -355,7 +355,7 @@ fn compose_explanation_reports_dedup_only_for_a_non_inert_call() {
 #[test]
 fn scope_params_are_published_in_the_versioned_schema_pack() {
     let pack = schema_pack();
-    assert_eq!(pack["mcp_protocol_revision"], json!("2025-11-25"));
+    assert_eq!(pack["mcp_protocol_revision"], json!("2026-07-28"));
     let tool = |name: &str| {
         pack["tools"]
             .as_array()

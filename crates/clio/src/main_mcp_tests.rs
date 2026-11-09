@@ -50,7 +50,7 @@ fn mcp_schema_export_writes_file() {
     let raw = std::fs::read_to_string(&path).expect("written pack");
     let pack: serde_json::Value = serde_json::from_str(&raw).expect("json");
     assert_eq!(pack["format"], "am_tool_schema_pack");
-    assert_eq!(pack["mcp_protocol_revision"], "2025-11-25");
+    assert_eq!(pack["mcp_protocol_revision"], "2026-07-28");
     let _ = std::fs::remove_file(&path);
 }
 
@@ -87,15 +87,13 @@ fn mcp_stdio_serves_then_eof() {
     // Feeds an in-memory empty stream so the test never blocks on the
     // inherited process stdin (`run` would lock the real stdin). The
     // explicit DB keeps the test independent of the host environment.
-    let handler = clio_mcp::protocol::McpHandler::new(
-        clio_mcp::runtime::McpState::open_with_effective(
-            &mcp_options(["--db", "sqlite::memory:"].map(str::to_owned)).expect("options"),
-            &serde_json::json!({}),
-        )
-        .expect("state"),
-    );
+    let state = clio_mcp::runtime::McpState::open_with_effective(
+        &mcp_options(["--db", "sqlite::memory:"].map(str::to_owned)).expect("options"),
+        &serde_json::json!({}),
+    )
+    .expect("state");
     let mut out = Vec::new();
-    clio_mcp::stdio::serve(&handler, std::io::Cursor::new(Vec::new()), &mut out)
+    clio_mcp::stdio::serve(&state, std::io::Cursor::new(Vec::new()), &mut out)
         .expect("serve until EOF");
 }
 
@@ -240,16 +238,14 @@ fn mcp_stdio_serve_serves_and_reports_open_failure() {
 
 #[test]
 fn http_config_reads_flags() {
-    let flags = flags_of(&["--bind", "127.0.0.1:9999", "--sessions"]);
+    let flags = flags_of(&["--bind", "127.0.0.1:9999"]);
     let cfg = http_config(&flags);
     // `bind` is filled in with the resolved address when serving, so the config
     // itself keeps the transport default until a listener is chosen.
     assert_eq!(cfg.bind, "127.0.0.1:0");
-    assert!(cfg.sessions_enabled);
 
     let default = http_config(&flags_of(&[]));
     assert_eq!(default.bind, "127.0.0.1:0");
-    assert!(!default.sessions_enabled);
     assert!(!default.insecure_bind_any, "off unless the flag says true");
 
     let opted_in = http_config(&flags_of(&["--insecure-bind-any"]));

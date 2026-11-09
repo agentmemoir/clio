@@ -76,7 +76,7 @@ where
             "max_envelope_skew_secs": 0
         },
         "mcp": {
-            "revision": "2025-11-25",
+            "revision": "2026-07-28",
             "transports": ["stdio", "streamable_http"],
             "tool_profile": clio_types::DEFAULT_PRESET.as_str(),
             "discovery": false

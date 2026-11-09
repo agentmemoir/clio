@@ -32,8 +32,7 @@ use crate::mcp_cli::tests::{
 
 #[test]
 fn an_absent_token_file_flag_loads_no_store() {
-    let store =
-        load_http_credentials(&flags_of(&["--sessions"]), &lookup(&[])).expect("no flag is fine");
+    let store = load_http_credentials(&flags_of(&[]), &lookup(&[])).expect("no flag is fine");
     assert!(
         store.is_none(),
         "no flag names no store; the caller then requires a token or refuses"

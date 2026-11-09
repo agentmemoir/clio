@@ -3,70 +3,29 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the two request guards that are not about
-//! credentials: Origin validation, and the optional `MCP-Session-Id` session
-//! lifecycle the Streamable HTTP transport offers.
+//! This module is responsible for the one request guard that is not about
+//! credentials: Origin validation, which protects the Streamable HTTP transport
+//! against DNS rebinding.
 //!
 //! ## Owns
-//! - `HttpShared`: the per-server session registry (id → the identity of the
-//!   principal that minted it) and its id counter
 //! - `check_origin` and `origin_host_allowed` (DNS-rebinding protection)
-//! - `handle_delete` (session termination) and `mint_session`
+//! - The parse of an `Origin` value into the host it names
 //!
 //! ## Does not own
 //! - Credential resolution and the 401 answer (see `http_auth`)
 //! - Request framing and the response writer (see `http` and `http_read`)
 //! - The principal rule a resolved credential then applies (see `principal`)
+//! - Session state: the transport is stateless, so no request carries one
 //!
 //! ## Boundary
 //!
-//! Changes to Origin policy or session lifecycle should normally require changes
-//! here. Changes to authentication should not require changes here.
+//! Changes to Origin policy should normally require changes here. Changes to
+//! authentication should not require changes here.
 //!
-//! Keep this module focused on the origin and session guards.
-//!
-//! # Session binding
-//!
-//! On a credential-bound server a session is minted for the principal that ran
-//! `initialize`, and it stays live only for that same principal. A session id
-//! presented by anyone else is answered exactly like an unknown id, so a stolen
-//! id buys nothing without the credential that minted it. The identity is not a
-//! secret and is never logged; it is only compared. The identity is the
-//! principal's record label, which the store keeps unique, so two different
-//! credentials can never compare equal and cannot reach each other's sessions.
-//! On an unbound server every session is stored as unowned and the lifecycle is
-//! unchanged.
+//! Keep this module focused on the origin guard.
 
 use crate::http::HttpConfig;
 use crate::http_read::HttpRequest;
-use std::collections::HashMap;
-use std::fmt::Write as _;
-use std::sync::Mutex;
-
-/// Per-server mutable transport state.
-#[derive(Debug, Default)]
-pub(crate) struct HttpShared {
-    /// Session id → the identity of the minting principal; `None` for a session
-    /// minted on an unbound server.
-    sessions: Mutex<HashMap<String, Option<String>>>,
-    session_counter: std::sync::atomic::AtomicU64,
-}
-
-impl HttpShared {
-    /// Whether `id` is a live session for the requester with identity
-    /// `identity`.
-    ///
-    /// A session is live only when it exists AND its stored identity equals the
-    /// requester's: `None` matches `None`, and two equal identities match. This
-    /// is the one predicate the session gate checks, so a bound server refuses a
-    /// cross-principal presentation exactly as it refuses an unknown id.
-    pub(crate) fn is_live(&self, id: &str, identity: Option<&str>) -> bool {
-        self.sessions.lock().is_ok_and(|m| {
-            m.get(id)
-                .is_some_and(|stored| stored.as_deref() == identity)
-        })
-    }
-}
 
 /// Origin refusal (`403`) or `None` when the request may proceed.
 ///
@@ -111,52 +70,6 @@ fn origin_host(origin: &str) -> Option<&str> {
     }
     let host = authority.split(':').next().unwrap_or("");
     (!host.is_empty()).then_some(host)
-}
-
-/// `DELETE` with an unknown, absent, or foreign session id; the owner's
-/// `DELETE` removes it.
-pub(crate) fn handle_delete(
-    shared: &HttpShared,
-    req: &HttpRequest,
-    identity: Option<&str>,
-) -> (u16, String, Vec<(String, String)>) {
-    let Some(id) = req.get("mcp-session-id") else {
-        return (400, String::new(), vec![]);
-    };
-    // Only the minting principal may terminate a session; any other identity is
-    // answered like an unknown id and leaves the session in place.
-    let removed = shared.sessions.lock().is_ok_and(|mut m| {
-        m.get(id)
-            .is_some_and(|stored| stored.as_deref() == identity)
-            && m.remove(id).is_some()
-    });
-    if removed {
-        (200, String::new(), vec![])
-    } else {
-        (404, String::new(), vec![])
-    }
-}
-
-/// Mint a fresh opaque 128-bit session id and register it under `identity`, the
-/// requester's principal identity (`None` on an unbound server).
-pub(crate) fn mint_session(shared: &HttpShared, identity: Option<&str>) -> String {
-    use std::hash::{BuildHasher, Hasher};
-    let counter = shared
-        .session_counter
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    // `RandomState` carries OS-seeded keys; two keyed draws plus the monotonic
-    // counter give an unguessable id rather than a predictable counter+clock.
-    let seed = std::collections::hash_map::RandomState::new();
-    let mut id = String::from("sess-");
-    for draw in [counter, 0] {
-        let mut hasher = seed.build_hasher();
-        hasher.write_u64(draw);
-        let _ = write!(id, "{:016x}", hasher.finish());
-    }
-    if let Ok(mut sessions) = shared.sessions.lock() {
-        sessions.insert(id.clone(), identity.map(str::to_owned));
-    }
-    id
 }
 
 #[cfg(test)]

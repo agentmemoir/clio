@@ -10,8 +10,8 @@
 //! - The three `CommandSpec` records and their usage examples
 //! - The `schema-export` flag-alias pair (`path` is the accepted alias of
 //!   `out`) and both documented spellings the pair names
-//! - The `http` record's `--bind`, `--token-file`, `--sessions`, and
-//!   `--insecure-no-auth` flags, and the database trio both transports print
+//! - The `http` record's `--bind`, `--token-file`, and `--insecure-no-auth`
+//!   flags, and the database trio both transports print
 //! - The `--tools` flag both transports and the export document, and the
 //!   usage refusal a bad value raises
 //! - The `--discovery` switch both transports document
@@ -66,7 +66,6 @@ const DB_BACKEND_BANK_TOOLS: &[Flag] = &[GLOBAL_DB, GLOBAL_BACKEND, GLOBAL_BANK,
 
 /// The flags `mcp http` documents past the database trio.
 const TOKEN_FILE: Flag = Flag::text("token-file", "PATH", "Credential store `mcp_cli` loads.");
-const SESSIONS: Flag = Flag::toggle("sessions", "Enables `mcp_cli` http sessions.");
 const INSECURE_NO_AUTH: Flag = Flag::toggle(
     "insecure-no-auth",
     "Serves `mcp_cli` http without a credential.",
@@ -169,7 +168,6 @@ pub(crate) const MCP_HTTP: CommandSpec = CommandSpec {
         GLOBAL_BACKEND,
         GLOBAL_BANK,
         TOKEN_FILE,
-        SESSIONS,
         INSECURE_NO_AUTH,
         INSECURE_BIND_ANY,
         TOOLS,
@@ -187,10 +185,6 @@ pub(crate) const MCP_HTTP: CommandSpec = CommandSpec {
         Example {
             command: "clio mcp http --bind 127.0.0.1:8765 --db ./memory.db",
             comment: Some("Bind and serve one SQLite store."),
-        },
-        Example {
-            command: "clio mcp http --bind 127.0.0.1:8765 --sessions",
-            comment: Some("Turn on HTTP sessions."),
         },
     ],
     tool: None,

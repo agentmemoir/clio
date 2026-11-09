@@ -3,12 +3,12 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for a non-activated candidate dispatcher that
-//! answers MCP JSON-RPC requests under the rules of revision `2026-07-28`:
+//! This module is responsible for the stateless MCP dispatcher that answers MCP
+//! JSON-RPC requests under the rules of the one revision this server serves:
 //! per-request metadata, removed methods, and that revision's error codes.
 //!
 //! ## Owns
-//! - The candidate revision constant and the supported-revision list
+//! - The supported-revision list the admission and dispatch read
 //! - `params._meta` validation, the unsupported-version error, and the
 //!   required-client-capability refusal
 //! - The refusal of a tool call that answers input this server never requested
@@ -16,18 +16,18 @@
 //! - The one cache-hint pair every cacheable result of this dispatcher carries
 //!
 //! ## Does not own
-//! - The pinned revision, the tool catalogue, and the transports (see
-//!   `protocol`, `http`, `stdio`)
+//! - The revision constant itself and the tool catalogue (see the crate root
+//!   and `protocol`)
+//! - Transport framing and gates (see `http`, `http_candidate`, `stdio`)
 //! - Tool semantics (see `write_tools`, `read_tools`)
-//! - Activation: only this crate's tests compile and reach this module
 //!
 //! ## Boundary
 //!
-//! Changes to the candidate revision's request rules should normally require
-//! changes here. Changes to the pinned revision, a transport, or a tool should
+//! Changes to the stateless revision's request rules should normally require
+//! changes here. Changes to the revision constant, a transport, or a tool should
 //! not require changes here.
 //!
-//! Keep this module focused on the candidate revision's request handling.
+//! Keep this module focused on the revision's request handling.
 
 use crate::conditional_http::{ERR_HEADER_MISMATCH, Refusal, check_headers, refusal};
 use crate::protocol::{
@@ -37,9 +37,6 @@ use crate::protocol::{
 use crate::runtime::McpState;
 use serde_json::{Map, Value, json};
 
-/// The revision this dispatcher answers as.
-pub(crate) const CANDIDATE_REVISION: &str = "2026-07-28";
-
 /// Wire name of the header carrying the revision the client is using.
 ///
 /// The transport lowercases header keys, so this is the key the getter sees.
@@ -48,8 +45,8 @@ pub(crate) const PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
 /// The header's name as a refusal message spells it.
 const PROTOCOL_VERSION_HEADER_NAME: &str = "MCP-Protocol-Version";
 
-/// Revisions this dispatcher accepts.
-pub(crate) const SUPPORTED_REVISIONS: &[&str] = &[CANDIDATE_REVISION];
+/// Revisions this dispatcher accepts: the one revision this server serves.
+pub(crate) const SUPPORTED_REVISIONS: &[&str] = &[crate::MCP_PROTOCOL_REVISION];
 
 /// JSON-RPC unsupported protocol version.
 const ERR_UNSUPPORTED_PROTOCOL_VERSION: i64 = -32022;
@@ -99,13 +96,15 @@ pub(crate) const CACHE_HINTS: CacheHints = CacheHints {
     scope: "private",
 };
 
-/// Admit one candidate-revision HTTP request and, when it passes, serve it.
+/// Admit one stateless HTTP request and, when it passes, serve it.
 ///
-/// The checks run in one fixed order and stop at the first failure: the conditional headers, JSON syntax, the required version header, the required metadata, header/body equality, the supported revision, and the client capability the request needs. Only a request that passes every check reaches [`dispatch`].
+/// The checks run in one fixed order and stop at the first failure: the conditional headers, JSON syntax, the removed-method rule, the required version header, the required metadata, header/body equality, the supported revision, and the client capability the request needs. The removed-method rule runs before every metadata rule, so a removed method is answered as an unknown method whether or not the request carries `_meta` or the version header. Every other request that passes every check reaches [`dispatch`].
 ///
-/// `get` reads one header value by its lowercase wire name. A refused request
-/// answers the status and JSON-RPC body [`refusal`] renders; a notification
-/// that passes answers `None`, like [`dispatch`].
+/// `get` reads one header value by its lowercase wire name. A removed method is
+/// answered here rather than refused, so the transport maps its `-32601` to its
+/// own not-found answer. Any other refused request answers the status and
+/// JSON-RPC body [`refusal`] renders; a notification on the admitted path
+/// answers `None`, like [`dispatch`].
 ///
 /// # Errors
 /// The request fails one admission check. The refusal names the header that
@@ -126,6 +125,9 @@ where
         let err = RpcError::new(ERR_PARSE, "Parse error: invalid JSON");
         return Err(refusal(&Value::Null, &err));
     };
+    if let Some(answer) = removed_method_answer(&body) {
+        return Ok(Some(answer));
+    }
     let declared = get(PROTOCOL_VERSION_HEADER)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| missing_version_header(&body))?;
@@ -164,20 +166,50 @@ where
     Ok(dispatch(state, &body))
 }
 
-/// Admit one candidate frame on a transport with no header layer.
+/// Admit one frame on a transport with no header layer.
 ///
 /// The stdio transport has no headers, so there is nothing to compare. The
 /// frame is parsed and then answered through [`dispatch`], which applies the
-/// same required-metadata, supported-revision, and client-capability rules the
-/// HTTP admission applies after its header checks. A frame that is not JSON
-/// answers the JSON-RPC parse error.
-#[cfg(test)]
+/// same removed-method, supported-revision, and client-capability rules the
+/// HTTP admission applies after its header checks, and the required-metadata
+/// rule to every message carrying an `id`. The two transports differ in one
+/// place: [`dispatch`] answers a message without an `id` before it reads that
+/// message's metadata, while the HTTP admission reads the metadata of every
+/// body it parses, so a notification with no `_meta` is silent here and
+/// refused as invalid params there. A frame that is not JSON answers the
+/// JSON-RPC parse error.
 pub(crate) fn admit_stdio(state: &McpState, frame: &str) -> Option<Value> {
     let Ok(body) = serde_json::from_str::<Value>(frame) else {
         let err = RpcError::new(ERR_PARSE, "Parse error: invalid JSON");
         return Some(error_response(None, &err));
     };
     dispatch(state, &body)
+}
+
+/// Answer a removed method, or `None` for any other message.
+///
+/// The rule runs before the metadata, revision, and capability rules on both
+/// transports, in the HTTP admission and in [`dispatch`], so a removed method
+/// is unknown whether or not the request carries `_meta`. A message without an
+/// `id` is a notification and stays unanswered.
+#[must_use]
+fn removed_method_answer(msg: &Value) -> Option<Value> {
+    let id = msg.get("id")?;
+    let method = msg.get("method").and_then(Value::as_str)?;
+    REMOVED_METHODS
+        .contains(&method)
+        .then(|| not_found(id, method))
+}
+
+/// The one answer for a method this revision does not serve.
+#[must_use]
+fn not_found(id: &Value, method: &str) -> Value {
+    reject(
+        id,
+        ERR_METHOD_NOT_FOUND,
+        format!("method `{method}` not found"),
+        None,
+    )
 }
 
 /// The refusal for a request whose version header is absent or empty.
@@ -201,13 +233,8 @@ pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
     };
     // A removed method is answered before any metadata rule: it is unknown
     // whether or not the request carries `_meta`.
-    if REMOVED_METHODS.contains(&method) {
-        return Some(reject(
-            id,
-            ERR_METHOD_NOT_FOUND,
-            format!("method `{method}` not found"),
-            None,
-        ));
+    if let Some(answer) = removed_method_answer(msg) {
+        return Some(answer);
     }
     let (capabilities, requested) = match request_meta(msg) {
         Ok(meta) => meta,
@@ -250,12 +277,7 @@ pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
             None,
         ),
         "tools/call" => delegate(id, state, msg),
-        other => reject(
-            id,
-            ERR_METHOD_NOT_FOUND,
-            format!("method `{other}` not found"),
-            None,
-        ),
+        other => not_found(id, other),
     })
 }
 

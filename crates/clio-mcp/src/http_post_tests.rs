@@ -3,114 +3,109 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the unit tests of the POST dispatch
-//! strategies: the active transport's answer through the pinned protocol entry
-//! point, the session identifier its `initialize` answer carries, and the
-//! request-scoped state a bound request runs against.
+//! This module is responsible for the unit tests of the POST dispatch strategy
+//! and the request-scoped state a bound request runs against.
 //!
 //! ## Owns
-//! - Every assertion about `LivePost`, its notification and session branches,
-//!   and `scoped_state`
+//! - The strategy trait's notification, refused-method, and served branches
+//! - `scoped_state` and the principal it carries
 //!
 //! ## Does not own
 //! - The strategy trait or the route gates (see `http_post` and `http`)
-//! - The candidate strategy (see `http_candidate`)
+//! - The stateless admission the strategy calls (see `stateless`)
 //!
 //! ## Boundary
 //!
-//! Changes to how the active transport answers one admitted POST should
-//! normally require changes here. Changes to a gate or a tool should not.
+//! Changes to how the transport answers one admitted POST should normally
+//! require changes here. Changes to a gate or a tool should not.
 
 use super::*;
+use crate::http_candidate::CandidatePost;
 use crate::principal::Principal;
 use crate::runtime::McpOpenOptions;
 use clio_types::Actor;
 use serde_json::json;
-use std::collections::HashMap;
 
 /// A fresh runtime state for one test.
 fn state() -> Arc<McpState> {
     McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state")
 }
 
-/// One parsed request carrying `body`.
-fn request(body: &str) -> HttpRequest {
+/// One parsed request carrying `body` and `headers`.
+fn request(body: &str, headers: &[(&str, &str)]) -> HttpRequest {
     HttpRequest {
         method: "POST".into(),
         path: "/mcp".into(),
-        headers: HashMap::new(),
+        headers: headers
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect(),
         body: body.into(),
     }
 }
 
-#[test]
-fn live_post_answers_the_pinned_protocol_entry_point() {
-    let state = state();
-    let handler = Arc::new(McpHandler::new(Arc::clone(&state)));
-    let cfg = HttpConfig::default();
-    let shared = HttpShared::default();
-    let req = request(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
-    let (status, body, extra) = LivePost.respond(PostContext {
-        handler: &handler,
-        state: &state,
-        cfg: &cfg,
-        shared: &shared,
-        req: &req,
-        identity: None,
-        request_method: "tools/list",
-    });
-    assert_eq!(status, 200);
-    let value: serde_json::Value = serde_json::from_str(&body).expect("a JSON answer");
-    assert!(value["result"].is_object(), "{value}");
-    assert!(extra.is_empty(), "no session is minted for `tools/list`");
+/// The headers a well-formed stateless request carries.
+fn stateless_headers() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("mcp-method", "tools/list"),
+        ("mcp-protocol-version", crate::MCP_PROTOCOL_REVISION),
+    ]
 }
 
 #[test]
-fn live_post_answers_a_notification_with_202_and_no_body() {
+fn a_notification_is_answered_with_202_and_no_body() {
     let state = state();
-    let handler = Arc::new(McpHandler::new(Arc::clone(&state)));
-    let cfg = HttpConfig::default();
-    let shared = HttpShared::default();
-    let req = request(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
-    let (status, body, extra) = LivePost.respond(PostContext {
-        handler: &handler,
+    let req = request(
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
+        &[
+            ("mcp-method", "notifications/initialized"),
+            ("mcp-protocol-version", crate::MCP_PROTOCOL_REVISION),
+        ],
+    );
+    let (status, body, extra) = CandidatePost.respond(PostContext {
         state: &state,
-        cfg: &cfg,
-        shared: &shared,
         req: &req,
-        identity: None,
-        request_method: "notifications/initialized",
     });
     assert_eq!(status, 202);
     assert!(body.is_empty(), "{body}");
-    assert_eq!(extra, Vec::new(), "a notification mints no session");
+    assert!(extra.is_empty(), "no header is answered with a body alone");
 }
 
 #[test]
-fn live_post_mints_a_session_for_initialize() {
+fn a_removed_method_is_answered_with_404() {
     let state = state();
-    let handler = Arc::new(McpHandler::new(Arc::clone(&state)));
-    let cfg = HttpConfig {
-        sessions_enabled: true,
-        ..HttpConfig::default()
-    };
-    let shared = HttpShared::default();
     let req = request(
-        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"ping","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
+        &[
+            ("mcp-method", "ping"),
+            ("mcp-protocol-version", crate::MCP_PROTOCOL_REVISION),
+        ],
     );
-    let (status, _body, extra) = LivePost.respond(PostContext {
-        handler: &handler,
+    let (status, body, extra) = CandidatePost.respond(PostContext {
         state: &state,
-        cfg: &cfg,
-        shared: &shared,
         req: &req,
-        identity: Some("fixture"),
-        request_method: "initialize",
     });
-    assert_eq!(status, 200);
-    assert_eq!(extra.len(), 1, "{extra:?}");
-    assert_eq!(extra[0].0, "MCP-Session-Id");
-    assert!(shared.is_live(&extra[0].1, Some("fixture")));
+    assert_eq!(status, 404, "{body}");
+    let value: serde_json::Value = serde_json::from_str(&body).expect("a JSON answer");
+    assert_eq!(value["error"]["code"], json!(-32601), "{value}");
+    assert!(extra.is_empty(), "{extra:?}");
+}
+
+#[test]
+fn a_stateless_listing_is_served_with_200() {
+    let state = state();
+    let req = request(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
+        &stateless_headers(),
+    );
+    let (status, body, extra) = CandidatePost.respond(PostContext {
+        state: &state,
+        req: &req,
+    });
+    assert_eq!(status, 200, "{body}");
+    let value: serde_json::Value = serde_json::from_str(&body).expect("a JSON answer");
+    assert!(value["result"]["tools"].is_array(), "{value}");
+    assert!(extra.is_empty(), "{extra:?}");
 }
 
 #[test]

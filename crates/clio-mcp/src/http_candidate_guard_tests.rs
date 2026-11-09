@@ -173,6 +173,21 @@ fn http_removed_methods_are_refused() {
 }
 
 #[test]
+fn http_bare_removed_methods_answer_not_found_before_the_metadata_rule() {
+    let port = spawn_candidate();
+    for method in ["initialize", "ping"] {
+        let frame = json!({
+            "jsonrpc": "2.0", "id": 1, "method": method,
+            "params": { "protocolVersion": "2025-11-25" }
+        });
+        let response = post(port, &frame, &format!("Mcp-Method: {method}\r\n"));
+        let answer = body(&response);
+        check_removed_method_refusal(response.status, &answer, method)
+            .unwrap_or_else(|error| panic!("{method}: {error}"));
+    }
+}
+
+#[test]
 fn a_successful_response_to_a_removed_method_fails_the_candidate_check() {
     let synthetic_success = json!({
         "jsonrpc": "2.0", "id": 7,

@@ -251,8 +251,7 @@ pub(crate) fn mcp_stdio_serve<R: std::io::BufRead, W: std::io::Write>(
             // Background index drain: drains the durable outbox off the
             // response path (post-write nudge + periodic sweep for retries).
             let _sweeper = state.spawn_index_sweeper();
-            let handler = clio_mcp::protocol::McpHandler::new(state);
-            match clio_mcp::stdio::serve(&handler, input, output) {
+            match clio_mcp::stdio::serve(&state, input, output) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("mcp stdio error: {e}");
@@ -278,9 +277,6 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
         Ok(flags) => flags,
         Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
     };
-    if let Err(error) = refuse_sessions_value(&flags) {
-        return crate::cli_top_level::report_surface_usage_error(&error, &collected);
-    }
     let tool_groups = match crate::mcp_tools_flag::selection(&flags) {
         Ok(groups) => groups,
         Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
@@ -393,7 +389,6 @@ pub(crate) fn http_config(
     flags: &std::collections::HashMap<String, String>,
 ) -> clio_mcp::http::HttpConfig {
     clio_mcp::http::HttpConfig {
-        sessions_enabled: flags.contains_key("sessions"),
         insecure_no_auth: flags
             .get("insecure-no-auth")
             .is_some_and(|value| value == "true"),
@@ -404,22 +399,6 @@ pub(crate) fn http_config(
     }
 }
 
-/// `--sessions` is a switch. Bare, it turns sessions on. With a value
-/// (`--sessions=false`, or a token taken as `--sessions extra`) the value is
-/// not what the caller meant, and sessions would still turn on, so it fails
-/// closed instead.
-fn refuse_sessions_value(
-    flags: &std::collections::HashMap<String, String>,
-) -> Result<(), crate::cli_error::CliError> {
-    match flags.get("sessions") {
-        Some(value) if value != "true" => Err(crate::cli_error::CliError::usage_hint(
-            "--sessions takes no value",
-            "pass --sessions alone to turn sessions on, or leave it out",
-        )),
-        _ => Ok(()),
-    }
-}
-
 #[cfg(test)]
 #[path = "mcp_cli_tests.rs"]
 pub(crate) mod tests;
@@ -427,10 +406,6 @@ pub(crate) mod tests;
 #[cfg(test)]
 #[path = "mcp_cli_dispatch_tests.rs"]
 mod dispatch_tests;
-
-#[cfg(test)]
-#[path = "mcp_cli_sessions_tests.rs"]
-mod sessions_tests;
 
 #[cfg(test)]
 #[path = "mcp_cli_insecure_tests.rs"]
