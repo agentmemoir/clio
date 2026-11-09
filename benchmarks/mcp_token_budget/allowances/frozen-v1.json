@@ -59,6 +59,15 @@
       "candidate_sha256": "1b0dffa5fe5fb0ae24a1457a922230ffe5b56196cd1968b977fe5e9a703fcfc0",
       "max_bytes": 139786,
       "max_tokens": 29871
+    },
+    {
+      "decision_id": "mcp-flattened-pack-shape-2026-11-09",
+      "date": "2026-11-09",
+      "reason": "The build now ships the flattened pack shape because the shape probe could not run on the baseline capture, which holds no shared schema reference to observe. Inlining every local reference grows the canonical tools array to 140559 bytes and 30004 cl100k_base tokens, and this record covers the new candidate digest at exactly the measured size.",
+      "base_commit": "2586d7f35e6d7cb35dbe321125f4731e55ad1ab5",
+      "candidate_sha256": "f9820131ad2b5f698e08280d0cf5f6226c2aa5e35258a27568d4fb172f592764",
+      "max_bytes": 140559,
+      "max_tokens": 30004
     }
   ]
 }

@@ -1,0 +1,56 @@
+{
+  "format": "clio_mcp_pack_shape",
+  "format_version": 1,
+  "record_id": "pack-shape-v1",
+  "probe": {
+    "status": "not_run",
+    "reason": "the baseline-captured payload holds no shared schema reference, so client support for shared schema references is unobserved",
+    "receipt_id": "pack-shape-probe-bf68dea714b90dbe-not_run",
+    "client": {
+      "fixture": "benchmarks/mcp_token_budget/baseline/clients/eager_all_defs.json",
+      "name": "synthetic-eager-client",
+      "version": "1.0.0",
+      "sha256": "bf68dea714b90dbe52e3e361652da14af89f32a6b7dea5d17362aebff12418d8",
+      "provenance": "synthetic-mock",
+      "fixture_version": 1
+    },
+    "refs_observed": 0,
+    "defs_observed": 0,
+    "unresolved_refs": 0,
+    "fixtures_examined": [
+      {
+        "fixture": "benchmarks/mcp_token_budget/baseline/clients/eager_all_defs.json",
+        "refs_observed": 0,
+        "defs_observed": 0,
+        "unresolved_refs": 0
+      },
+      {
+        "fixture": "benchmarks/mcp_token_budget/baseline/clients/on_demand_deferred.json",
+        "refs_observed": 0,
+        "defs_observed": 0,
+        "unresolved_refs": 0
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "shape": "reference",
+      "path": "crates/clio-mcp/tests/fixtures/schema_pack_reference.json",
+      "sha256": "1b0dffa5fe5fb0ae24a1457a922230ffe5b56196cd1968b977fe5e9a703fcfc0",
+      "bytes": 139786,
+      "tokens": 29871
+    },
+    {
+      "shape": "flattened",
+      "path": "crates/clio-mcp/tests/fixtures/schema_pack.json",
+      "sha256": "f9820131ad2b5f698e08280d0cf5f6226c2aa5e35258a27568d4fb172f592764",
+      "bytes": 140559,
+      "tokens": 30004
+    }
+  ],
+  "shipped": {
+    "shape": "flattened",
+    "path": "crates/clio-mcp/tests/fixtures/schema_pack.json",
+    "sha256": "f9820131ad2b5f698e08280d0cf5f6226c2aa5e35258a27568d4fb172f592764"
+  }
+}

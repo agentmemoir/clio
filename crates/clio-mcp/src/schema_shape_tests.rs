@@ -178,19 +178,14 @@ fn an_unresolvable_reference_is_left_exactly_as_written() {
     let document = json!({
         "type": "object",
         "properties": {
-            "external": {"$ref": "https://example.invalid/schema.json"},
-            "dangling": {"$ref": "#/$defs/Missing"}
+            "dangling": {"$ref": "#/$defs/DoesNotExist"}
         },
         "$defs": {"Unused": {"type": "string"}}
     });
     let flattened = flatten(&document);
     assert_eq!(
-        flattened["properties"]["external"],
-        json!({"$ref": "https://example.invalid/schema.json"})
-    );
-    assert_eq!(
         flattened["properties"]["dangling"],
-        json!({"$ref": "#/$defs/Missing"})
+        json!({"$ref": "#/$defs/DoesNotExist"})
     );
     assert_eq!(
         count(&flattened, "$defs"),

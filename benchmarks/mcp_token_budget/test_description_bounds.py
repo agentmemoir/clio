@@ -34,7 +34,7 @@ SCHEMA_RS = REPO / "crates" / "clio-mcp" / "src" / "schema.rs"
 SHORT = "Short sentence."
 SCOPE_SIZE = 186
 NESTED = {"tool": "admit_preview_batch", "path": [
-    "inputSchema", "$defs", "AdmissionCandidate", "properties",
+    "inputSchema", "properties", "items", "items", "properties",
     "allow_duplicate", "description",
 ]}
 
@@ -201,7 +201,7 @@ class BoundTests(unittest.TestCase):
         for part in ("retrieve.provenance_floor", "121", "120", "25"):
             self.assertIn(part, message)
 
-    def test_a_nested_defs_description_is_measured_and_named(self):
+    def test_a_nested_inline_description_is_measured_and_named(self):
         report = description_bounds.check(
             grown_pack(NESTED, "x" * 121), require_tokenizer()
         )
@@ -209,7 +209,7 @@ class BoundTests(unittest.TestCase):
         breach = report["breaches"][0]
         self.assertEqual(
             breach["location"],
-            "admit_preview_batch.$defs.AdmissionCandidate.allow_duplicate",
+            "admit_preview_batch.items.items.allow_duplicate",
         )
 
     def test_a_description_grown_past_25_tokens_fails(self):

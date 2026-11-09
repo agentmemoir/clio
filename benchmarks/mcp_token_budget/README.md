@@ -97,3 +97,13 @@ An allowance record carries a stable `decision_id`, the `date` the decision was 
 Chosen values land in the decisions record: [`decisions/frozen-v1.json`](decisions/frozen-v1.json) holds the ordered records that `budget_decisions.py` validates, and each one names the preset, the bytes and tokens chosen for it, the `reason` for choosing that size, and the frozen presets row the value is derived from, so a chosen number is traceable to a measurement instead of being stated on trust. The exception is the target factor decision: [`targets/frozen-v1.json`](targets/frozen-v1.json) keeps its `factor_decision` labelled `Decision` because every target must match it, so that one is gate arithmetic and stays in the target record. A Decision is never a measurement and never a gate input, so no chosen value can loosen or tighten a budget check. The record names the measured `base_commit` it was derived on, while git history supplies the commit it lands in, because a record that named its own landing commit would go stale the moment it moved.
 
 Keeping the measurement and the judgement apart is deliberate, and it still holds inside the one check: `measure.py` prints the rows for a human or a review and carries no threshold, while the judgement lives in `budget_check.py` against the pinned digest, so a measurement that can be argued with stays trustworthy and a threshold can move later without re-deriving how the number was produced.
+
+## Pack shape
+
+`probe_pack_shape.py` reads the client captures the frozen baseline names, inspects their payloads for shared schema references — local `#/...` `$ref` pointers and the `$defs` objects they resolve against — and prints one receipt saying what it observed and no more.
+
+The receipt carries one of three statuses: `passed` when at least one local `$ref` is present and every target resolves inside the capture, `failed` when a local `$ref` does not resolve, and `not_run` when the capture holds no local `$ref` and no `$defs`, so there is nothing to observe and the client's support is unobserved.
+
+An unrun probe ships the flattened pack, exactly as a failed one does: only an observed pass ships the reference pack, because an unobserved client is never evidence of support.
+
+`pack_shape.py` measures both candidate packs with the same canonical tools serialization, digest, and pinned offline tokenizer the gate uses, then records the choice once in [`pack_shape.json`](pack_shape.json) — the probe receipt, both candidate measurements, and the shipped shape with its digest, which the crate's own one-shape constant must agree with.
