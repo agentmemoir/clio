@@ -25,7 +25,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::http_test_support_tests::{INIT, post_json, spawn_server};
+use super::http_test_support_tests::{post_served, spawn_server};
 use super::*;
 use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};
 use clio_types::Actor;
@@ -68,7 +68,7 @@ fn insecure_no_auth_restores_the_unauthenticated_loopback_server() {
         insecure_no_auth: true,
         ..HttpConfig::default()
     });
-    assert_eq!(post_json(port, INIT, "").status, 200);
+    assert_eq!(post_served(port, "server/discover", "").status, 200);
 }
 
 /// With both `--insecure-no-auth` and a credential store, the store still
@@ -90,13 +90,13 @@ fn insecure_no_auth_with_a_credential_store_still_requires_the_credential() {
         ..HttpConfig::default()
     });
     assert_eq!(
-        post_json(port, INIT, "").status,
+        post_served(port, "server/discover", "").status,
         401,
         "a request with no credential is refused even under the opt-out"
     );
     let auth = format!("Authorization: Bearer {secret}\r\n");
     assert_eq!(
-        post_json(port, INIT, &auth).status,
+        post_served(port, "server/discover", &auth).status,
         200,
         "the store's own credential is accepted"
     );

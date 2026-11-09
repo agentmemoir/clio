@@ -106,27 +106,41 @@ fn assert_compact_json(line: &str) {
     assert!(!in_string && !escaped, "unterminated JSON string: {line:?}");
 }
 
+/// The request metadata the stateless revision requires on every request.
+fn meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": crate::MCP_PROTOCOL_REVISION,
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
+}
+
 fn frames() -> String {
-    let init = json!({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {"protocolVersion": "2025-11-25", "capabilities": {}}
+    let discover = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+        "params": {"_meta": meta()}
     });
-    let list = json!({"jsonrpc":"2.0","id":2,"method":"tools/list"});
+    let list = json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/list",
+        "params": {"_meta": meta()}
+    });
     let store = json!({
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": "store", "arguments": {
+        "params": {"_meta": meta(), "name": "store", "arguments": {
             "item": {"id": "itm-s1", "subject_id": "subj-s1", "gist": "prefers terse answers"},
             "category": "persona", "epistemic_kind": "fact",
             "bank": "bank-a"
         }}
     });
-    let notify = json!({"jsonrpc":"2.0","method":"notifications/initialized"});
+    let notify = json!({
+        "jsonrpc": "2.0", "method": "notifications/initialized",
+        "params": {"_meta": meta()}
+    });
     let empty_line = "";
-    format!("{init}\n{list}\n{notify}\n{empty_line}\n{store}\n")
+    format!("{discover}\n{list}\n{notify}\n{empty_line}\n{store}\n")
 }
 
 #[test]
-fn t04_stdio_session_flows_end_to_end() {
+fn t04_stdio_discovery_listing_and_call_end_to_end() {
     let state = crate::runtime::McpState::open_with_effective(
         &McpOpenOptions::default(),
         &serde_json::json!({}),
@@ -147,8 +161,11 @@ fn t04_stdio_session_flows_end_to_end() {
         let v: Value = serde_json::from_str(line).expect("valid single-line JSON");
         assert_eq!(v["jsonrpc"], json!("2.0"));
     }
-    let init: Value = serde_json::from_str(lines[0]).expect("init");
-    assert_eq!(init["result"]["protocolVersion"], json!("2025-11-25"));
+    let discover: Value = serde_json::from_str(lines[0]).expect("discover");
+    assert_eq!(
+        discover["result"]["supportedVersions"],
+        json!([crate::MCP_PROTOCOL_REVISION])
+    );
     let list: Value = serde_json::from_str(lines[1]).expect("list");
     assert!(list["result"]["tools"].as_array().is_some());
     let store: Value = serde_json::from_str(lines[2]).expect("store");
@@ -198,7 +215,7 @@ fn stdio_store_retrieve_end_to_end() {
     let item_id = "itm-stdio-e2e";
     let store = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": "store", "arguments": {
+        "params": {"_meta": meta(), "name": "store", "arguments": {
             "item": {
                 "id": item_id,
                 "subject_id": item_id,
@@ -219,7 +236,7 @@ fn stdio_store_retrieve_end_to_end() {
     });
     let retrieve = json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "retrieve", "arguments": {
+        "params": {"_meta": meta(), "name": "retrieve", "arguments": {
             "bank": "bank-a",
             "query": "terse answers",
             "limit": 5
@@ -280,20 +297,20 @@ fn stdio_retrieve_rejects_wrongly_typed_optional_arguments() {
         McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
     let store = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": "store", "arguments": {
+        "params": {"_meta": meta(), "name": "store", "arguments": {
             "item": {"gist": "prefers terse answers"},
             "category": "persona", "epistemic_kind": "fact", "bank": "repro-bank"
         }}
     });
     let bad_limit = json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "retrieve", "arguments": {
+        "params": {"_meta": meta(), "name": "retrieve", "arguments": {
             "bank": "repro-bank", "query": "terse", "limit": "1"
         }}
     });
     let bad_anchor = json!({
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": "retrieve", "arguments": {
+        "params": {"_meta": meta(), "name": "retrieve", "arguments": {
             "bank": "repro-bank", "query": "terse", "query_anchor": 5
         }}
     });

@@ -1,10 +1,12 @@
 // Copyright 2026 Agent Memoir (https://agentmemoir.com/)
 // SPDX-License-Identifier: Apache-2.0
 //
-//! Streamable HTTP transport tests: security baselines,
-//! session lifecycle, initialize/tools/call end to end.
+//! Streamable HTTP transport tests: the request gates, the stateless
+//! admission, and discovery/tools/call end to end.
 
-use super::http_test_support_tests::{INIT, post_json, request, spawn_server};
+use super::http_test_support_tests::{
+    admission, post_admitted, post_call, post_served, request, served_body, spawn_server,
+};
 use super::*;
 use crate::conn_pool::MAX_CONNECTIONS;
 use crate::http_guard::origin_host_allowed;
@@ -25,25 +27,49 @@ fn single_record_store() -> CredentialStore {
     }])
 }
 
+/// The revision this server serves is discoverable rather than negotiated:
+/// `initialize` was removed from the revision, so a client that still opens
+/// with it is answered as an unknown method.
 #[test]
 fn t06_initialize_returns_pinned_revision() {
     let (port, _) = spawn_server(HttpConfig::default());
-    let res = post_json(port, INIT, "");
+    let res = post_served(port, "server/discover", "");
     assert_eq!(res.status, 200);
     let body: Value = serde_json::from_str(&res.body).expect("json");
     assert_eq!(
-        body["result"]["protocolVersion"],
-        json!(crate::MCP_PROTOCOL_REVISION)
+        body["result"]["supportedVersions"],
+        json!([crate::MCP_PROTOCOL_REVISION])
     );
-    assert_eq!(body["result"]["serverInfo"]["name"], json!("clio-mcp"));
+    assert_eq!(
+        body["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+        json!("clio-mcp")
+    );
+    let removed = post_admitted(port, "initialize", &initialize_frame(), "");
+    assert_eq!(removed.status, 404, "a removed method is not served");
+    let body: Value = serde_json::from_str(&removed.body).expect("json");
+    assert_eq!(body["error"]["code"], json!(-32601));
+}
+
+/// A client still opening with `initialize` sends the retired handshake's
+/// parameters; the body is built here so the refusal is about the method.
+fn initialize_frame() -> String {
+    serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {
+            "_meta": crate::stateless_fixtures::required_meta(crate::MCP_PROTOCOL_REVISION),
+            "protocolVersion": crate::MCP_PROTOCOL_REVISION,
+            "capabilities": {}
+        }
+    })
+    .to_string()
 }
 
 #[test]
 fn t08_bad_origin_is_403() {
     let (port, _) = spawn_server(HttpConfig::default());
-    let res = post_json(port, INIT, "Origin: http://evil.example.com\r\n");
+    let res = post_served(port, "server/discover", "Origin: http://evil.example.com\r\n");
     assert_eq!(res.status, 403);
-    let ok = post_json(port, INIT, "Origin: http://localhost:5173\r\n");
+    let ok = post_served(port, "server/discover", "Origin: http://localhost:5173\r\n");
     assert_eq!(ok.status, 200);
 }
 
@@ -53,11 +79,15 @@ fn t09_missing_auth_rejected_when_a_store_record_is_configured() {
         credentials: Some(Arc::new(single_record_store())),
         ..HttpConfig::default()
     });
-    let no_auth = post_json(port, INIT, "");
+    let no_auth = post_served(port, "server/discover", "");
     assert_eq!(no_auth.status, 401);
-    let wrong = post_json(port, INIT, "Authorization: Bearer nope\r\n");
+    let wrong = post_served(port, "server/discover", "Authorization: Bearer nope\r\n");
     assert_eq!(wrong.status, 401);
-    let good = post_json(port, INIT, "Authorization: Bearer secret-token\r\n");
+    let good = post_served(
+        port,
+        "server/discover",
+        "Authorization: Bearer secret-token\r\n",
+    );
     assert_eq!(good.status, 200);
 }
 
@@ -110,7 +140,7 @@ fn non_loopback_with_both_opt_outs_serves_unauthenticated() {
     std::thread::spawn(move || {
         let _ = serve_with_listener(state, cfg, listener);
     });
-    let res = post_json(port, INIT, "");
+    let res = post_served(port, "server/discover", "");
     assert_eq!(
         res.status, 200,
         "both opt-outs admit the bind: {}",
@@ -123,14 +153,16 @@ fn get_sse_and_wrong_paths() {
     let (port, _) = spawn_server(HttpConfig::default());
     let get = request(port, "GET /mcp HTTP/1.1\r\nHost: localhost\r\n\r\n");
     assert_eq!(get.status, 405, "GET SSE not offered under this pin");
-    let miss = post_json(port, INIT, "");
+    let miss = post_served(port, "server/discover", "");
     assert_eq!(miss.status, 200);
+    let body = served_body("server/discover");
     let wrong_path = request(
         port,
         &format!(
-            "POST /other HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\n\r\n{}",
-            INIT.len(),
-            INIT
+            "POST /other HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\n{}\r\n{}",
+            body.len(),
+            admission("server/discover"),
+            body
         ),
     );
     assert_eq!(wrong_path.status, 404);
@@ -139,10 +171,13 @@ fn get_sse_and_wrong_paths() {
 #[test]
 fn tools_call_end_to_end_over_http() {
     let (port, _) = spawn_server(HttpConfig::default());
-    post_json(port, INIT, "");
-    let call = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"triple_add","arguments":{"subject":"a","predicate":"b","object":"c","epistemic_kind":"fact","bank":"bank-a"}}}"#;
-    let res = post_json(port, call, "");
-    assert_eq!(res.status, 200);
+    let res = post_call(
+        port,
+        "triple_add",
+        r#"{"subject":"a","predicate":"b","object":"c","epistemic_kind":"fact","bank":"bank-a"}"#,
+        "",
+    );
+    assert_eq!(res.status, 200, "{}", res.body);
     let body: Value = serde_json::from_str(&res.body).expect("json");
     let result = &body["result"];
     assert_eq!(result["isError"], json!(false));
@@ -152,24 +187,28 @@ fn tools_call_end_to_end_over_http() {
 #[test]
 fn notification_post_returns_202() {
     let (port, _) = spawn_server(HttpConfig::default());
-    let res = post_json(
-        port,
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
-        "",
+    // A notification carries the required metadata like any other request, and
+    // is still answered with an empty 202.
+    let notification = format!(
+        r#"{{"jsonrpc":"2.0","method":"notifications/initialized","params":{{"_meta":{}}}}}"#,
+        crate::stateless_fixtures::required_meta(crate::MCP_PROTOCOL_REVISION)
     );
-    assert_eq!(res.status, 202);
+    let res = post_admitted(port, "notifications/initialized", &notification, "");
+    assert_eq!(res.status, 202, "{}", res.body);
     assert!(res.body.is_empty(), "{:?}", res.body);
 }
 
 #[test]
 fn wrong_content_type_is_415() {
     let (port, _) = spawn_server(HttpConfig::default());
+    let body = served_body("server/discover");
     let res = request(
         port,
         &format!(
-            "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: text/plain\r\nAccept: application/json\r\nContent-Length: {}\r\n\r\n{}",
-            INIT.len(),
-            INIT
+            "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: text/plain\r\nAccept: application/json\r\nContent-Length: {}\r\n{}\r\n{}",
+            body.len(),
+            admission("server/discover"),
+            body
         ),
     );
     assert_eq!(res.status, 415);
@@ -182,13 +221,16 @@ fn wrong_content_type_is_415() {
 #[test]
 fn unacceptable_accept_is_406_and_unserved_methods_are_405() {
     let (port, _) = spawn_server(HttpConfig::default());
+    let body = served_body("server/discover");
     let with_accept = |method: &str, accept: &str| {
         request(
             port,
             &format!(
                 "{method} /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
-                 Accept: {accept}\r\nContent-Length: {}\r\n\r\n{INIT}",
-                INIT.len()
+                 Accept: {accept}\r\nContent-Length: {}\r\n{}\r\n{}",
+                body.len(),
+                admission("server/discover"),
+                body
             ),
         )
     };
@@ -280,12 +322,12 @@ fn serve_with_listener_accepts_real_connections() {
     std::thread::spawn(move || {
         let _ = serve_with_listener(state, cfg, listener);
     });
-    let res = post_json(port, INIT, "");
+    let res = post_served(port, "server/discover", "");
     assert_eq!(res.status, 200);
     let body: Value = serde_json::from_str(&res.body).expect("json");
     assert_eq!(
-        body["result"]["protocolVersion"],
-        json!(crate::MCP_PROTOCOL_REVISION)
+        body["result"]["supportedVersions"],
+        json!([crate::MCP_PROTOCOL_REVISION])
     );
 }
 
@@ -302,89 +344,4 @@ fn resource_bounds_are_pinned_to_the_recorded_values() {
     assert_eq!(MAX_HEAD_BYTES, 64 * 1024, "64 KiB head cap");
     assert_eq!(DEFAULT_DEADLINE_SECS, 30, "30 s total request deadline");
     assert_eq!(MAX_CONNECTIONS, 32, "32 concurrent-connection cap");
-}
-
-/// Transport parity for the retention tools: the same `tools/call` returns the
-/// same `structuredContent` over stdio and Streamable HTTP.
-#[test]
-fn retention_tools_parity_stdio_vs_http() {
-    let batch = json!({
-        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "admit_preview_batch", "arguments": {
-            "bank": "bank-a",
-            "items": [
-                {"item": {"id": "p1", "gist": "must require decision"}, "episodic_type": "gist", "epistemic_kind": "fact"},
-                {"item": {"id": "p2", "gist": "ok"}, "episodic_type": "gist", "epistemic_kind": "fact"}
-            ]
-        }}
-    })
-    .to_string();
-    let profile = json!({
-        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": "retention_profile_get", "arguments": {"bank": "bank-a"}}
-    })
-    .to_string();
-
-    // stdio transport over the shared handler.
-    let stdio_state =
-        McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-            .expect("state");
-    let frames = format!("{batch}\n{profile}\n");
-    let mut out: Vec<u8> = Vec::new();
-    crate::stdio::serve(
-        &stdio_state,
-        std::io::Cursor::new(frames.into_bytes()),
-        &mut out,
-    )
-    .expect("serve");
-    let stdio: Vec<Value> = String::from_utf8(out)
-        .expect("utf8")
-        .lines()
-        .map(|l| serde_json::from_str(l).expect("json"))
-        .collect();
-    assert_eq!(stdio.len(), 2);
-
-    // Streamable HTTP transport.
-    let (port, _) = spawn_server(HttpConfig::default());
-    let http_batch: Value = serde_json::from_str(&post_json(port, &batch, "").body).expect("json");
-    let http_profile: Value =
-        serde_json::from_str(&post_json(port, &profile, "").body).expect("json");
-
-    assert_eq!(
-        stdio[0]["result"]["structuredContent"],
-        http_batch["result"]["structuredContent"]
-    );
-    assert_eq!(
-        stdio[1]["result"]["structuredContent"],
-        http_profile["result"]["structuredContent"]
-    );
-    assert!(
-        http_batch["result"]["structuredContent"]["summary"]["would_admit"]
-            .as_u64()
-            .is_some()
-    );
-
-    // Both transports advertise the selected profile's tools in `tools/list`.
-    let list = r#"{"jsonrpc":"2.0","id":4,"method":"tools/list",
-        "params":{"_meta":{"com.agentmemoir/pageSize":100}}}"#;
-    let http_list: Value = serde_json::from_str(&post_json(port, list, "").body).expect("json");
-    let mut names: Vec<&str> = http_list["result"]["tools"]
-        .as_array()
-        .expect("tools")
-        .iter()
-        .filter_map(|t| t["name"].as_str())
-        .collect();
-    let bound = crate::bound_tools();
-    let mut expected: Vec<&str> = clio_types::DEFAULT_PRESET
-        .tools()
-        .into_iter()
-        .filter(|name| bound.contains(name))
-        .collect();
-    names.sort_unstable();
-    expected.sort_unstable();
-    assert_eq!(names, expected, "the listing follows the selected profile");
-    assert!(
-        !names.contains(&"retention_profile_get"),
-        "a tool outside the profile is not advertised over HTTP"
-    );
 }

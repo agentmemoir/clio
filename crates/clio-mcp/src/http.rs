@@ -401,6 +401,10 @@ fn status_text(status: u16) -> &'static str {
 #[cfg(test)]
 #[path = "http_request_bounds_tests.rs"]
 mod http_request_bounds_tests;
+
+#[cfg(test)]
+#[path = "http_retention_parity_tests.rs"]
+mod http_retention_parity_tests;
 #[cfg(test)]
 #[path = "http_start_auth_tests.rs"]
 mod http_start_auth_tests;

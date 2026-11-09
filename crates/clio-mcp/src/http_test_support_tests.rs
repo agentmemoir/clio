@@ -8,7 +8,9 @@
 //! writing, and response parsing.
 //!
 //! ## Owns
-//! - `spawn_server` (the real `serve_with_listener` accept loop) and `INIT`
+//! - `spawn_server` (the real `serve_with_listener` accept loop)
+//! - The admitted request every transport scenario sends: its body, its
+//!   conditional headers, and the POST helpers that carry both
 //! - `request`, `post_json`, and the `Response` parser
 //!
 //! ## Does not own
@@ -20,7 +22,9 @@
 //! Test-only. Never compiled into production builds.
 
 use super::*;
+use crate::http_candidate_fixtures::{headers as admission_headers, name_headers};
 use crate::runtime::{McpOpenOptions, McpState};
+use crate::stateless_fixtures::{CANDIDATE_FIXTURE_REVISION, request as fixture_request, required_meta};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -97,4 +101,49 @@ pub(crate) fn post_json(port: u16, body: &str, extra: &str) -> Response {
     request(port, &req)
 }
 
-pub(crate) const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"#;
+/// One request body for `method`, carrying the metadata the revision requires
+/// on every request.
+///
+/// The revision comes from the crate's own pin through the shared fixtures, so
+/// a scenario can never sit on a stale one.
+pub(crate) fn served_body(method: &str) -> String {
+    let frame = fixture_request(method, &required_meta(CANDIDATE_FIXTURE_REVISION));
+    serde_json::to_string(&frame).expect("a fixture serializes")
+}
+
+/// The conditional headers the admission requires for `method`, ending the
+/// header block.
+pub(crate) fn admission(method: &str) -> String {
+    admission_headers(method)
+}
+
+/// POST `body` as `method`, with the conditional headers the admission
+/// requires and then `extra`.
+pub(crate) fn post_admitted(port: u16, method: &str, body: &str, extra: &str) -> Response {
+    post_json(port, body, &format!("{}{extra}", admission(method)))
+}
+
+/// POST one admitted request for `method`, carrying no headers beyond the
+/// admission's own and `extra`.
+pub(crate) fn post_served(port: u16, method: &str, extra: &str) -> Response {
+    post_admitted(port, method, &served_body(method), extra)
+}
+
+/// POST one admitted `tools/call` for `name`, with the resource name the
+/// admission compares against the body.
+pub(crate) fn post_call(port: u16, name: &str, arguments: &str, extra: &str) -> Response {
+    let body = format!(
+        r#"{{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{{"_meta":{},"name":"{name}","arguments":{arguments}}}}}"#,
+        required_meta(CANDIDATE_FIXTURE_REVISION)
+    );
+    post_tool_frame(port, name, &body, extra)
+}
+
+/// POST one already-built `tools/call` frame for `name`.
+pub(crate) fn post_tool_frame(port: u16, name: &str, body: &str, extra: &str) -> Response {
+    post_json(
+        port,
+        body,
+        &format!("{}{extra}", name_headers("tools/call", name)),
+    )
+}
