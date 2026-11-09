@@ -164,5 +164,8 @@ where
 }
 
 #[cfg(test)]
+#[path = "conditional_http_event_id_tests.rs"]
+mod conditional_http_event_id_tests;
+#[cfg(test)]
 #[path = "conditional_http_tests.rs"]
 mod conditional_http_tests;
