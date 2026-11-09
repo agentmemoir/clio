@@ -14,10 +14,10 @@ recorded adjustment instead: the record preserves its initial row, factor, and
 target, names the measured candidate, and fixes a final ceiling that is never
 recomputed by a later run.
 
-Nothing here enforces. ``PRESET_TARGETS_ENFORCED`` is False, so a measured value
-above its target is reported as a miss and never changes an exit code; flipping
-that one constant is the whole enforcement change. An adjustment is not an
-exemption: an adjusted preset is still compared with both final ceilings.
+A measured value above its target fails the build: ``PRESET_TARGETS_ENFORCED`` is
+True, so a miss is reported and adds a failure. An adjustment is not an
+exemption: an adjusted preset is still compared with both final ceilings, and it
+fails above its final ceiling.
 
 The record is validated without the tokenizer, so the hermetic job can check it.
 Every error is one line prefixed ``targets:`` and names the rule it broke.
@@ -86,8 +86,8 @@ HEADROOM_FORMULA = "baseline_value - target"
 UNIT_FACTORS = {"tokens": "token_factor", "bytes": "byte_factor"}
 TARGET_LABEL = "Inferred"
 
-#: The one switch. True makes a miss a failure; False only reports it.
-PRESET_TARGETS_ENFORCED = False
+#: The one switch. True makes a preset target miss fail the build; False reports it.
+PRESET_TARGETS_ENFORCED = True
 
 #: Every preset carries both targets; ``all`` carries a recorded final ceiling.
 TARGET_PRESETS = ("minimal", "coding", "ops", "all")

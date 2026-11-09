@@ -98,8 +98,8 @@ class RecordTests(unittest.TestCase):
              for unit in budget_targets.UNITS},
         )
 
-    def test_the_record_is_not_enforcing_yet(self):
-        self.assertFalse(budget_targets.PRESET_TARGETS_ENFORCED)
+    def test_the_record_is_enforced(self):
+        self.assertTrue(budget_targets.PRESET_TARGETS_ENFORCED)
 
     def test_the_wrong_format_or_version_is_refused(self):
         value = document()
@@ -217,13 +217,14 @@ class CompareTests(unittest.TestCase):
         return budget_targets.load(TARGETS)
 
     def test_every_preset_is_compared_and_a_miss_is_reported(self):
-        result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidates())
+        with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", False):
+            result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidates())
         self.assertFalse(result["enforced"])
         self.assertEqual(result["failures"], [])
         self.assertEqual(len(result["comparisons"]), 8)
         self.assertEqual(
             {item["preset"] for item in result["comparisons"]},
-            set(budget_targets.TARGET_PRESETS),
+            {"minimal", "coding", "ops", "all"},
         )
         first = result["comparisons"][0]
         self.assertEqual(

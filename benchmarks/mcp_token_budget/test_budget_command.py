@@ -4,7 +4,7 @@
 The check is driven through `main` on the committed fixture pack, so the document
 the build prints is the one asserted here: both pack arms, the skill truth when
 no path is given, the activated body that is always measured, the per-preset
-targets that are reported but not enforced yet, and every exit code. A test that
+targets that fail the build on a miss, and every exit code. A test that
 measures tokens needs the pinned tokenizer and skips with a named reason when
 tiktoken is absent.
 """
@@ -122,7 +122,7 @@ class CommandTests(unittest.TestCase):
             },
         )
         targets = report["targets"]
-        self.assertFalse(targets["enforced"])
+        self.assertTrue(targets["enforced"])
         self.assertEqual(len(targets["comparisons"]), 8)
         self.assertEqual(
             {item["preset"] for item in targets["comparisons"]},
@@ -145,7 +145,10 @@ class CommandTests(unittest.TestCase):
         with mock.patch.object(
             budget_check.preset_rows, "measure_presets", return_value=measured
         ):
-            code, text = self.run_main(["--pack", str(PACK), "--preset-bin", "clio"])
+            with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", False):
+                code, text = self.run_main(
+                    ["--pack", str(PACK), "--preset-bin", "clio"]
+                )
             self.assertEqual(code, 0, text)
             report = json.loads(text)
             self.assertEqual(report["verdict"], "pass")
@@ -168,7 +171,7 @@ class CommandTests(unittest.TestCase):
             for failure in report["failures"]
             if "'ops'" in failure and "tokens" in failure
         )
-        for expected in ("'ops'", "tokens", "15183", "20000"):
+        for expected in ("'ops'", "tokens", "15183", "20000", "4817", "-4817"):
             self.assertIn(expected, ops_tokens)
 
     def test_every_preset_is_measured(self):
@@ -228,7 +231,7 @@ class CommandTests(unittest.TestCase):
         }
         with mock.patch.object(
             budget_check.preset_rows, "measure_presets", return_value=measured
-        ):
+        ), mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", False):
             code, text = self.run_main(["--pack", str(PACK), "--preset-bin", "clio"])
         self.assertEqual(code, 0, text)
         report = json.loads(text)

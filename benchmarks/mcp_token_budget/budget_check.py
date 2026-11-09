@@ -31,13 +31,13 @@ token growth alone, so a body whose bytes or digest moved without growing its
 count passes and the two digests are reported side by side. That row is read from
 the baseline record the run was given, never from a second read of the file.
 
-The preset targets are reported beside the arms. ``--preset-bin`` names the
+The preset targets are enforced beside the arms. ``--preset-bin`` names the
 built binary that exports every preset for its own live measurement; without it
 the target arm fails closed instead of reusing one measurement for every preset.
-The ``all`` preset carries one explicit recorded final ceiling. The targets are
-not enforced yet, so a target miss appears in the report and leaves the exit
-code alone; a targets file that cannot be trusted is an unusable input, not a
-silent skip.
+The ``all`` preset carries one explicit recorded final ceiling. A target miss
+fails the run and names the preset, the unit, the target, the measured value,
+the excess, and the headroom; a targets file that cannot be trusted is an
+unusable input, not a silent skip.
 
 The whole report is built in memory and written once, so a failure can never leave
 half a document behind. An unusable input exits 2 with ``mcp-budget-check:
@@ -285,9 +285,8 @@ def check_pack(
     caller that passes a changed record sees that change. ``skill`` is the
     comparison returned by `check_skill`, ``activated`` the one returned by
     `activated_budget.check`, and ``targets`` the one returned by
-    `budget_targets.compare`; every preset target is compared, a miss is
-    reported, and the preset targets stay unenforced, while the activated body
-    is reported even when its digest differs. With no activated comparison,
+    `budget_targets.compare`; every preset target is compared and a miss fails
+    the run, while the activated body is reported even when its digest differs. With no activated comparison,
     ``activated_body`` is compared against ``record`` here, and with no body
     either the entry is marked not-measured, never reported as zero.
     When no skill was measured the ``skill`` entry still names both frozen rows

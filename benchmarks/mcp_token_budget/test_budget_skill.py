@@ -391,10 +391,10 @@ class ActivatedBodyTests(unittest.TestCase):
                 item["target"] = item["baseline_value"] // 100
                 item["headroom"] = item["baseline_value"] - item["target"]
         measured = {p: pack_candidate(baseline) for p in budget_targets.TARGET_PRESETS}
-        targets = budget_targets.compare(
-            budget_targets.validate(document), budget_check.baseline_rows(record),
-            measured,
-        )
+        with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", False):
+            targets = budget_targets.compare(
+                budget_targets.validate(document), budget_check.baseline_rows(record),
+                measured)
         report = budget_check.check_pack(
             baseline, pack_candidate(baseline), budget_allowances.NONE, record,
             targets=targets,

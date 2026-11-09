@@ -10,7 +10,7 @@
   "basis": {
     "shared_row": true,
     "per_preset_measurement": false,
-    "reason": "Every preset now carries both targets, each derived from the shared full-surface row. The value is a ceiling on the preset's own live measurement, not a chosen value: per-preset packs are exported by the built binary and measured as candidates on every run. The all preset cannot reach the shared-derived ceiling without removing shipped tools, so it carries one explicit recorded final ceiling in target_adjustment."
+    "reason": "Every preset now carries both targets, each derived from the shared full-surface row. The value is a ceiling on the preset's own live measurement, not a chosen value: per-preset packs are exported by the built binary and measured as candidates on every run. A measured value above its target fails the run. The all preset cannot reach the shared-derived ceiling without removing shipped tools, so it carries one explicit recorded final ceiling in target_adjustment."
   },
   "tokenizer": {
     "encoding": "cl100k_base",
@@ -28,7 +28,7 @@
     "headroom_formula": "baseline_value - target"
   },
   "policy": {
-    "enforced_by": "budget_targets.compare reports every preset target on every run; PRESET_TARGETS_ENFORCED turns a miss into a failure",
+    "enforced_by": "benchmarks/mcp_token_budget/budget_check.py compares every preset target with its own live measurement and fails on a miss; scripts/mcp_budget_check.sh runs it in the CI budget job",
     "missing_baseline_row": "reject",
     "foreign_tokenizer": "reject"
   },
