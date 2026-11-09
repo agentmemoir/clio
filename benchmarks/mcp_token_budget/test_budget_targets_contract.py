@@ -208,6 +208,23 @@ class ContractTests(unittest.TestCase):
             value, "adjustment preset 'all' bytes factor is 80, target row states 99"
         )
 
+    def test_an_adjustment_factor_that_ignores_the_decision_is_refused(self):
+        for unit, factor, decided, baseline_value in (
+            ("tokens", 60, 70, 21691),
+            ("bytes", 90, 80, 105632),
+        ):
+            with self.subTest(unit=unit):
+                value = document()
+                adjustment = value["target_adjustment"][0]
+                adjustment["initial"]["factor"][unit] = factor
+                adjustment["initial"]["target"][unit] = baseline_value * factor // 100
+                entry(value, "all", unit)["factor"] = factor
+                self.assert_refused(
+                    value,
+                    f"adjustment preset 'all' {unit} initial factor is {factor}, "
+                    f"expected {decided} from factor_decision",
+                )
+
     def test_the_factor_decision_keys_must_be_exact(self):
         value = document()
         value["factor_decision"]["extra"] = 1

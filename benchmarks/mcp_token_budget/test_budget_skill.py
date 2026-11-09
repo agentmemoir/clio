@@ -384,17 +384,15 @@ class ActivatedBodyTests(unittest.TestCase):
         record = baseline_record()
         baseline = budget_check.arms_from(record, budget_check.PINNED_BASELINE_SHA256)
         document = json.loads(TARGETS.read_text(encoding="utf-8"))
-        document["factor_decision"]["token_factor"]["numerator"] = 1
-        for item in document["targets"]:
+        validated = budget_targets.validate(document)
+        for item in validated:
             if item["unit"] == "tokens" and item["preset"] != "all":
-                item["factor"] = 1
                 item["target"] = item["baseline_value"] // 100
                 item["headroom"] = item["baseline_value"] - item["target"]
         measured = {p: pack_candidate(baseline) for p in budget_targets.TARGET_PRESETS}
         with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", False):
             targets = budget_targets.compare(
-                budget_targets.validate(document), budget_check.baseline_rows(record),
-                measured)
+                validated, budget_check.baseline_rows(record), measured)
         report = budget_check.check_pack(
             baseline, pack_candidate(baseline), budget_allowances.NONE, record,
             targets=targets,

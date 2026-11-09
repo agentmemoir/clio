@@ -64,8 +64,8 @@ def _measured(value) -> dict:
     return dict(value)
 
 
-def _check_rows(preset, initial, final_target, targets, units) -> None:
-    """Refuse an initial block that disagrees with the preset's target rows."""
+def _check_rows(preset, initial, final_target, targets, units, factors) -> None:
+    """Refuse an initial block that disagrees with the target rows and decision."""
     rows = {}
     for item in targets:
         if isinstance(item, dict):
@@ -84,6 +84,12 @@ def _check_rows(preset, initial, final_target, targets, units) -> None:
             _fail(
                 f"adjustment preset {preset!r} {unit} factor is "
                 f"{initial['factor'][unit]}, target row states {row.get('factor')!r}"
+            )
+        if initial["factor"][unit] != factors[unit]:
+            _fail(
+                f"adjustment preset {preset!r} {unit} initial factor is "
+                f"{initial['factor'][unit]}, expected {factors[unit]} from "
+                f"factor_decision"
             )
         baseline_value = row.get("baseline_value")
         if not _is_int(baseline_value) or baseline_value <= 0:
@@ -111,7 +117,7 @@ def _check_rows(preset, initial, final_target, targets, units) -> None:
             )
 
 
-def validate(value, presets, units, targets) -> dict:
+def validate(value, presets, units, targets, factors) -> dict:
     """Return the adjustments keyed by preset, or raise on any problem."""
     if not isinstance(value, list):
         _fail(f"target_adjustment must be a list, got {type(value).__name__}")
@@ -164,6 +170,7 @@ def validate(value, presets, units, targets) -> dict:
             final_target,
             targets,
             units,
+            factors,
         )
         adjustments[preset] = {
             "decision_id": item["decision_id"],

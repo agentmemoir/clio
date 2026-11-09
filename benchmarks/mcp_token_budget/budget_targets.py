@@ -313,9 +313,9 @@ def _targets(value, factors, adjustments) -> list:
     return targets
 
 
-def _adjustments(value, targets) -> dict:
+def _adjustments(value, targets, factors) -> dict:
     """Return the validated adjustment map, or refuse a contradictory record."""
-    return target_adjustment.validate(value, TARGET_PRESETS, UNITS, targets)
+    return target_adjustment.validate(value, TARGET_PRESETS, UNITS, targets, factors)
 
 
 def validate(document) -> list:
@@ -336,7 +336,7 @@ def validate(document) -> list:
     _tokenizer(document["tokenizer"])
     _policy(document["policy"])
     factors = _factor_decision(document["factor_decision"])
-    adjustments = _adjustments(document["target_adjustment"], document["targets"])
+    adjustments = _adjustments(document["target_adjustment"], document["targets"], factors)
     return _targets(document["targets"], factors, adjustments)
 
 
