@@ -39,8 +39,8 @@ DERIVED_FROM = {
     "record": "benchmarks/mcp_token_budget/presets/frozen-v1.json",
     "record_id": "preset-surface-v1",
     "row": "minimal",
-    "catalog_hash": "fnv1a64:b7a8f5d67479619b",
-    "input_sha256": "e20c9cc9a80acb54318ac7b15ddc6796cd2cd0c12c7f9fbff586ea8aa0461824",
+    "catalog_hash": "fnv1a64:bd68f323db04ccb3",
+    "input_sha256": "ee86e2bae172ce2dc3d9ce0ffd4cc5094af05d2e3c95e5a2dc362984896ba67a",
 }
 
 
@@ -88,13 +88,13 @@ class CommittedRecordTests(unittest.TestCase):
         self.assertEqual(decision["label"], "Decision")
         self.assertEqual(decision["judgement"], "derived")
         self.assertEqual(decision["preset"], "minimal")
-        self.assertEqual(decision["bytes"], 13224)
+        self.assertEqual(decision["bytes"], 13232)
         self.assertEqual(decision["tokens"], 2803)
         self.assertEqual(decision["derived_from"], DERIVED_FROM)
         self.assertEqual(
-            decision["base_commit"], "f36a0723f36c2dcf592428f50d36b7ee44cb75d1"
+            decision["base_commit"], "1720cbd69a5e8bed6be2757fdc20e394018fa777"
         )
-        self.assertIn("13224 bytes and 2803 tokens", decision["reason"])
+        self.assertIn("13232 bytes and 2803 tokens", decision["reason"])
         self.assertTrue(
             decision["reason"].startswith(
                 "The minimal preset is the six tools in the retrieval and graph groups"
