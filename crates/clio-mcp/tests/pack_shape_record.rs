@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - `the_record_ships_the_shape_the_crate_emits`
+//! - `the_record_shipped_entry_is_the_shipped_candidate`
 //! - `the_record_shipped_digest_is_the_shipped_pack_digest`
 //! - `the_record_holds_both_candidate_measurements`
 //! - `the_record_probe_status_is_allowed`
@@ -89,6 +90,52 @@ fn the_record_ships_the_shape_the_crate_emits() {
         shipped,
         shipped_shape_name(),
         "the record names the emitted shape"
+    );
+}
+
+#[test]
+fn the_record_shipped_entry_is_the_shipped_candidate() {
+    let record = read_json(RECORD_RELATIVE);
+    let shipped = &record["shipped"];
+    assert_eq!(
+        shipped["shape"].as_str(),
+        Some(shipped_shape_name()),
+        "the shipped entry names the shape this crate ships"
+    );
+    assert_eq!(
+        shipped["path"].as_str(),
+        Some(SHIPPED_RELATIVE),
+        "the shipped entry points at the shipped fixture"
+    );
+
+    let fixture_digest = sha256_hex_bytes(canonical_tools(&read_json(SHIPPED_RELATIVE)).as_bytes());
+    assert_eq!(
+        shipped["sha256"].as_str(),
+        Some(fixture_digest.as_str()),
+        "the shipped entry's digest is the shipped fixture's digest"
+    );
+
+    let candidates = record["candidates"]
+        .as_array()
+        .expect("the record holds a candidates array");
+    let matching: Vec<&Value> = candidates
+        .iter()
+        .filter(|candidate| candidate["sha256"].as_str() == Some(fixture_digest.as_str()))
+        .collect();
+    assert_eq!(
+        matching.len(),
+        1,
+        "exactly one candidate entry carries the shipped fixture's digest"
+    );
+    assert_eq!(
+        matching[0]["path"].as_str(),
+        Some(SHIPPED_RELATIVE),
+        "the entry that matches the fixture is the shipped fixture's entry"
+    );
+    assert_eq!(
+        matching[0]["shape"].as_str(),
+        Some(shipped_shape_name()),
+        "the entry that matches the fixture names the shape this crate ships"
     );
 }
 

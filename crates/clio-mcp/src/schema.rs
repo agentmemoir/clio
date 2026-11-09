@@ -100,8 +100,12 @@ pub fn schema_pack_for_groups(groups: &[clio_types::ToolGroup]) -> Value {
 /// hashed as emitted, and wrapped. One call yields one document, so a caller
 /// cannot be handed both shapes at once and the shipped build paths can only
 /// emit the shape they name.
+///
+/// The shape parameter is not part of the crate's public surface: the only
+/// shape an outside caller can reach is the one [`schema_pack`] and
+/// [`schema_pack_for_groups`] ship.
 #[must_use]
-pub fn pack_document(tools: &[ToolDef], shape: PackShape) -> Value {
+pub(crate) fn pack_document(tools: &[ToolDef], shape: PackShape) -> Value {
     let tools: Vec<Value> = tools
         .iter()
         .map(ToolDef::to_tool)
@@ -284,3 +288,7 @@ mod schema_hash_tests;
 #[cfg(test)]
 #[path = "schema_local_defs_tests.rs"]
 mod schema_local_defs_tests;
+
+#[cfg(test)]
+#[path = "schema_pack_reference_tests.rs"]
+mod schema_pack_reference_tests;
