@@ -17,6 +17,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import activated_row
 import baseline_provenance
 
 RECORD_FORMAT = "clio_mcp_frozen_baseline"
@@ -31,10 +32,9 @@ DELIVERIES = frozenset({"eager", "on_demand"})
 
 TOKENIZER_ENCODING = "cl100k_base"
 ASSET_SHA256 = "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
-RETIRED_SKILL_SHA256 = (
-    "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80"
-)
+RETIRED_SKILL_SHA256 = "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80"
 RETIRED_ROWS = ("retired_skill_entry_point/bytes", "retired_skill_entry_point/tokens")
+ACTIVATED_ROW = activated_row.ROW_ID
 
 ALLOWED_TOP_LEVEL = frozenset(
     {
@@ -273,7 +273,7 @@ def check_record(record, base_dir) -> list:
                 f"declared {sorted(seen)}, rows {sorted(row_turns)}"
             )
 
-    expected_ids = _expected_client_ids(record) | set(RETIRED_ROWS)
+    expected_ids = _expected_client_ids(record) | set(RETIRED_ROWS) | {ACTIVATED_ROW}
     seen_ids = []
     for row in _rows(record):
         row_id = row.get("row")
@@ -310,7 +310,7 @@ def check_record(record, base_dir) -> list:
                 f"a fallback, or outside the pinned units"
             )
         row_id = obj.get("row")
-        if isinstance(row_id, str) and row_id.startswith("client/"):
+        if isinstance(row_id, str) and (row_id.startswith("client/") or row_id == ACTIVATED_ROW):
             digest = obj.get("input_sha256")
             if not isinstance(digest, str) or not SHA256_RE.match(digest):
                 errors.append(f"AC8: row {row_id} is labelled Measured but has no input_sha256")
@@ -321,6 +321,8 @@ def check_record(record, base_dir) -> list:
                 errors.append(f"AC8: row {row_id} is labelled Measured but has no receipt_id")
             elif not isinstance(receipts, dict) or not isinstance(receipts.get(receipt), dict):
                 errors.append(f"AC8: row {row_id} receipt_id does not resolve")
+        if row_id == ACTIVATED_ROW and obj.get("recomputable") is not True:
+            errors.append(f"AC8: row {row_id} is labelled Measured but is not recomputable")
 
     for row_id in RETIRED_ROWS:
         count = len([row for row in _rows(record) if row.get("row") == row_id])
@@ -333,6 +335,8 @@ def check_record(record, base_dir) -> list:
             errors.append(f"AC7: {row.get('row')} content_sha256 does not match the pinned digest")
         if not _is_int(row.get("value")) or row["value"] <= 0:
             errors.append(f"AC7: {row.get('row')} value must be greater than zero")
+
+    errors.extend(activated_row.check(record))
 
     if not isinstance(ranking, dict):
         errors.append("AC4: per_tool_ranking must be an object")
@@ -357,9 +361,7 @@ def check_record(record, base_dir) -> list:
                 tokens = item.get("tool_tokens")
                 tokens = tokens if _is_int(tokens) else 0
                 return (-tokens, str(item.get("tool", "")))
-            ordered = sorted(
-                [item for item in items if isinstance(item, dict)], key=_order
-            )
+            ordered = sorted([item for item in items if isinstance(item, dict)], key=_order)
             if [item.get("tool") for item in items if isinstance(item, dict)] != [
                 item.get("tool") for item in ordered
             ]:

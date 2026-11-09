@@ -7,6 +7,7 @@ asserts the validator refuses the copy with the expected AC error.
 
 import contextlib
 import copy
+import hashlib
 import json
 import shutil
 import sys
@@ -18,14 +19,27 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+import activated_row
 import baseline_validate
 
 RECORD = HERE / "baseline" / "frozen-v1.json"
 FIXTURES = HERE / "baseline" / "clients"
+ACTIVATED_ROW = activated_row.ROW_ID
 
 
 def load_record():
     return json.loads(RECORD.read_text(encoding="utf-8"))
+
+
+def activated(record):
+    """Return the shipped activated skill body row of ``record``."""
+    return next(row for row in record["rows"] if row["row"] == ACTIVATED_ROW)
+
+
+def refusals(mutate):
+    """Return the validator errors for one mutation of the real record."""
+    with mutated_record(mutate) as path:
+        return baseline_validate.validate(path)
 
 
 @contextlib.contextmanager
@@ -149,6 +163,62 @@ class SemanticsTests(unittest.TestCase):
         with mutated_record(private_segment) as path:
             errors = baseline_validate.validate(path)
         self.assertTrue(any("path boundary" in error for error in errors), errors)
+
+    def test_activated_row_records_the_input_its_count_came_from(self):
+        record = load_record()
+        row = activated(record)
+        self.assertIs(row["recomputable"], True)
+        self.assertEqual(row["input_sha256"], activated_row.INPUT_SHA256)
+        self.assertEqual(
+            hashlib.sha256((HERE.parents[1] / row["file"]).read_bytes()).hexdigest(),
+            row["input_sha256"],
+        )
+        receipt = record["receipts"][row["receipt_id"]]
+        self.assertIs(receipt["recomputable_from_public_inputs"], True)
+        self.assertEqual(baseline_validate.validate(RECORD), [])
+
+    def test_activated_row_cannot_claim_it_is_not_recomputable(self):
+        def deny_recomputable(record):
+            activated(record)["recomputable"] = False
+
+        errors = refusals(deny_recomputable)
+        wanted = [error for error in errors if ACTIVATED_ROW in error and "recomputable" in error]
+        self.assertTrue(wanted, errors)
+
+        def drop_input_digest(record):
+            activated(record).pop("input_sha256")
+
+        errors = refusals(drop_input_digest)
+        wanted = [error for error in errors if ACTIVATED_ROW in error and "input_sha256" in error]
+        self.assertTrue(wanted, errors)
+
+    def test_activated_row_records_the_expected_input_digest(self):
+        for value in ("0" * 64, activated_row.INPUT_SHA256[:-1] + "0", ""):
+            with self.subTest(input_sha256=value):
+                def other_digest(record, value=value):
+                    activated(record)["input_sha256"] = value
+
+                errors = refusals(other_digest)
+                wanted = [
+                    error for error in errors if ACTIVATED_ROW in error and "input_sha256" in error
+                ]
+                self.assertTrue(wanted, errors)
+
+    def test_activated_receipt_must_state_public_recomputation(self):
+        def deny_public_recomputation(record):
+            row = activated(record)
+            record["receipts"][row["receipt_id"]]["recomputable_from_public_inputs"] = False
+
+        errors = refusals(deny_public_recomputation)
+        wanted = [error for error in errors if ACTIVATED_ROW in error and "receipt" in error]
+        self.assertTrue(wanted, errors)
+
+        def drop_receipts(record):
+            record["receipts"] = {}
+
+        errors = refusals(drop_receipts)
+        wanted = [error for error in errors if ACTIVATED_ROW in error and "receipt" in error]
+        self.assertTrue(wanted, errors)
 
 
 if __name__ == "__main__":

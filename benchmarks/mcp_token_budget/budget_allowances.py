@@ -217,6 +217,19 @@ def load(path) -> list:
     return load_document(path)["records"]
 
 
+def load_or_empty(path, digest) -> dict:
+    """Return the document at ``path``, or one holding no records when it is absent."""
+    path = Path(path)
+    if not path.exists():
+        return {
+            "format": FORMAT,
+            "format_version": FORMAT_VERSION,
+            "baseline": {"sha256": digest},
+            "records": [],
+        }
+    return load_document(path)
+
+
 def skip() -> list:
     """Return the empty record list; a candidate above baseline then fails."""
     return []

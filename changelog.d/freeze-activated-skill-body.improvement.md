@@ -1,0 +1,1 @@
+The frozen MCP token budget now carries the shipped activated skill body as its own measured row, pinned to the file's content digest, the cl100k_base tokenizer identity, and a factor of 1.0, so a later comparison reads one fixed number instead of re-measuring the file.
