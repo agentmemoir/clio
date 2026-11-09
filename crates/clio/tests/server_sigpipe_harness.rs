@@ -116,10 +116,12 @@ fn a_dropped_stdout_reader_does_not_kill_the_stdio_server() {
         let stdin = child.stdin.as_mut().expect("stdin");
         writeln!(
             stdin,
-            "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\
-             \"params\":{{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{{}}}}}}"
+            "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\
+             \"params\":{{\"_meta\":{{\
+             \"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\
+             \"io.modelcontextprotocol/clientCapabilities\":{{}}}}}}}}}}"
         )
-        .expect("write the initialize request");
+        .expect("write the tools/list request");
         stdin.flush().expect("flush the request");
     }
     // End of input after the request: the session has nothing left to serve.

@@ -146,7 +146,7 @@ fn selection_of(value: &str) -> Vec<clio_types::ToolGroup> {
 const DISCOVERY_TOOLS: [&str; 3] = ["tool_describe", "tool_invoke", "tool_search"];
 
 /// One whole `tools/list` request, so a test names the exact request it sends.
-const TOOLS_LIST: &str = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+const TOOLS_LIST: &str = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#;
 
 /// The raw response bytes one `tools/list` request gets over the stdio serve
 /// path, with `config` as the whole configuration layer and `groups` and
@@ -369,7 +369,7 @@ fn client_meta_never_changes_the_listing() {
     let with_meta = served_bytes(
         None,
         Some(true),
-        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"com.example/clientDeferLoading":true}}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"com.example/clientDeferLoading":true}}}"#,
     );
     assert_eq!(
         plain, with_meta,

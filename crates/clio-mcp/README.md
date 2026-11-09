@@ -1,4 +1,4 @@
-# MCP surfaces (pinned revision `2025-11-25`)
+# MCP surfaces (pinned revision `2026-07-28`)
 
 The `clio-mcp` crate publishes machine-readable `tool_schema`s for the Core tool catalog and exposes the write/mutate **and** read/retrieve/compose sets over **stdio** and **Streamable HTTP** with identical tool names and semantics. Gates run inside the in-process tools on every path; transports cannot bypass admission.
 
@@ -6,7 +6,7 @@ The `clio-mcp` crate publishes machine-readable `tool_schema`s for the Core tool
 
 - `clio mcp schema-export [--out FILE]` (alias `--path FILE`) — print (or write) the `tool_schema` pack (JSON Schema per Core tool, protocol-revision stamp, catalog hash).
 - `clio mcp stdio [--db PATH] [--backend sqlite|postgres] [--bank BANK]` — run the MCP stdio transport (newline-delimited JSON-RPC on stdout; logs on stderr only).
-- `clio mcp http --bind ADDR [--db PATH] [--auth-token TOKEN] [--token-file PATH] [--sessions]` — run the Streamable HTTP transport on `POST /mcp`. Loopback binds are allowed without a credential (dev mode); a non-loopback bind refuses to start without one. The token comes from `--auth-token`, else from the `CLIO_MCP_TOKEN` environment variable (the flag wins when both are set; an empty environment value counts as unset). `--sessions` mints and enforces `MCP-Session-Id` lifecycle; on a credential-bound server every session belongs to the credential that minted it, and presenting it as anyone else is refused exactly like an unknown session id.
+- `clio mcp http [--bind [ADDR]] [--db PATH] [--backend sqlite|postgres] [--bank BANK] [--token-file PATH]` — run the Streamable HTTP transport on `POST /mcp`. The transport is stateless: it mints no session, sends no `MCP-Session-Id`, and a request carrying the version header and its `_meta` is answered on its own. A credential is required unless the bind is loopback and `--insecure-no-auth` is passed: `--token-file PATH` names the token store that `clio auth token add` manages. The removed `--sessions` switch and the removed `--auth-token` / `CLIO_MCP_TOKEN` credential source are not accepted; naming either is a usage error.
 
 ## Network credentials
 
@@ -59,4 +59,4 @@ cargo test -p clio-mcp --test mcp_read_conformance
 cargo test -p clio-mcp --test mcp_read_mock
 ```
 
-The suites cover: initialize handshake, `tools/list` bound tool set, a tools/call matrix for every bound write tool (happy path + gated-reject samples) and every bound read tool over both transports, each with parity against the in-process dispatcher, bad-Origin → 403, missing/wrong auth → 401 when a token is configured, the optional session lifecycle, stdio stdout purity, a mock client that simulates dropped connections / mid-stream aborts / dropped session tokens, and the `2025-11-25` revision assertion. CI runs them as the `mcp-conformance-2025-11-25` job.
+The suites cover: stateless request admission and dispatch, `tools/list` bound tool set, a tools/call matrix for every bound write tool (happy path + gated-reject samples) and every bound read tool over both transports, each with parity against the in-process dispatcher, bad-Origin → 403, missing/wrong auth → 401 when a token is configured, stdio stdout purity, a mock client that simulates dropped connections / mid-stream aborts, and the `2026-07-28` revision assertion. The removed handshake is covered as a refusal: `initialize` and `notifications/initialized` are unknown methods. CI runs them as the `mcp-conformance-2026-07-28` job.

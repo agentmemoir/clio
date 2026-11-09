@@ -2,11 +2,12 @@
 """Record the measured byte and token cost of the discovery flag on one preset.
 
 The same binary is started twice as ``clio mcp stdio --tools <preset>
---discovery off`` and then ``on``. Each run answers ``initialize`` and
-``tools/list`` on stdin/stdout, and only the served ``result.tools`` array is
-measured: it is canonicalized with the helpers of ``preset_rows.py``, so its
-bytes give the byte length, the cl100k_base token count, and the sha256 that
-ties a row back to the exact surface the server advertised. The three discovery
+--discovery off`` and then ``on``. Each run answers one ``tools/list`` request,
+carrying the metadata its stateless revision requires, on stdin/stdout, and only
+the served ``result.tools`` array is measured: it is canonicalized with the
+helpers of ``preset_rows.py``, so its bytes give the byte length, the cl100k_base
+token count, and the sha256 that ties a row back to the exact surface the server
+advertised. The three discovery
 tools are the only difference between the two runs, so the record's ``cost`` is
 their on-minus-off size, derived here and never read from an input. The
 ``comparability`` block names the build both rows share and the frozen records
@@ -55,7 +56,7 @@ COMPARABILITY_NOTE = (
     "alone. The pre-flag records listed here predate the flag and are not "
     "comparable with either row."
 )
-_PROTOCOL_VERSION = "2025-11-25"
+_PROTOCOL_VERSION = "2026-07-28"
 _CAPTURE_TIMEOUT = 60
 _VERSION_TIMEOUT = 30
 
@@ -65,14 +66,12 @@ def _serve(binary, preset, flag):
     command = [
         str(binary), "mcp", "stdio", "--tools", preset, "--discovery", flag
     ]
-    initialize = {
-        "protocolVersion": _PROTOCOL_VERSION,
-        "capabilities": {},
-        "clientInfo": {"name": "discovery-rows", "version": "0"},
+    meta = {
+        "io.modelcontextprotocol/protocolVersion": _PROTOCOL_VERSION,
+        "io.modelcontextprotocol/clientCapabilities": {},
     }
     requests = [
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": initialize},
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"_meta": meta}},
     ]
     payload = "".join(
         json.dumps(request, separators=(",", ":")) + "\n" for request in requests

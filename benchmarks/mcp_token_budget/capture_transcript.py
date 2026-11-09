@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Capture a deterministic two-exchange ``tools/call`` session from a binary.
+"""Capture a deterministic one-exchange ``tools/call`` session from a binary.
 
 The capture drives one real ``clio mcp stdio`` process, records the raw request
-line and the raw response line for each exchange, and writes them as strings so
+line and the raw response line for the exchange, and writes them as strings so
 a test can replay the exact bytes. Nothing is re-serialized: the recorded text
-is the text that crossed the pipe.
+is the text that crossed the pipe. There is no handshake to record: the
+stateless revision answers a request on its own, so the request line carries the
+protocol metadata the server requires.
 
 The run is all or nothing. A non-zero exit, any stderr output, or a response
-count other than two exits 2 with a message on stderr and writes no file, so a
+count other than one exits 2 with a message on stderr and writes no file, so a
 partial or logged session can never become a fixture.
 
 Each fixture also records a ``capture`` block: the source commit, the sha256 of
@@ -26,10 +28,10 @@ from pathlib import Path
 FIXTURE_FORMAT = "am_mcp_client_session"
 FIXTURE_VERSION = 1
 CLIENT = "clio mcp stdio"
-PROTOCOL_VERSION = "2025-11-25"
+PROTOCOL_VERSION = "2026-07-28"
 SERVER_ARGS = ["mcp", "stdio", "--db", "sqlite::memory:"]
 TIMEOUT_SECONDS = 120
-EXPECTED_EXCHANGES = 2
+EXPECTED_EXCHANGES = 1
 
 #: Tools that read no store state, so the recorded payload is reproducible.
 TOOL_NAME = "ranking_env_get"
@@ -51,20 +53,15 @@ def frames() -> list[str]:
             {
                 "jsonrpc": "2.0",
                 "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": {"name": "clio-mcp-transcript", "version": "1"},
-                },
-            }
-        ),
-        compact(
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
                 "method": "tools/call",
-                "params": {"name": TOOL_NAME, "arguments": {}},
+                "params": {
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
+                        "io.modelcontextprotocol/clientCapabilities": {},
+                    },
+                    "name": TOOL_NAME,
+                    "arguments": {},
+                },
             }
         ),
     ]

@@ -11,7 +11,6 @@
 //! - The help text's promise of the token store and the opt-out flag
 //!
 //! ## Does not own
-//! - The `--sessions` value rule (`mcp_cli_sessions_tests`)
 //! - The credential-store load (`mcp_cli_credentials`)
 //! - The transport's own start guard (`clio-mcp`'s `http`)
 //!

@@ -312,7 +312,7 @@ fn check_example_accepts_a_bare_value_optional_flag() {
     };
     assert_eq!(check_example(&spec, &bare), Ok(()));
     let followed = Example {
-        command: "clio mcp http --bind --sessions",
+        command: "clio mcp http --bind --insecure-no-auth",
         comment: None,
     };
     assert_eq!(check_example(&spec, &followed), Ok(()));

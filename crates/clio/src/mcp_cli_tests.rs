@@ -392,7 +392,9 @@ fn the_stdio_session_serves_until_end_of_input() {
 #[test]
 fn a_stdio_session_stops_with_one_when_its_output_stream_refuses() {
     let opts = opts_with(memory(&[]), &[]);
-    let frame = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{}}}"#;
+    // One stateless request: the revision has no handshake, so the frame carries
+    // its own version metadata and is answered on its own.
+    let frame = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#;
     let input = std::io::Cursor::new(format!("{frame}\n").into_bytes());
     assert_eq!(
         mcp_stdio_serve(

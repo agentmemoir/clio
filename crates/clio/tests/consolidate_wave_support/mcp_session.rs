@@ -28,6 +28,14 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+/// The request metadata the stateless revision requires on every request.
+fn request_meta() -> Value {
+    serde_json::json!({
+        "io.modelcontextprotocol/protocolVersion": clio_mcp::MCP_PROTOCOL_REVISION,
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
+}
+
 /// A live `clio mcp stdio` child, killed and reaped even on a panicking assert.
 pub struct McpSession {
     server: std::process::Child,
@@ -44,10 +52,12 @@ impl Drop for McpSession {
 }
 
 impl McpSession {
-    /// Open a long-lived session over the fixture's store and handshake.
+    /// Open a long-lived session over the fixture's store.
     ///
     /// The binding under test is the process lifetime: an MCP server outlives
-    /// its wave, a one-shot CLI process does not.
+    /// its wave, a one-shot CLI process does not. The served revision is
+    /// stateless, so there is no handshake to send before the first request; the
+    /// opening `tools/list` is what proves the child is answering.
     pub fn open(f: &Fixture) -> Self {
         let mut child = f
             .command_for(&["mcp", "stdio", "--bank", BANK])
@@ -89,11 +99,9 @@ impl McpSession {
             stderr: captured,
         };
         session.send(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {"protocolVersion": "2025-11-25", "capabilities": {},
-                       "clientInfo": {"name": "harness", "version": "0"}}
+            "jsonrpc": "2.0", "id": 1, "method": "tools/list",
+            "params": {"_meta": request_meta()}
         }));
-        session.send(&serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
         let _ = session.recv(1);
         session
     }
@@ -130,7 +138,7 @@ impl McpSession {
     pub fn call_raw(&mut self, id: i64, name: &str, arguments: Value) -> Value {
         self.send(&serde_json::json!({
             "jsonrpc": "2.0", "id": id, "method": "tools/call",
-            "params": {"name": name, "arguments": arguments}
+            "params": {"_meta": request_meta(), "name": name, "arguments": arguments}
         }));
         self.recv(id)["result"].clone()
     }

@@ -50,7 +50,7 @@ fn mcp_schema_export_writes_file() {
     let raw = std::fs::read_to_string(&path).expect("written pack");
     let pack: serde_json::Value = serde_json::from_str(&raw).expect("json");
     assert_eq!(pack["format"], "am_tool_schema_pack");
-    assert_eq!(pack["mcp_protocol_revision"], "2025-11-25");
+    assert_eq!(pack["mcp_protocol_revision"], "2026-07-28");
     let _ = std::fs::remove_file(&path);
 }
 
