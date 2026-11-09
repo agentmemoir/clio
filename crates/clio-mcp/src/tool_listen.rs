@@ -8,7 +8,7 @@
 //! and the registry entry that stops when the client closes the stream.
 //!
 //! ## Owns
-//! - The listen request interception and its refusals
+//! - The listen request handler and its refusals
 //! - The acknowledgement envelope and the later list-change envelope
 //! - The streamed source that turns published changes into frames
 //!
@@ -24,10 +24,10 @@
 //!
 //! Keep this module focused on the listen request and its stream.
 
+use crate::conditional_http::refusal;
 use crate::event_stream::{EventStream, FrameSource, frame};
 use crate::http_post::{PostBody, PostResponse};
-use crate::http_read::HttpRequest;
-use crate::protocol::{ERR_INTERNAL, ERR_INVALID_REQUEST, RpcError, error_response};
+use crate::protocol::{ERR_INTERNAL, ERR_INVALID_REQUEST, RpcError, invalid_params};
 use crate::runtime::McpState;
 use crate::tool_signals::{NotRegistered, Subscriber, ToolSignals};
 use crate::tools_page::current_view_digest;
@@ -36,85 +36,93 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// The request method this module answers.
-const LISTEN_METHOD: &str = "subscriptions/listen";
+pub(crate) const LISTEN_METHOD: &str = "subscriptions/listen";
 
 /// The request metadata key naming the subscription a notification belongs to.
 const SUBSCRIPTION_ID: &str = "io.modelcontextprotocol/subscriptionId";
 
-/// Intercept one listen request, or `None` for every other body.
+/// Serve one admitted listen request.
 ///
-/// A body that is not JSON, or whose method is not `subscriptions/listen`,
-/// returns `None` so the normal admission path runs unchanged.
-pub(crate) fn intercept(state: &McpState, req: &HttpRequest) -> Option<PostResponse> {
-    let body = serde_json::from_str::<Value>(req.body.trim()).ok()?;
-    if body.get("method").and_then(Value::as_str) != Some(LISTEN_METHOD) {
-        return None;
-    }
+/// The transport validates the request first, so every admission gate has
+/// already run. A request this module refuses answers the shared refusal status
+/// and JSON-RPC body, and registers no subscriber.
+pub(crate) fn serve(state: &McpState, body: &Value) -> PostResponse {
     let Some(id) = body.get("id") else {
-        return Some(buffered_error(
-            None,
-            ERR_INVALID_REQUEST,
-            "Invalid request: a subscription needs an `id`",
-        ));
+        return refused(
+            body,
+            &RpcError::new(
+                ERR_INVALID_REQUEST,
+                "Invalid request: a subscription needs an `id`",
+            ),
+        );
     };
-    let key = match id {
-        Value::String(text) => text.clone(),
-        Value::Number(number) => number.to_string(),
-        _ => {
-            return Some(buffered_error(
-                None,
+    if !matches!(id, Value::String(_) | Value::Number(_)) {
+        return refused(
+            &Value::Null,
+            &RpcError::new(
                 ERR_INVALID_REQUEST,
                 "Invalid request: a subscription id must be a string or a number",
-            ));
-        }
+            ),
+        );
+    }
+    let tools_list_changed = match tools_list_changed(body) {
+        Ok(value) => value,
+        Err(err) => return refused(body, &err),
     };
-    let tools_list_changed = body
-        .pointer("/params/notifications/toolsListChanged")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
     let baseline = match current_view_digest(state) {
         Ok(digest) => digest,
-        Err(err) => {
-            return Some(buffered_error(Some(id), ERR_INTERNAL, err.message));
-        }
+        Err(err) => return refused(body, &err),
     };
-    let subscriber = match state.tool_signals.register(&key, baseline) {
-        Ok(subscriber) => subscriber,
+    let (serial, subscriber) = match state.tool_signals.register(baseline) {
+        Ok(registered) => registered,
         Err(NotRegistered::Capacity) => {
-            return Some((
-                503,
-                PostBody::Buffered(NotRegistered::Capacity.to_string()),
-                Vec::new(),
-            ));
+            return refused(
+                body,
+                &RpcError::new(ERR_INTERNAL, NotRegistered::Capacity.to_string()),
+            );
         }
     };
     let seen = subscriber.observed();
     let acknowledgement = acknowledged(id, tools_list_changed);
-    Some((
+    (
         200,
         PostBody::Stream(EventStream {
             head: frame(&acknowledgement.to_string()),
             source: Box::new(ListenSource {
                 subscriber,
                 id: id.clone(),
-                key,
+                serial,
                 signals: Arc::clone(&state.tool_signals),
                 seen,
                 tools_list_changed,
             }),
         }),
         Vec::new(),
-    ))
+    )
 }
 
-/// A buffered JSON-RPC error answer.
-fn buffered_error(id: Option<&Value>, code: i64, message: impl Into<String>) -> PostResponse {
-    let err = RpcError::new(code, message);
-    (
-        200,
-        PostBody::Buffered(error_response(id, &err).to_string()),
-        Vec::new(),
-    )
+/// Whether the client asked for tool-list changes, or the refusal for a filter
+/// the revision does not type.
+fn tools_list_changed(body: &Value) -> Result<bool, RpcError> {
+    match body.pointer("/params/notifications") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Object(notifications)) => match notifications.get("toolsListChanged") {
+            None | Some(Value::Null) => Ok(false),
+            Some(Value::Bool(value)) => Ok(*value),
+            Some(_) => Err(invalid_params(
+                "Invalid params: `notifications.toolsListChanged` must be a boolean",
+            )),
+        },
+        Some(_) => Err(invalid_params(
+            "Invalid params: `params.notifications` must be an object",
+        )),
+    }
+}
+
+/// A buffered refusal: the shared status and JSON-RPC error body.
+fn refused(body: &Value, err: &RpcError) -> PostResponse {
+    let (status, text) = refusal(body, err);
+    (status, PostBody::Buffered(text), Vec::new())
 }
 
 /// The notification a stream opens with.
@@ -149,8 +157,8 @@ struct ListenSource {
     subscriber: Arc<Subscriber>,
     /// The subscription identity: the listen request's own `id`.
     id: Value,
-    /// The registry key the identity renders to.
-    key: String,
+    /// The registry serial this stream holds.
+    serial: u64,
     /// The registry that holds this subscription.
     signals: Arc<ToolSignals>,
     /// The change count this source already emitted.
@@ -181,7 +189,7 @@ impl FrameSource for ListenSource {
 
 impl Drop for ListenSource {
     fn drop(&mut self) {
-        self.signals.unregister(&self.key);
+        self.signals.unregister(self.serial);
     }
 }
 

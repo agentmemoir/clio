@@ -5,8 +5,8 @@
 //!
 //! This module is responsible for the unit tests of the `subscriptions/listen`
 //! request: the acknowledgement, the honoured subset, the frames one publish
-//! produces, the registry entry two identical ids share, the unregister on
-//! drop, and the cursor a view change invalidates.
+//! produces, two streams that share an id, the unregister on drop, and the
+//! cursor a view change invalidates.
 //!
 //! ## Owns
 //! - The acknowledgement and list-change envelope assertions
@@ -49,10 +49,16 @@ fn raw_request(body: &str) -> HttpRequest {
     }
 }
 
+/// Serve the body of a listen request, or `None` for another method.
+fn intercept(state: &McpState, req: &HttpRequest) -> Option<PostResponse> {
+    let body = serde_json::from_str::<Value>(req.body.trim()).ok()?;
+    (body.get("method").and_then(Value::as_str) == Some(LISTEN_METHOD)).then(|| serve(state, &body))
+}
+
 /// The JSON-RPC error a buffered refusal carries.
 fn refused(response: PostResponse) -> Value {
     let (status, body, extra) = response;
-    assert_eq!(status, 200, "a refusal is answered in the request body");
+    assert_eq!(status, 400, "a refusal answers the admission status");
     assert!(extra.is_empty(), "a refusal carries no extra headers");
     match body {
         PostBody::Buffered(text) => serde_json::from_str(&text).expect("a JSON answer"),
@@ -168,14 +174,32 @@ fn one_publish_yields_one_list_changed_frame() {
 }
 
 #[test]
-fn repeated_registrations_share_one_subscriber_entry() {
+fn two_streams_with_one_id_are_independent() {
     let state = state();
-    let first = intercept(&state, &request(&listen_frame(&json!("same"), true)))
-        .expect("the first listen request is intercepted");
-    let second = intercept(&state, &request(&listen_frame(&json!("same"), true)))
-        .expect("the second listen request is intercepted");
-    let _first = streamed(first);
-    let _second = streamed(second);
+    let first = streamed(
+        intercept(&state, &request(&listen_frame(&json!(1), true)))
+            .expect("the first listen request is intercepted"),
+    );
+    let mut second = streamed(
+        intercept(&state, &request(&listen_frame(&json!(1), true)))
+            .expect("the second listen request is intercepted"),
+    );
+    assert_eq!(
+        state.tool_signals.subscribers(),
+        2,
+        "each request owns one registry entry"
+    );
+    drop(first);
+    assert_eq!(state.tool_signals.subscribers(), 1);
+    assert!(state.tool_signals.publish("view-two"));
+    let frame_text = next_frame(&mut second).expect("the open stream receives the change");
+    assert_eq!(
+        frame_text
+            .matches("\"method\":\"notifications/tools/list_changed\"")
+            .count(),
+        1,
+        "{frame_text:?}"
+    );
     assert_eq!(state.tool_signals.subscribers(), 1);
 }
 
@@ -313,13 +337,20 @@ fn a_full_registry_refuses_one_more_listener() {
     )
     .expect("the refusal is an answer");
     let (status, body, extra) = response;
-    assert_eq!(status, 503, "a full registry cannot serve the request");
+    assert_eq!(status, 400, "a full registry cannot serve the request");
     assert!(extra.is_empty(), "a refusal carries no extra headers");
     match body {
-        PostBody::Buffered(text) => assert_eq!(
-            text,
-            format!("the server already holds {MAX_SUBSCRIPTIONS} tool-view subscriptions")
-        ),
+        PostBody::Buffered(text) => {
+            let value: Value = serde_json::from_str(&text).expect("a JSON error answer");
+            assert_eq!(value["error"]["code"], json!(crate::protocol::ERR_INTERNAL));
+            assert_eq!(
+                value["error"]["message"],
+                json!(format!(
+                    "the server already holds {MAX_SUBSCRIPTIONS} tool-view subscriptions"
+                ))
+            );
+            assert!(value.get("result").is_none(), "a refusal claims no success");
+        }
         PostBody::Stream(_) => panic!("a refusal is a buffered body"),
     }
     assert_eq!(
@@ -328,6 +359,39 @@ fn a_full_registry_refuses_one_more_listener() {
         "the refused listener is not added"
     );
     drop(held);
+}
+
+#[test]
+fn a_notifications_filter_of_the_wrong_shape_is_refused() {
+    let state = state();
+    let cases = [
+        (
+            json!({ "notifications": true }),
+            "`params.notifications` must be an object",
+        ),
+        (
+            json!({ "notifications": { "toolsListChanged": "yes" } }),
+            "`notifications.toolsListChanged` must be a boolean",
+        ),
+    ];
+    for (params, message) in cases {
+        let body = json!({
+            "jsonrpc": "2.0", "id": 17, "method": LISTEN_METHOD, "params": params
+        });
+        let value = refused(serve(&state, &body));
+        assert_eq!(value["error"]["code"], json!(ERR_INVALID_PARAMS), "{value}");
+        assert!(
+            value["error"]["message"]
+                .as_str()
+                .is_some_and(|text| text.contains(message)),
+            "{value}"
+        );
+        assert_eq!(
+            state.tool_signals.subscribers(),
+            0,
+            "a refused filter registers nothing"
+        );
+    }
 }
 
 #[test]

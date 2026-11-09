@@ -3,31 +3,26 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the stateless MCP dispatcher that answers MCP
-//! JSON-RPC requests under the rules of the one revision this server serves:
-//! per-request metadata, removed methods, and that revision's error codes.
+//! This module answers stateless MCP JSON-RPC requests under the one revision
+//! this server serves: per-request metadata, removed methods, and that
+//! revision's error codes.
 //!
 //! ## Owns
-//! - The supported-revision list the admission and dispatch read
-//! - `params._meta` validation, the unsupported-version error, and the
-//!   required-client-capability refusal
-//! - The refusal of a tool call that answers input this server never requested
-//! - The `server/discover` result and the result fields the revision requires
-//! - The one cache-hint pair every cacheable result of this dispatcher carries
+//! - The supported-revision list, `params._meta` validation, and the
+//!   unsupported-version and required-capability refusals
+//! - The required-metadata rule, the transport flag, and the `server/discover`
+//!   result
+//! - The one cache-hint pair every cacheable result carries
 //!
 //! ## Does not own
-//! - The revision constant itself and the tool catalogue (see the crate root
-//!   and `protocol`)
+//! - The revision constant and the tool catalogue (see the crate root and
+//!   `protocol`)
 //! - Transport framing and gates (see `http`, `http_candidate`, `stdio`)
-//! - Tool semantics (see `write_tools`, `read_tools`)
 //!
 //! ## Boundary
 //!
-//! Changes to the stateless revision's request rules should normally require
-//! changes here. Changes to the revision constant, a transport, or a tool should
-//! not require changes here.
-//!
-//! Keep this module focused on the revision's request handling.
+//! Changes to the revision's request rules should normally require changes
+//! here. Changes to a transport or a tool should not.
 
 use crate::conditional_http::{ERR_HEADER_MISMATCH, Refusal, check_headers, refusal};
 use crate::protocol::{
@@ -50,33 +45,25 @@ pub(crate) const SUPPORTED_REVISIONS: &[&str] = &[crate::MCP_PROTOCOL_REVISION];
 
 /// JSON-RPC unsupported protocol version.
 const ERR_UNSUPPORTED_PROTOCOL_VERSION: i64 = -32022;
-
 /// JSON-RPC missing required client capability.
 const ERR_MISSING_REQUIRED_CLIENT_CAPABILITY: i64 = -32021;
 
 /// Request metadata key carrying the revision the client is using.
 const PROTOCOL_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
-
 /// Request metadata key carrying the client's per-request capabilities.
 const CLIENT_CAPABILITIES: &str = "io.modelcontextprotocol/clientCapabilities";
-
 /// Request parameters key carrying answers to the server's input requests.
 const INPUT_RESPONSES: &str = "inputResponses";
-
 /// Request parameters key carrying state from a server input-required result.
 const REQUEST_STATE: &str = "requestState";
-
 /// Member that only an elicitation answer requires (`ElicitResult.action`).
 const ELICITATION_ACTION: &str = "action";
 
 /// Requests the served revision removed, so they answer as unknown methods.
 const REMOVED_METHODS: &[&str] = &["initialize", "ping", "logging/setLevel"];
 
-/// The cache hints a complete result of a cacheable request carries.
-///
-/// The revision requires both members on every such result and requires every
-/// page of a paginated listing to share one scope, so a request answered in
-/// several pages cannot pick a scope of its own.
+/// The cache hints a complete cacheable result carries: both members, and one
+/// scope shared by every page of a paginated listing.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CacheHints {
     /// How long, in milliseconds, a client may reuse the result as it stands.
@@ -85,31 +72,53 @@ pub(crate) struct CacheHints {
     pub(crate) scope: &'static str,
 }
 
-/// The one cache-hint pair this dispatcher answers for every cacheable result.
-///
-/// The two cacheable operations, discovery and the visible catalogue, share
-/// this one freshness window and this one cache scope, so a client reads the
-/// same reuse terms whichever of them it asks for, and no result may be handed
-/// to a cache shared across authorization contexts.
+/// The one cache-hint pair every cacheable result of this dispatcher answers.
 pub(crate) const CACHE_HINTS: CacheHints = CacheHints {
     ttl_ms: 300_000,
     scope: "private",
 };
 
+/// The transport a request arrived on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Transport {
+    Http,
+    Stdio,
+}
+
+/// One message that passed every admission check.
+pub(crate) enum Admitted {
+    Removed(Value),
+    Request(Value),
+}
+
 /// Admit one stateless HTTP request and, when it passes, serve it.
 ///
-/// The checks run in one fixed order and stop at the first failure: the conditional headers, JSON syntax, the removed-method rule, the required version header, the required metadata, header/body equality, the supported revision, and the client capability the request needs. The removed-method rule runs before every metadata rule, so a removed method is answered as an unknown method whether or not the request carries `_meta` or the version header. Every other request that passes every check reaches [`dispatch`].
-///
-/// `get` reads one header value by its lowercase wire name. A removed method is
-/// answered here rather than refused, so the transport maps its `-32601` to its
-/// own not-found answer. Any other refused request answers the status and
-/// JSON-RPC body [`refusal`] renders; a notification on the admitted path
-/// answers `None`, like [`dispatch`].
+/// [`validate`] runs every check; a removed method is answered here, and any
+/// other admitted request reaches [`dispatch`]. A refusal answers the status
+/// and body [`refusal`] renders.
 ///
 /// # Errors
-/// The request fails one admission check. The refusal names the header that
-/// refuses it, or the metadata key it lacks.
+/// The request fails one admission check.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn admit<'a, F>(state: &McpState, get: F, frame: &str) -> Result<Option<Value>, Refusal>
+where
+    F: Fn(&str) -> Option<&'a str>,
+{
+    match validate(get, frame)? {
+        Admitted::Removed(answer) => Ok(Some(answer)),
+        Admitted::Request(body) => Ok(dispatch(state, Transport::Http, &body)),
+    }
+}
+
+/// Run every admission check over one frame, in one fixed order.
+///
+/// The checks stop at the first failure: the conditional headers, JSON syntax,
+/// the removed-method rule, the required version header, the required metadata,
+/// header/body equality, the supported revision, and the client capability.
+///
+/// # Errors
+/// The request fails one admission check.
+pub(crate) fn validate<'a, F>(get: F, frame: &str) -> Result<Admitted, Refusal>
 where
     F: Fn(&str) -> Option<&'a str>,
 {
@@ -126,7 +135,7 @@ where
         return Err(refusal(&Value::Null, &err));
     };
     if let Some(answer) = removed_method_answer(&body) {
-        return Ok(Some(answer));
+        return Ok(Admitted::Removed(answer));
     }
     let declared = get(PROTOCOL_VERSION_HEADER)
         .filter(|value| !value.is_empty())
@@ -163,7 +172,7 @@ where
         .with_data(data);
         return Err(refusal(&body, &err));
     }
-    Ok(dispatch(state, &body))
+    Ok(Admitted::Request(body))
 }
 
 /// Admit one frame on a transport with no header layer.
@@ -183,7 +192,7 @@ pub(crate) fn admit_stdio(state: &McpState, frame: &str) -> Option<Value> {
         let err = RpcError::new(ERR_PARSE, "Parse error: invalid JSON");
         return Some(error_response(None, &err));
     };
-    dispatch(state, &body)
+    dispatch(state, Transport::Stdio, &body)
 }
 
 /// Answer a removed method, or `None` for any other message.
@@ -226,7 +235,7 @@ fn missing_version_header(body: &Value) -> Refusal {
 /// A message without an `id` is a notification, including the removed
 /// `notifications/initialized`, and MCP never answers a notification.
 #[must_use]
-pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
+pub(crate) fn dispatch(state: &McpState, transport: Transport, msg: &Value) -> Option<Value> {
     let id = msg.get("id")?;
     let Some(method) = msg.get("method").and_then(Value::as_str) else {
         return Some(reject(id, ERR_INVALID_REQUEST, "method is required", None));
@@ -262,7 +271,7 @@ pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
         ));
     }
     Some(match method {
-        "server/discover" => ok(id, &discover()),
+        "server/discover" => ok(id, &discover(transport)),
         "tools/list" => match tools_list(state, params) {
             Ok(result) => ok(id, &result),
             Err(err) => reject(id, err.code, err.message, err.data),
@@ -293,12 +302,9 @@ pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
 /// The client capability a request needs from its declared capabilities.
 ///
 /// Only a `tools/call` that answers an elicitation input request needs one. In
-/// this revision `ElicitResult` is the sole input answer that requires an
-/// `action` member, so an answer carrying `action` is the only one read as an
-/// elicitation answer; sampling and roots answers demand no capability. The
-/// answers must be the object map the revision types them as: a shape that is
-/// not an object is refused as invalid params, not turned into a capability
-/// demand here.
+/// this revision `ElicitResult` is the only input answer carrying an `action`
+/// member; sampling and roots answers demand no capability. A non-object
+/// `inputResponses` is refused as invalid params, not turned into a demand.
 #[must_use]
 pub(crate) fn required_capability(method: &str, params: Option<&Value>) -> Option<&'static str> {
     let answers_elicitation = params
@@ -317,9 +323,8 @@ pub(crate) fn required_capability(method: &str, params: Option<&Value>) -> Optio
 
 /// Whether a tool call tries to answer input this server never requested.
 ///
-/// The revision types `inputResponses` as an object map and `requestState` as a
-/// string. A non-empty map, a non-string state, or a value of another shape all
-/// claim a pending input request, and no such request is ever issued here.
+/// A non-empty `inputResponses` map, a non-string `requestState`, or a value of
+/// another shape all claim a pending input request, and none is ever issued.
 fn answers_pending_input(params: &Value) -> bool {
     let answers = match params.get(INPUT_RESPONSES) {
         None | Some(Value::Null) => false,
@@ -376,22 +381,21 @@ fn stamp_result(result: &mut Value) {
 
 /// The `server/discover` result: versions, capabilities, and identity.
 #[must_use]
-fn discover() -> Value {
+fn discover(transport: Transport) -> Value {
     json!({
         "resultType": "complete",
         "supportedVersions": SUPPORTED_REVISIONS,
-        "capabilities": { "tools": { "listChanged": true } },
+        "capabilities": { "tools": { "listChanged": transport == Transport::Http } },
         "ttlMs": CACHE_HINTS.ttl_ms,
         "cacheScope": CACHE_HINTS.scope,
         "_meta": result_meta()
     })
 }
 
-/// The visible catalogue page, stamped with the result fields the revision
-/// requires.
+/// The visible catalogue page, stamped with the fields the revision requires.
 ///
-/// The catalogue itself comes from the production handler, so tool definitions,
-/// the configured profile, and paging keep one source. The cache hints are the
+/// The catalogue comes from the production handler, so definitions, the
+/// configured profile, and paging keep one source. The cache hints are the
 /// module's one decision value, so a page never promises what discovery does
 /// not.
 fn tools_list(state: &McpState, params: Option<&Value>) -> Result<Value, RpcError> {

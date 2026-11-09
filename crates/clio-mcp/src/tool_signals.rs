@@ -9,7 +9,7 @@
 //!
 //! ## Owns
 //! - The published view digest and the change counter derived from it
-//! - The bounded subscriber registry and its identifier deduplication
+//! - The bounded subscriber registry, keyed by a monotonic serial
 //! - The condition a listener waits on, with a bounded timeout
 //! - The refusal a transport reports when the registry is full
 //!
@@ -26,6 +26,7 @@
 //! Keep this module focused on the in-process change signal.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -94,21 +95,24 @@ pub(crate) struct ToolSignals {
     published: Mutex<Option<String>>,
     /// The number of announced changes.
     changes: Mutex<u64>,
-    /// The registered listeners, keyed by their identifier.
-    subscribers: Mutex<BTreeMap<String, Arc<Subscriber>>>,
+    /// The registered listeners, keyed by a monotonic serial.
+    subscribers: Mutex<BTreeMap<u64, Arc<Subscriber>>>,
+    /// The serial the next registration takes.
+    next_serial: AtomicU64,
 }
 
 impl ToolSignals {
-    /// Register one listener and return the condition it waits on.
+    /// Register one listener and return its serial and the condition it waits
+    /// on.
     ///
     /// The first registration seeds the published baseline and notifies
-    /// nobody. A repeated identifier returns the subscriber already registered.
-    /// A full registry refuses a new identifier with [`NotRegistered::Capacity`].
+    /// nobody. Every registration inserts its own entry, so two requests never
+    /// share one. A full registry refuses the registration with
+    /// [`NotRegistered::Capacity`].
     pub(crate) fn register(
         &self,
-        id: &str,
         baseline: String,
-    ) -> Result<Arc<Subscriber>, NotRegistered> {
+    ) -> Result<(u64, Arc<Subscriber>), NotRegistered> {
         {
             let mut published: std::sync::MutexGuard<'_, Option<String>> = self
                 .published
@@ -119,27 +123,25 @@ impl ToolSignals {
             }
         }
         let current = *self.changes.lock().expect("change counter mutex poisoned");
-        let mut subscribers: std::sync::MutexGuard<'_, BTreeMap<String, Arc<Subscriber>>> = self
+        let mut subscribers: std::sync::MutexGuard<'_, BTreeMap<u64, Arc<Subscriber>>> = self
             .subscribers
             .lock()
             .expect("subscriber registry mutex poisoned");
-        if let Some(existing) = subscribers.get(id) {
-            return Ok(Arc::clone(existing));
-        }
         if subscribers.len() >= MAX_SUBSCRIPTIONS {
             return Err(NotRegistered::Capacity);
         }
+        let serial = self.next_serial.fetch_add(1, Ordering::Relaxed);
         let subscriber = Arc::new(Subscriber::new(current));
-        subscribers.insert(id.to_owned(), Arc::clone(&subscriber));
-        Ok(subscriber)
+        subscribers.insert(serial, Arc::clone(&subscriber));
+        Ok((serial, subscriber))
     }
 
-    /// Drop one listener, if it is registered.
-    pub(crate) fn unregister(&self, id: &str) {
+    /// Drop one listener by its serial, and only that listener.
+    pub(crate) fn unregister(&self, serial: u64) {
         self.subscribers
             .lock()
             .expect("subscriber registry mutex poisoned")
-            .remove(id);
+            .remove(&serial);
     }
 
     /// Publish one view digest and wake every listener when it is new.
@@ -168,7 +170,7 @@ impl ToolSignals {
             *changes += 1;
             *changes
         };
-        let subscribers: std::sync::MutexGuard<'_, BTreeMap<String, Arc<Subscriber>>> = self
+        let subscribers: std::sync::MutexGuard<'_, BTreeMap<u64, Arc<Subscriber>>> = self
             .subscribers
             .lock()
             .expect("subscriber registry mutex poisoned");

@@ -344,9 +344,9 @@ fn config_set_schema_states_session_default() {
 #[test]
 fn announce_after_profile_change_publishes_once() {
     let state = state();
-    let subscriber = state
+    let (_, subscriber) = state
         .tool_signals
-        .register("announce", "seed".to_owned())
+        .register("seed".to_owned())
         .expect("register");
     {
         let mut rt: std::sync::MutexGuard<'_, clio_config::Runtime> =

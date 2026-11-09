@@ -22,7 +22,9 @@
 use crate::event_stream::frame;
 use crate::http::HttpConfig;
 use crate::http::http_test_support_tests::spawn_server;
-use crate::http_candidate_fixtures::headers as admission_headers;
+use crate::http_candidate_fixtures::{
+    body, check_error_envelope, headers as admission_headers, post,
+};
 use crate::runtime::McpState;
 use crate::stateless_fixtures::{CANDIDATE_FIXTURE_REVISION, required_meta};
 use crate::tool_listen::acknowledged;
@@ -147,6 +149,54 @@ fn change_view(state: &McpState, all_groups: bool) -> bool {
         config.set_mcp_tool_groups(groups);
     }
     state.announce_tool_view()
+}
+
+#[test]
+fn a_listen_request_without_the_version_header_is_refused_before_a_stream_opens() {
+    let (port, handler) = spawn_server(HttpConfig::default());
+    let response = post(
+        port,
+        &listen_frame(1),
+        "Mcp-Method: subscriptions/listen\r\n",
+    );
+
+    assert_eq!(response.status, 400, "{}", response.body);
+    let answer = body(&response);
+    check_error_envelope(&answer, 1).expect("a refusal is an error envelope");
+    assert_eq!(answer["error"]["code"], json!(-32020), "{answer}");
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("MCP-Protocol-Version")),
+        "{answer}"
+    );
+    assert_eq!(
+        handler.state().tool_signals.subscribers(),
+        0,
+        "a refused request registers no subscriber"
+    );
+}
+
+#[test]
+fn a_listen_request_whose_method_header_names_another_method_is_refused() {
+    let (port, handler) = spawn_server(HttpConfig::default());
+    let response = post(port, &listen_frame(1), &admission_headers("tools/list"));
+
+    assert_eq!(response.status, 400, "{}", response.body);
+    let answer = body(&response);
+    check_error_envelope(&answer, 1).expect("a refusal is an error envelope");
+    assert_eq!(answer["error"]["code"], json!(-32020), "{answer}");
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("Mcp-Method")),
+        "{answer}"
+    );
+    assert_eq!(
+        handler.state().tool_signals.subscribers(),
+        0,
+        "a refused request registers no subscriber"
+    );
 }
 
 #[test]

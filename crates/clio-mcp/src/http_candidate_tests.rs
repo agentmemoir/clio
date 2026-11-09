@@ -255,6 +255,28 @@ fn http_required_metadata_refusal() {
 }
 
 #[test]
+fn http_discovery_reports_the_list_change_capability() {
+    let port = spawn_candidate();
+    let response = post(
+        port,
+        &request(
+            "server/discover",
+            &required_meta(CANDIDATE_FIXTURE_REVISION),
+        ),
+        &headers("server/discover"),
+    );
+
+    assert_eq!(response.status, 200);
+    let answer = body(&response);
+    check_success_envelope(&answer, 7).expect("discovery is served");
+    assert_eq!(
+        answer["result"]["capabilities"]["tools"]["listChanged"],
+        json!(true),
+        "HTTP serves the listen stream"
+    );
+}
+
+#[test]
 fn http_optional_metadata_accepted() {
     let port = spawn_candidate();
     let required = post(

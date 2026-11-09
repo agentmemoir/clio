@@ -20,12 +20,11 @@
 //!
 //! ## Boundary
 //!
-//! Changes to the candidate dispatcher's behavior should normally require
-//! changes here. Changes to the pinned revision's suites should not.
+//! Changes to the dispatcher's behavior should normally require changes here; changes to the pinned revision's suites should not.
 //!
 //! Keep this module focused on the candidate dispatcher's fixtures.
 
-use super::{CACHE_HINTS, SUPPORTED_REVISIONS, dispatch, required_capability};
+use super::{CACHE_HINTS, SUPPORTED_REVISIONS, Transport, dispatch, required_capability};
 use crate::MCP_PROTOCOL_REVISION as REVISION;
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
@@ -36,7 +35,7 @@ use crate::stateless_fixtures::{
 use serde_json::{Value, json};
 
 fn answer(state: &McpState, msg: &Value) -> Value {
-    dispatch(state, msg).expect("a request carrying an id is answered")
+    dispatch(state, Transport::Http, msg).expect("a request carrying an id is answered")
 }
 
 fn assert_states_agree(first: &McpState, second: &McpState, msg: &Value) -> Value {
@@ -75,6 +74,18 @@ fn discover_reports_the_candidate_revision_and_its_capabilities() {
     );
     assert_eq!(result["ttlMs"], json!(CACHE_HINTS.ttl_ms));
     assert_eq!(result["cacheScope"], json!(CACHE_HINTS.scope));
+}
+
+#[test]
+fn stdio_discovery_reports_no_list_change_capability() {
+    let state = state();
+    let frame = request("server/discover", &required_meta(REVISION));
+    let res = super::admit_stdio(&state, &frame.to_string()).expect("a request carries an id");
+    assert_eq!(
+        res["result"]["capabilities"]["tools"]["listChanged"],
+        json!(false),
+        "the headerless transport cannot serve a subscription"
+    );
 }
 
 #[test]
@@ -362,6 +373,7 @@ fn a_message_without_an_id_is_a_notification_and_is_never_answered() {
     assert!(
         dispatch(
             &state,
+            Transport::Http,
             &json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })
         )
         .is_none()
@@ -370,7 +382,7 @@ fn a_message_without_an_id_is_a_notification_and_is_never_answered() {
         "jsonrpc": "2.0", "method": "tools/list",
         "params": { "_meta": required_meta(REVISION) }
     });
-    assert!(dispatch(&state, &msg).is_none());
+    assert!(dispatch(&state, Transport::Http, &msg).is_none());
 }
 
 #[test]
@@ -388,9 +400,10 @@ fn first_message_is_served_without_a_handshake() {
 
 #[test]
 fn dispatch_takes_one_message_and_no_session_handle() {
-    let entry: fn(&McpState, &Value) -> Option<Value> = dispatch;
+    let entry: fn(&McpState, Transport, &Value) -> Option<Value> = dispatch;
     let res = entry(
         &state(),
+        Transport::Http,
         &request("server/discover", &required_meta(REVISION)),
     )
     .expect("a request carrying an id is answered");

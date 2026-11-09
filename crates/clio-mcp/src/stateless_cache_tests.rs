@@ -28,7 +28,7 @@
 //!
 //! Keep this module focused on the result fields a revision adds.
 
-use super::{CACHE_HINTS, dispatch};
+use super::{CACHE_HINTS, Transport, dispatch};
 use crate::protocol::{ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
 use crate::runtime::McpState;
 use crate::stateless_fixtures::{
@@ -37,7 +37,7 @@ use crate::stateless_fixtures::{
 use serde_json::{Value, json};
 
 fn answer(state: &McpState, msg: &Value) -> Value {
-    dispatch(state, msg).expect("a request carrying an id is answered")
+    dispatch(state, Transport::Http, msg).expect("a request carrying an id is answered")
 }
 
 /// The hint pair one page carries, read from its result.
