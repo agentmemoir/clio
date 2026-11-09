@@ -108,6 +108,8 @@ pub mod write_tools;
 mod write_tools_handlers;
 
 #[cfg(test)]
+mod conditional_http;
+#[cfg(test)]
 mod lib_tests;
 #[cfg(test)]
 mod stateless;
