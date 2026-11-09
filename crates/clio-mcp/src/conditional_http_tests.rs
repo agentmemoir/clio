@@ -8,13 +8,12 @@
 //! header, and the sentinel decode of an encoded name.
 //!
 //! ## Owns
-//! - Every assertion about `check_headers`, `decode_name_header`, and the
-//!   header constants
+//! - Every assertion about `check_headers`, `decode_name_header`, `refuse`, and
+//!   the header constants
 //!
 //! ## Does not own
 //! - The guard itself (`conditional_http`)
-//! - The HTTP route and its response status (see the crate's integration
-//!   suites)
+//! - The HTTP route and its framing (see the crate's integration suites)
 //!
 //! ## Boundary
 //!
@@ -25,7 +24,7 @@
 
 use super::{
     ERR_HEADER_MISMATCH, MCP_METHOD_HEADER, MCP_NAME_HEADER, NAME_REQUIRING_METHODS,
-    SENTINEL_PREFIX, SENTINEL_SUFFIX, check_headers, decode_name_header,
+    SENTINEL_PREFIX, SENTINEL_SUFFIX, check_headers, decode_name_header, refuse,
 };
 use crate::protocol::RpcError;
 use base64::Engine;
@@ -72,6 +71,44 @@ fn assert_fault(headers: &[(&str, &str)], body: &Value, header: &str) -> String 
         err.message
     );
     err.message
+}
+
+/// The candidate refusal one request draws, with its body parsed.
+///
+/// `None` is a request the guard accepts.
+fn refusal(headers: &[(&str, &str)], body: &Value) -> Option<(u16, Value)> {
+    let supplied: HashMap<&str, &str> = headers.iter().copied().collect();
+    let (status, text) = refuse(|name: &str| supplied.get(name).copied(), body)?;
+    Some((
+        status,
+        serde_json::from_str(&text).expect("the refusal body is JSON"),
+    ))
+}
+
+/// The refusal envelope of a body refused over one request: a 400 carrying the
+/// header-mismatch code, the request's own id, and no `result`.
+fn assert_refusal(headers: &[(&str, &str)], body: &Value, id: &Value) {
+    let (status, envelope) = refusal(headers, body).expect("the guard refuses the request");
+    assert_eq!(status, 400, "{envelope}");
+    assert_eq!(envelope["jsonrpc"], json!("2.0"), "{envelope}");
+    assert_eq!(
+        envelope["error"]["code"].as_i64(),
+        Some(ERR_HEADER_MISMATCH),
+        "{envelope}"
+    );
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .is_some_and(|message| !message.is_empty()),
+        "{envelope}"
+    );
+    assert_eq!(envelope["id"], *id, "{envelope}");
+    assert!(envelope.get("result").is_none(), "{envelope}");
+    assert_eq!(
+        envelope.as_object().map(serde_json::Map::len),
+        Some(3),
+        "only `jsonrpc`, `id`, and `error`: {envelope}"
+    );
 }
 
 #[test]
@@ -289,4 +326,73 @@ fn an_unclosed_or_unreadable_sentinel_is_refused_by_the_decode() {
         let err = decode_name_header(raw).expect_err("malformed");
         assert_eq!(err.code, ERR_HEADER_MISMATCH, "{raw}: {err:?}");
     }
+}
+
+#[test]
+fn a_tool_call_missing_its_name_header_is_refused_with_400_and_the_code() {
+    assert_refusal(
+        &[(MCP_METHOD_HEADER, "tools/call")],
+        &tool_call("clio_read"),
+        &json!(1),
+    );
+}
+
+#[test]
+fn an_encoded_name_that_names_another_tool_is_refused_with_400_and_the_code() {
+    let name = encoded("clio_read");
+    assert_refusal(
+        &[(MCP_METHOD_HEADER, "tools/call"), (MCP_NAME_HEADER, &name)],
+        &tool_call("clio_write"),
+        &json!(1),
+    );
+}
+
+#[test]
+fn a_request_missing_its_method_header_is_refused_with_400_and_the_code() {
+    assert_refusal(
+        &[(MCP_NAME_HEADER, "clio_read")],
+        &tool_call("clio_read"),
+        &json!(1),
+    );
+}
+
+#[test]
+fn a_refused_request_carrying_no_id_is_answered_with_a_null_id() {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": { "name": "clio_read" }
+    });
+    assert_refusal(&[(MCP_METHOD_HEADER, "tools/call")], &body, &Value::Null);
+}
+
+#[test]
+fn a_tool_call_with_an_encoded_name_of_the_body_name_is_not_refused() {
+    let name = encoded("clio_read");
+    assert!(
+        refusal(
+            &[(MCP_METHOD_HEADER, "tools/call"), (MCP_NAME_HEADER, &name)],
+            &tool_call("clio_read"),
+        )
+        .is_none(),
+        "the route serves a request whose headers agree"
+    );
+}
+
+#[test]
+fn a_listing_with_no_name_header_is_not_refused() {
+    let body = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} });
+    assert!(
+        refusal(&[(MCP_METHOD_HEADER, "tools/list")], &body).is_none(),
+        "a listing names no resource"
+    );
+}
+
+#[test]
+fn an_unknown_method_with_agreeing_headers_is_not_refused() {
+    let body = json!({ "jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {} });
+    assert!(
+        refusal(&[(MCP_METHOD_HEADER, "resources/read")], &body).is_none(),
+        "an unknown method stays with the JSON-RPC layer"
+    );
 }

@@ -14,10 +14,12 @@
 //! - The one table of body methods that require a name, with the body field
 //!   each name is compared against
 //! - The guard that compares the headers with one request body
+//! - The refusal a route answers a failed guard with: the status and the
+//!   JSON-RPC error body
 //!
 //! ## Does not own
-//! - The HTTP route, its framing, and the response status (see `http` and
-//!   `http_read`)
+//! - The HTTP route and its framing (see `http` and `http_read`); this module
+//!   only names the status a request the guard refuses is answered with
 //! - The pinned revision constant and the JSON-RPC envelope (see the crate
 //!   root and `protocol`)
 //! - Activation: only this crate's tests compile and reach this module
@@ -31,7 +33,7 @@
 //! Keep this module focused on checking the candidate revision's request
 //! headers against the body.
 
-use crate::protocol::RpcError;
+use crate::protocol::{RpcError, error_response};
 use base64::Engine;
 use serde_json::Value;
 
@@ -140,6 +142,25 @@ where
 /// The one refusal for a request carrying no `Mcp-Method` header.
 fn missing_method() -> RpcError {
     RpcError::new(ERR_HEADER_MISMATCH, "the `Mcp-Method` header is required")
+}
+
+/// The candidate refusal for one request: the status and the JSON-RPC body a
+/// route answers when the guard fails.
+///
+/// `None` is a request whose headers agree with its body, which the route goes
+/// on to serve. The body is [`error_response`]'s envelope over the
+/// header-mismatch error, so it carries no `result`, and the request's own id,
+/// or `null` when the body has none.
+///
+/// `get` reads one header value by its lowercase wire name, as in
+/// [`check_headers`].
+pub(crate) fn refuse<'a, F>(get: F, body: &Value) -> Option<(u16, String)>
+where
+    F: Fn(&str) -> Option<&'a str>,
+{
+    let err = check_headers(get, body).err()?;
+    let envelope = error_response(body.get("id"), &err);
+    Some((400, serde_json::to_string(&envelope).unwrap_or_default()))
 }
 
 #[cfg(test)]

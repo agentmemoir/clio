@@ -79,7 +79,7 @@ impl McpHandler {
         let id = msg.get("id")?;
         match Self::route(state, msg) {
             Ok(result) => Some(Self::ok_response(Some(id), &result)),
-            Err(err) => Some(Self::error_response(Some(id), &err)),
+            Err(err) => Some(error_response(Some(id), &err)),
         }
     }
 
@@ -103,7 +103,7 @@ impl McpHandler {
     pub(crate) fn handle_frame_with_state(&self, state: &McpState, frame: &str) -> Option<Value> {
         match serde_json::from_str::<Value>(frame) {
             Ok(msg) => Self::handle_message_with_state(state, &msg),
-            Err(_) => Some(Self::error_response(
+            Err(_) => Some(error_response(
                 None,
                 &RpcError::new(ERR_PARSE, "Parse error: invalid JSON"),
             )),
@@ -265,18 +265,22 @@ impl McpHandler {
             "result": result
         })
     }
+}
 
-    fn error_response(id: Option<&Value>, err: &RpcError) -> Value {
-        let mut error = json!({ "code": err.code, "message": err.message });
-        if let Some(data) = &err.data {
-            error["data"] = data.clone();
-        }
-        json!({
-            "jsonrpc": "2.0",
-            "id": id.cloned().unwrap_or(Value::Null),
-            "error": error
-        })
+/// Build one JSON-RPC 2.0 error response, carrying no `result`.
+///
+/// An absent id is answered as `null`, which is what a request the server could
+/// not read is owed.
+pub(crate) fn error_response(id: Option<&Value>, err: &RpcError) -> Value {
+    let mut error = json!({ "code": err.code, "message": err.message });
+    if let Some(data) = &err.data {
+        error["data"] = data.clone();
     }
+    json!({
+        "jsonrpc": "2.0",
+        "id": id.cloned().unwrap_or(Value::Null),
+        "error": error
+    })
 }
 
 /// A JSON-RPC error with an optional structured `data` payload.

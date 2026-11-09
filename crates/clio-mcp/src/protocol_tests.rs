@@ -317,7 +317,7 @@ fn initialize_reports_pin_for_mismatched_client_revision() {
 fn coactivation_handoff_failure_maps_to_32001() {
     let failure = json!({"ok": false, "code": "coactivation_handoff_failed", "message": "x"});
     let err = coactivation_rpc_error(&failure).expect("mapped");
-    let response = McpHandler::error_response(Some(&json!(1)), &err);
+    let response = error_response(Some(&json!(1)), &err);
     assert_eq!(response["error"]["code"], json!(ERR_COACTIVATION_HANDOFF));
     assert_eq!(
         response["error"]["data"]["error"],
