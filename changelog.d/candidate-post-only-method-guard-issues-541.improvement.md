@@ -1,1 +1,1 @@
-An internal candidate guard now accepts only POST on the candidate MCP endpoint and refuses every other verb with status 405 and an `Allow: POST` header, and the live route is not wired to it yet, so nothing changes for users today.
+No user-facing change.
