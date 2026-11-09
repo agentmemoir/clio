@@ -11,6 +11,8 @@
 //! - `run_stdio`, the batch frame driver that asserts each stdout line is one
 //!   compact JSON-RPC response.
 //! - `stdio_write_set_matrix_with_parity`, the write-set parity test over stdio.
+//! - `stdio_removed_handshake_is_unknown_and_notifications_are_silent`, the
+//!   removed-method and notification contract over the same transport.
 //!
 //! ## Does not own
 //! - The shared write-set fixture and builders (`main`).
@@ -27,7 +29,7 @@ use clio_mcp::bound_tools;
 use serde_json::{Value, json};
 use std::io::Cursor;
 
-use crate::{init_frame, mask_volatile, rpc, state, write_set_fixture};
+use crate::{mask_volatile, request, rpc, state, tool_call, tools_list, write_set_fixture};
 
 /// Drive a batch of frames through the stdio transport; every output line is
 /// one compact JSON-RPC response (stdout purity is asserted inline).
@@ -42,8 +44,8 @@ fn run_stdio(frames: &str) -> Vec<Value> {
         .collect()
 }
 
-/// the whole write set over stdio, with parity
-/// against the in-process dispatcher and isError mirroring gated rejects.
+/// The whole write set over stdio, with parity against the in-process
+/// dispatcher and isError mirroring gated rejects.
 #[test]
 fn stdio_write_set_matrix_with_parity() {
     let fixtures = write_set_fixture();
@@ -52,26 +54,18 @@ fn stdio_write_set_matrix_with_parity() {
         .iter()
         .map(|(name, args)| clio_mcp::write_tools::dispatch(&direct_state, name, args))
         .collect();
-    let mut frames = init_frame();
+    let mut frames = String::new();
     for (i, (name, args)) in fixtures.iter().enumerate() {
-        frames.push_str(&rpc(
-            100 + i as u64,
-            "tools/call",
-            json!({"name": name, "arguments": args}),
-        ));
+        frames.push_str(&tool_call(100 + i as u64, name, args));
         frames.push('\n');
     }
-    frames.push_str(&rpc(
-        300,
-        "tools/list",
-        json!({"_meta": {"com.agentmemoir/pageSize": 100}}),
-    ));
+    frames.push_str(&tools_list(300));
     frames.push('\n');
     let responses = run_stdio(&frames);
     assert_eq!(
         responses.len(),
-        fixtures.len() + 2,
-        "initialize + every fixture answered (stdout purity)"
+        fixtures.len() + 1,
+        "every fixture answered (stdout purity)"
     );
     let tools_list = responses
         .iter()
@@ -107,4 +101,57 @@ fn stdio_write_set_matrix_with_parity() {
         let ok = direct[i]["ok"].as_bool().expect("ok");
         assert_eq!(is_error, !ok, "isError mirrors ok for `{name}`");
     }
+}
+
+/// The revision removed the handshake: `initialize` and `ping` answer as
+/// unknown methods, a notification is served silently, and a client that sends
+/// the retired revision is refused with the unsupported-version code.
+#[test]
+fn stdio_removed_handshake_is_unknown_and_notifications_are_silent() {
+    let mut frames = String::new();
+    frames.push_str(&request(1, "initialize"));
+    frames.push('\n');
+    frames.push_str(&request(2, "ping"));
+    frames.push('\n');
+    frames.push_str(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+    frames.push('\n');
+    frames.push_str(&rpc(
+        3,
+        "server/discover",
+        json!({
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2025-11-25",
+                "io.modelcontextprotocol/clientCapabilities": {}
+            }
+        }),
+    ));
+    frames.push('\n');
+    let responses = run_stdio(&frames);
+    assert_eq!(
+        responses.len(),
+        3,
+        "three requests answered and the notification silent: {responses:?}"
+    );
+    for (index, method) in [(0, "initialize"), (1, "ping")] {
+        assert_eq!(
+            responses[index]["error"]["code"],
+            json!(-32601),
+            "`{method}` was removed from the revision"
+        );
+        assert!(responses[index].get("result").is_none(), "{method} served");
+    }
+    let refused = &responses[2];
+    assert_eq!(
+        refused["error"]["code"],
+        json!(-32022),
+        "the retired revision is refused: {refused}"
+    );
+    assert_eq!(
+        refused["error"]["data"]["supported"],
+        json!([clio_mcp::MCP_PROTOCOL_REVISION])
+    );
+    assert_eq!(
+        refused["error"]["data"]["requested"],
+        json!("2025-11-25")
+    );
 }

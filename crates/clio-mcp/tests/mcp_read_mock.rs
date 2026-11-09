@@ -1,9 +1,10 @@
 // Copyright 2026 Agent Memoir (https://agentmemoir.com/)
 // SPDX-License-Identifier: Apache-2.0
 //
-//! Mock MCP client harness for the read surface: simulates dropped connections,
-//! mid-stream aborts, and dropped `MCP-Session-Id` tokens, then verifies the
-//! read dispatcher keeps state consistent (no ghost reads, no corrupt edges).
+//! Mock MCP client harness for the read surface: simulates dropped connections
+//! and mid-stream aborts, then verifies the read dispatcher keeps state
+//! consistent (no ghost reads, no corrupt edges). Every request carries the
+//! metadata the served revision requires.
 
 use clio_mcp::protocol::McpHandler;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
@@ -15,6 +16,22 @@ use std::sync::Arc;
 
 const BANK: &str = "mock-bank";
 const TS: &str = "2024-01-01T00:00:00Z";
+
+/// The metadata block the served revision requires on every request.
+fn meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": clio_mcp::MCP_PROTOCOL_REVISION,
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
+}
+
+/// The conditional headers one admitted `tools/call` carries.
+fn call_headers(name: &str) -> String {
+    format!(
+        "Mcp-Protocol-Version: {}\r\nMcp-Method: tools/call\r\nMcp-Name: {name}\r\n",
+        clio_mcp::MCP_PROTOCOL_REVISION
+    )
+}
 
 fn seed_state() -> Arc<McpState> {
     let state = McpState::open_with_effective(
@@ -69,13 +86,11 @@ impl MockMcpClient {
         }
     }
 
+    /// A reconnect is a transport event: the revision serves every request on
+    /// its own metadata, so there is no handshake to repeat.
     fn reconnect(&mut self) {
         self.connected = true;
         self.reconnects += 1;
-        let _ = self.handler.handle_message(&json!({
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {"protocolVersion": clio_mcp::MCP_PROTOCOL_REVISION, "capabilities": {}}
-        }));
     }
 
     /// Simulate a transport drop; the next call transparently reconnects.
@@ -92,7 +107,7 @@ impl MockMcpClient {
             .handler
             .handle_message(&json!({
                 "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                "params": {"name": name, "arguments": args}
+                "params": {"_meta": meta(), "name": name, "arguments": args}
             }))
             .expect("response");
         response["result"]["structuredContent"].clone()
@@ -205,54 +220,25 @@ fn http_post(addr: &SocketAddr, body: &str, extra: &str) -> (u16, Value, HashMap
 }
 
 #[test]
-fn mock_client_dropped_session_requires_reinitialize() {
-    let addr = spawn_http_session_server();
-    let call = json!({"jsonrpc":"2.0","id":7,"method":"tools/call",
-                      "params":{"name":"inspect","arguments":{}}})
-    .to_string();
-    // Dropped session token: the server rejects the read.
-    let (status, _, _) = http_post(&addr, &call, "");
-    assert_eq!(status, 404, "read without a known session must be rejected");
-    // Re-initialize mints a fresh session; the read then succeeds.
-    let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize",
-                      "params":{"protocolVersion":clio_mcp::MCP_PROTOCOL_REVISION,"capabilities":{}}})
-    .to_string();
-    let (status, _, headers) = http_post(&addr, &init, "");
-    assert_eq!(status, 200);
-    let session = headers
-        .get("mcp-session-id")
-        .expect("initialize must mint a session id")
-        .clone();
-    let (status, body, _) = http_post(&addr, &call, &format!("MCP-Session-Id: {session}\r\n"));
-    assert_eq!(status, 200, "session read succeeds");
-    assert_eq!(body["result"]["structuredContent"]["ok"], json!(true));
-}
-
-#[test]
 fn mock_client_midstream_socket_close_then_clean_read() {
     let addr = spawn_http_session_server();
-    let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize",
-                      "params":{"protocolVersion":clio_mcp::MCP_PROTOCOL_REVISION,"capabilities":{}}})
-    .to_string();
-    let (status, _, headers) = http_post(&addr, &init, "");
-    assert_eq!(status, 200);
-    let session = headers.get("mcp-session-id").expect("session").clone();
-
     // Abort mid-stream: send the request and drop the socket before reading.
     let call = json!({"jsonrpc":"2.0","id":8,"method":"tools/call",
-                      "params":{"name":"get","arguments":{"item_id":"m-1"}}})
+                      "params":{"_meta":meta(),"name":"get","arguments":{"item_id":"m-1"}}})
     .to_string();
     let req = format!(
-        "POST /mcp HTTP/1.1\r\nHost: localhost\r\nMCP-Session-Id: {session}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n\r\n{call}",
-        call.len()
+        "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n{}\r\n{call}",
+        call.len(),
+        call_headers("get")
     );
     let mut stream = TcpStream::connect(addr).expect("connect");
     stream.write_all(req.as_bytes()).expect("write");
     drop(stream);
 
-    // A fresh read on the same session still returns the correct item.
-    let (status, body, _) = http_post(&addr, &call, &format!("MCP-Session-Id: {session}\r\n"));
-    assert_eq!(status, 200, "aborted stream must not wedge the session");
+    // A fresh request on the same endpoint still returns the correct item:
+    // nothing about the aborted stream is carried forward.
+    let (status, body, _) = http_post(&addr, &call, &call_headers("get"));
+    assert_eq!(status, 200, "an aborted stream must not wedge the endpoint");
     let structured = &body["result"]["structuredContent"];
     assert_eq!(structured["ok"], json!(true), "{body}");
     assert_eq!(structured["id"], json!("m-1"));

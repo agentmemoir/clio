@@ -12,18 +12,18 @@
     "sqlite::memory:"
   ],
   "capture": {
-    "source_commit": "1c0e65bf42a9f702b9300737b840789ab30c68ba",
-    "binary_sha256": "0c6cb5972e593e5dcde81ed90586b6c52aef83bfc88ed3708e6679b5f1209cd4",
-    "captured_at": "2026-11-05T22:02:23Z"
+    "source_commit": "b01c0b246135f1bcb9797cd0a20d9c79e0425af0",
+    "binary_sha256": "78a594fb7b5581754b8d875660708ae8fc46edd3857d0be7af113e3fe336558f",
+    "captured_at": "2026-11-09T00:00:00Z"
   },
   "exchanges": [
     {
-      "request": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"clio-mcp-transcript\",\"version\":\"1\"}}}",
-      "response": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{\"listChanged\":false}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"clio-mcp\",\"version\":\"0.1.0\"}}}"
+      "request": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server/discover\",\"params\":{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}",
+      "response": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"_meta\":{\"io.modelcontextprotocol/serverInfo\":{\"name\":\"clio-mcp\",\"version\":\"0.1.0\"}},\"cacheScope\":\"private\",\"capabilities\":{\"tools\":{\"listChanged\":false}},\"resultType\":\"complete\",\"supportedVersions\":[\"2026-07-28\"],\"ttlMs\":300000}}"
     },
     {
-      "request": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"ranking_env_get\",\"arguments\":{}}}",
-      "response": "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"ok\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"admission\":{\"w1\":0.25,\"w2\":0.25,\"w3\":0.25,\"w4\":0.25},\"coactivation\":{\"eta\":0.15,\"half_life_days\":30.0,\"hub_degree_limit\":16,\"max_hops\":2,\"w_min\":0.05},\"hygiene\":{\"dup\":0.15,\"pattern\":0.25,\"secret\":0.35,\"staleness\":0.1,\"utility\":0.15},\"hygiene_stale_half_life_days\":90.0,\"intent_gate\":{\"skip_confidence\":null},\"maintenance_triggers\":{\"cooldown_seconds\":300,\"dirty_ancestor_threshold\":1,\"eligible_hub_threshold\":1,\"hub_budget_per_wave\":16,\"max_waves_per_hour\":12,\"stale_unit_threshold\":1},\"ok\":true,\"retention\":{\"half_life_days\":30.0},\"retrieval\":{\"dense\":0.3333333333333333,\"importance\":0.3333333333333333,\"lexical\":0.3333333333333333},\"theta_admit\":0.4375,\"theta_overrides\":{},\"trust\":{\"agent_inferred\":0.85,\"third_party\":0.95,\"user_stated\":1.0},\"type_prior_overrides\":{}}}}"
+      "request": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}},\"name\":\"ranking_env_get\",\"arguments\":{}}}",
+      "response": "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"_meta\":{\"io.modelcontextprotocol/serverInfo\":{\"name\":\"clio-mcp\",\"version\":\"0.1.0\"}},\"content\":[{\"text\":\"ok\",\"type\":\"text\"}],\"isError\":false,\"resultType\":\"complete\",\"structuredContent\":{\"admission\":{\"w1\":0.25,\"w2\":0.25,\"w3\":0.25,\"w4\":0.25},\"coactivation\":{\"eta\":0.15,\"half_life_days\":30.0,\"hub_degree_limit\":16,\"max_hops\":2,\"w_min\":0.05},\"hygiene\":{\"dup\":0.15,\"pattern\":0.25,\"secret\":0.35,\"staleness\":0.1,\"utility\":0.15},\"hygiene_stale_half_life_days\":90.0,\"intent_gate\":{\"skip_confidence\":null},\"maintenance_triggers\":{\"cooldown_seconds\":300,\"dirty_ancestor_threshold\":1,\"eligible_hub_threshold\":1,\"hub_budget_per_wave\":16,\"max_waves_per_hour\":12,\"stale_unit_threshold\":1},\"ok\":true,\"retention\":{\"half_life_days\":30.0},\"retrieval\":{\"dense\":0.3333333333333333,\"importance\":0.3333333333333333,\"lexical\":0.3333333333333333},\"theta_admit\":0.4375,\"theta_overrides\":{},\"trust\":{\"agent_inferred\":0.85,\"third_party\":0.95,\"user_stated\":1.0},\"type_prior_overrides\":{}}}}"
     }
   ]
 }

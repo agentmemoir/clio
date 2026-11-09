@@ -57,16 +57,12 @@ fn rpc(id: u64, method: &str, params: Value) -> String {
     json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}).to_string()
 }
 
-fn init_frame() -> String {
-    format!(
-        "{}\n{}\n",
-        rpc(
-            1,
-            "initialize",
-            json!({"protocolVersion": MCP_PROTOCOL_REVISION, "capabilities": {}})
-        ),
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#
-    )
+/// The metadata block the served revision requires on every request.
+fn meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_REVISION,
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
 }
 
 fn run_stdio(state: &Arc<McpState>, frames: &str) -> Vec<Value> {
@@ -102,18 +98,20 @@ fn stdio_correct_audit_trail_and_inspect_total() {
             json!({"name": "inspect", "arguments": {"bank": BANK, "limit": 1}}),
         ),
     ];
-    let mut frames = init_frame();
+    let mut frames = String::new();
     for (id, args) in &calls {
-        frames.push_str(&rpc(*id, "tools/call", args.clone()));
+        let mut params = args.clone();
+        params["_meta"] = meta();
+        frames.push_str(&rpc(*id, "tools/call", params));
         frames.push('\n');
     }
     let responses = run_stdio(&state, &frames);
-    assert_eq!(responses.len(), 4, "stdout purity");
+    assert_eq!(responses.len(), 3, "stdout purity");
 
-    let corrected = &responses[1]["result"]["structuredContent"];
+    let corrected = &responses[0]["result"]["structuredContent"];
     assert_eq!(corrected["rule"], json!("discrete"), "{corrected}");
 
-    let trail = &responses[2]["result"]["structuredContent"];
+    let trail = &responses[1]["result"]["structuredContent"];
     let ops: Vec<&str> = trail["events"]
         .as_array()
         .expect("events")
@@ -132,7 +130,7 @@ fn stdio_correct_audit_trail_and_inspect_total() {
     sorted.sort_unstable();
     assert_eq!(ts, sorted, "timeline must be ordered ascending");
 
-    let inspected = &responses[3]["result"]["structuredContent"];
+    let inspected = &responses[2]["result"]["structuredContent"];
     assert_eq!(
         inspected["items"].as_array().expect("items").len(),
         1,
