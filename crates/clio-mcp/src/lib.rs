@@ -5,7 +5,7 @@
 //!
 //! This module is the `clio-mcp` crate root: machine-readable `tool_schema` pack,
 //! shared tool dispatcher, and MCP transport bindings (stdio + Streamable HTTP)
-//! for the pinned protocol revision.
+//! for the one stateless protocol revision this server implements.
 //!
 //! ## Owns
 //! - Tool schema pack generation and export
@@ -40,6 +40,7 @@ pub mod batch_tools;
 pub mod call_accounting;
 pub mod catalog_invoke;
 mod catalog_search;
+mod conditional_http;
 pub mod config_tools;
 mod conn_pool;
 pub mod discovery_tool_defs;
@@ -47,12 +48,14 @@ mod discovery_tools;
 mod export_destination;
 pub mod http;
 pub mod http_auth;
+mod http_candidate;
 mod http_guard;
 mod http_post;
 mod http_read;
 pub mod hygiene_tools;
 pub mod index_drain;
 pub mod maintenance_trigger;
+mod method_guard;
 pub mod mutator_record_tools;
 pub mod mutator_tools;
 mod ops_embedder;
@@ -99,6 +102,7 @@ pub mod schema_shape;
 mod schema_sync_defs;
 pub mod skill_asset_names;
 pub mod skill_assets;
+mod stateless;
 pub mod stdio;
 pub mod store_write;
 pub mod subject_request_tools;
@@ -109,25 +113,18 @@ pub mod write_tools;
 mod write_tools_handlers;
 
 #[cfg(test)]
-mod conditional_http;
-#[cfg(test)]
-mod http_candidate;
-#[cfg(test)]
 mod http_candidate_fixtures;
 #[cfg(test)]
 mod lib_tests;
 #[cfg(test)]
-mod method_guard;
-#[cfg(test)]
-mod stateless;
-#[cfg(test)]
 mod stateless_fixtures;
 
-/// Pinned MCP specification revision (item 3).
+/// The MCP specification revision this server implements.
 ///
-/// Transport and tool rules come from this single revision; later revisions
-/// (e.g. sessionless `2026-07-28`) are intentionally NOT mixed in.
-pub const MCP_PROTOCOL_REVISION: &str = "2025-11-25";
+/// Transport and tool rules come from this one revision, and it is the revision
+/// the server advertises on every transport. The stateless transport rules are
+/// this revision's rules; no earlier or later revision is served alongside it.
+pub const MCP_PROTOCOL_REVISION: &str = "2026-07-28";
 
 /// Tool names bound over MCP in this build (the write/mutate set).
 ///

@@ -3,12 +3,12 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for a non-activated candidate dispatcher that
-//! answers MCP JSON-RPC requests under the rules of revision `2026-07-28`:
+//! This module is responsible for the stateless MCP dispatcher that answers MCP
+//! JSON-RPC requests under the rules of the one revision this server serves:
 //! per-request metadata, removed methods, and that revision's error codes.
 //!
 //! ## Owns
-//! - The candidate revision constant and the supported-revision list
+//! - The supported-revision list the admission and dispatch read
 //! - `params._meta` validation, the unsupported-version error, and the
 //!   required-client-capability refusal
 //! - The refusal of a tool call that answers input this server never requested
@@ -16,18 +16,18 @@
 //! - The one cache-hint pair every cacheable result of this dispatcher carries
 //!
 //! ## Does not own
-//! - The pinned revision, the tool catalogue, and the transports (see
-//!   `protocol`, `http`, `stdio`)
+//! - The revision constant itself and the tool catalogue (see the crate root
+//!   and `protocol`)
+//! - Transport framing and gates (see `http`, `http_candidate`, `stdio`)
 //! - Tool semantics (see `write_tools`, `read_tools`)
-//! - Activation: only this crate's tests compile and reach this module
 //!
 //! ## Boundary
 //!
-//! Changes to the candidate revision's request rules should normally require
-//! changes here. Changes to the pinned revision, a transport, or a tool should
+//! Changes to the stateless revision's request rules should normally require
+//! changes here. Changes to the revision constant, a transport, or a tool should
 //! not require changes here.
 //!
-//! Keep this module focused on the candidate revision's request handling.
+//! Keep this module focused on the revision's request handling.
 
 use crate::conditional_http::{ERR_HEADER_MISMATCH, Refusal, check_headers, refusal};
 use crate::protocol::{
@@ -37,9 +37,6 @@ use crate::protocol::{
 use crate::runtime::McpState;
 use serde_json::{Map, Value, json};
 
-/// The revision this dispatcher answers as.
-pub(crate) const CANDIDATE_REVISION: &str = "2026-07-28";
-
 /// Wire name of the header carrying the revision the client is using.
 ///
 /// The transport lowercases header keys, so this is the key the getter sees.
@@ -48,8 +45,8 @@ pub(crate) const PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
 /// The header's name as a refusal message spells it.
 const PROTOCOL_VERSION_HEADER_NAME: &str = "MCP-Protocol-Version";
 
-/// Revisions this dispatcher accepts.
-pub(crate) const SUPPORTED_REVISIONS: &[&str] = &[CANDIDATE_REVISION];
+/// Revisions this dispatcher accepts: the one revision this server serves.
+pub(crate) const SUPPORTED_REVISIONS: &[&str] = &[crate::MCP_PROTOCOL_REVISION];
 
 /// JSON-RPC unsupported protocol version.
 const ERR_UNSUPPORTED_PROTOCOL_VERSION: i64 = -32022;
@@ -99,7 +96,7 @@ pub(crate) const CACHE_HINTS: CacheHints = CacheHints {
     scope: "private",
 };
 
-/// Admit one candidate-revision HTTP request and, when it passes, serve it.
+/// Admit one stateless HTTP request and, when it passes, serve it.
 ///
 /// The checks run in one fixed order and stop at the first failure: the conditional headers, JSON syntax, the required version header, the required metadata, header/body equality, the supported revision, and the client capability the request needs. Only a request that passes every check reaches [`dispatch`].
 ///
@@ -164,14 +161,13 @@ where
     Ok(dispatch(state, &body))
 }
 
-/// Admit one candidate frame on a transport with no header layer.
+/// Admit one frame on a transport with no header layer.
 ///
 /// The stdio transport has no headers, so there is nothing to compare. The
 /// frame is parsed and then answered through [`dispatch`], which applies the
 /// same required-metadata, supported-revision, and client-capability rules the
 /// HTTP admission applies after its header checks. A frame that is not JSON
 /// answers the JSON-RPC parse error.
-#[cfg(test)]
 pub(crate) fn admit_stdio(state: &McpState, frame: &str) -> Option<Value> {
     let Ok(body) = serde_json::from_str::<Value>(frame) else {
         let err = RpcError::new(ERR_PARSE, "Parse error: invalid JSON");

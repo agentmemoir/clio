@@ -8,7 +8,7 @@
 //! header, and the sentinel decode of an encoded name.
 //!
 //! ## Owns
-//! - Every assertion about `check_headers`, `decode_name_header`, `refuse`, and
+//! - Every assertion about `check_headers`, `decode_name_header`, `refusal`, and
 //!   the header constants
 //!
 //! ## Does not own
@@ -24,7 +24,7 @@
 
 use super::{
     ERR_HEADER_MISMATCH, MCP_METHOD_HEADER, MCP_NAME_HEADER, NAME_REQUIRING_METHODS,
-    SENTINEL_PREFIX, SENTINEL_SUFFIX, check_headers, decode_name_header, refuse,
+    SENTINEL_PREFIX, SENTINEL_SUFFIX, check_headers, decode_name_header, refusal as render,
 };
 use crate::protocol::RpcError;
 use base64::Engine;
@@ -78,7 +78,8 @@ fn assert_fault(headers: &[(&str, &str)], body: &Value, header: &str) -> String 
 /// `None` is a request the guard accepts.
 fn refusal(headers: &[(&str, &str)], body: &Value) -> Option<(u16, Value)> {
     let supplied: HashMap<&str, &str> = headers.iter().copied().collect();
-    let (status, text) = refuse(|name: &str| supplied.get(name).copied(), body)?;
+    let err = check_headers(|name: &str| supplied.get(name).copied(), body).err()?;
+    let (status, text) = render(body, &err);
     Some((
         status,
         serde_json::from_str(&text).expect("the refusal body is JSON"),

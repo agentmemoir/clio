@@ -8,8 +8,7 @@
 //! imply for one tool call.
 //!
 //! ## Owns
-//! - `Principal` (label, actor, bank list) and `session_identity`, the record
-//!   identity a session binds to
+//! - `Principal`: the record label, the actor, and the bank list
 //! - The two refusal rules applied to one call: a declared actor that disagrees
 //!   with the bound one, and a bank outside the credential's list
 //! - The grant predicate over that same list: whether the credential covers one
@@ -17,7 +16,7 @@
 //!
 //! ## Does not own
 //! - Where a principal comes from (see `http_auth`)
-//! - Whether a presented session id belongs to the requester (see `http_guard`)
+//! - Origin validation and the request gates (see `http_guard`, `http`)
 //! - The shared-bank deployment gate (see `runtime_context`)
 //! - Tool bodies, which never learn that a principal exists
 //!
@@ -59,19 +58,6 @@ impl Principal {
             actor,
             banks,
         }
-    }
-
-    /// The identity a session binds to: the record's label.
-    ///
-    /// The store refuses a repeated label, so within one server's store the
-    /// label names exactly one credential. Two different credentials can
-    /// therefore never compare equal, and no record can answer for another —
-    /// which is what keeps a session bound to the one principal that minted it.
-    ///
-    /// Not a secret and never logged: the value lives in one process's session
-    /// map and is only ever compared.
-    pub(crate) fn session_identity(&self) -> String {
-        self.label.clone()
     }
 
     /// The actor this principal authorizes a call as, given what the caller

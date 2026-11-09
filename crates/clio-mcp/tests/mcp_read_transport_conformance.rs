@@ -32,7 +32,6 @@
 mod support;
 
 use clio_mcp::MCP_PROTOCOL_REVISION;
-use clio_mcp::protocol::McpHandler;
 use clio_mcp::read_explain::TRACE_HIT_KEYS;
 use clio_mcp::runtime::McpState;
 use serde_json::{Value, json};
@@ -94,9 +93,8 @@ fn init_frame() -> String {
 }
 
 fn run_stdio(state: &Arc<McpState>, frames: &str) -> Vec<Value> {
-    let handler = McpHandler::new(Arc::clone(state));
     let mut out: Vec<u8> = Vec::new();
-    clio_mcp::stdio::serve(&handler, Cursor::new(frames.as_bytes().to_vec()), &mut out)
+    clio_mcp::stdio::serve(state, Cursor::new(frames.as_bytes().to_vec()), &mut out)
         .expect("stdio");
     String::from_utf8(out)
         .expect("utf8")

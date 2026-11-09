@@ -216,7 +216,7 @@ fn validate_flags_broken_schemas() {
 #[test]
 fn pack_revision_is_pinned() {
     assert_eq!(pack()["mcp_protocol_revision"], MCP_PROTOCOL_REVISION);
-    assert_eq!(MCP_PROTOCOL_REVISION, "2025-11-25");
+    assert_eq!(MCP_PROTOCOL_REVISION, "2026-07-28");
 }
 
 #[test]

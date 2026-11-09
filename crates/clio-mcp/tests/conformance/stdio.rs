@@ -27,14 +27,15 @@ use clio_mcp::bound_tools;
 use serde_json::{Value, json};
 use std::io::Cursor;
 
-use crate::{handler, init_frame, mask_volatile, rpc, state, write_set_fixture};
+use crate::{init_frame, mask_volatile, rpc, state, write_set_fixture};
 
 /// Drive a batch of frames through the stdio transport; every output line is
 /// one compact JSON-RPC response (stdout purity is asserted inline).
 fn run_stdio(frames: &str) -> Vec<Value> {
-    let h = handler();
+    let state = state();
     let mut out: Vec<u8> = Vec::new();
-    clio_mcp::stdio::serve(&h, Cursor::new(frames.as_bytes().to_vec()), &mut out).expect("stdio");
+    clio_mcp::stdio::serve(&state, Cursor::new(frames.as_bytes().to_vec()), &mut out)
+        .expect("stdio");
     let text = String::from_utf8(out).expect("utf8");
     text.lines()
         .map(|line| serde_json::from_str::<Value>(line).expect("pure stdout line"))

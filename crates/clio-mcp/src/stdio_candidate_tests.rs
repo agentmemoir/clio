@@ -25,7 +25,7 @@
 //!
 //! Keep this module focused on the candidate's stdio conformance scenarios.
 
-use super::serve_candidate;
+use super::serve;
 use crate::conditional_http::MCP_METHOD_HEADER;
 use crate::runtime::McpState;
 use crate::stateless::{PROTOCOL_VERSION_HEADER, admit};
@@ -115,7 +115,7 @@ fn answers(state: &McpState, frames: &[&Value]) -> Vec<Value> {
         input.push('\n');
     }
     let mut output = Vec::new();
-    serve_candidate(state, Cursor::new(input.into_bytes()), &mut output)
+    serve(state, Cursor::new(input.into_bytes()), &mut output)
         .expect("the candidate stdio adapter serves the frames");
     let text = String::from_utf8(output).expect("the adapter writes UTF-8");
     text.lines()

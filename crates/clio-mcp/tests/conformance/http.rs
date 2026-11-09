@@ -154,25 +154,6 @@ fn t06_http_initialize_and_optional_session_lifecycle() {
             "`{name}` missing from HTTP tools/list"
         );
     }
-
-    // Sessions enabled: minted on initialize, required afterwards, DELETE ends it.
-    let addr = spawn_http(clio_mcp::http::HttpConfig {
-        sessions_enabled: true,
-        ..clio_mcp::http::HttpConfig::default()
-    });
-    let init = rpc(
-        1,
-        "initialize",
-        json!({"protocolVersion": MCP_PROTOCOL_REVISION, "capabilities": {}}),
-    );
-    let (status, _init_body) = http_post(&addr, &init, "");
-    assert_eq!(status, 200);
-    // Mint is transport-level; request again to observe the session gate.
-    let list = rpc(2, "tools/list", json!({}));
-    let (status, _) = http_post(&addr, &list, "");
-    assert_eq!(status, 404, "call without minted session rejected");
-    let (status, _) = http_post(&addr, &init, "");
-    assert_eq!(status, 200, "initialize is exempt from the session gate");
 }
 
 #[test]

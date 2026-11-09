@@ -7,12 +7,11 @@
 use super::http_test_support_tests::{INIT, post_json, request, spawn_server};
 use super::*;
 use crate::conn_pool::MAX_CONNECTIONS;
-use crate::http_guard::mint_session;
 use crate::http_guard::origin_host_allowed;
 use crate::runtime::McpOpenOptions;
 use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};
 use clio_types::Actor;
-use serde_json::json;
+use serde_json::{Value, json};
 
 /// A store holding the one record whose secret is `secret-token`, built without
 /// a file: the literal keeps the request fixtures below readable.
@@ -37,38 +36,6 @@ fn t06_initialize_returns_pinned_revision() {
         json!(crate::MCP_PROTOCOL_REVISION)
     );
     assert_eq!(body["result"]["serverInfo"]["name"], json!("clio-mcp"));
-}
-
-#[test]
-fn t06_session_lifecycle_mint_echo_delete() {
-    let (port, _) = spawn_server(HttpConfig {
-        sessions_enabled: true,
-        ..HttpConfig::default()
-    });
-    let res = post_json(port, INIT, "");
-    let session = res
-        .headers
-        .get("mcp-session-id")
-        .cloned()
-        .expect("session minted on initialize");
-    // Without the session id subsequent calls are rejected.
-    let list = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
-    let no_session = post_json(port, list, "");
-    assert_eq!(no_session.status, 404, "unauthorized session use rejected");
-    // Echo works.
-    let call = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"consolidate","arguments":{"bank":"bank-a"}}}"#;
-    let ok = post_json(port, call, &format!("MCP-Session-Id: {session}\r\n"));
-    assert_eq!(ok.status, 200);
-    // DELETE terminates; the id stops working.
-    let del = request(
-        port,
-        &format!(
-            "DELETE /mcp HTTP/1.1\r\nHost: localhost\r\nMCP-Session-Id: {session}\r\nContent-Length: 0\r\n\r\n"
-        ),
-    );
-    assert_eq!(del.status, 200);
-    let after = post_json(port, call, &format!("MCP-Session-Id: {session}\r\n"));
-    assert_eq!(after.status, 404);
 }
 
 #[test]
@@ -247,7 +214,6 @@ fn unacceptable_accept_is_406_and_unserved_methods_are_405() {
 #[test]
 fn route_helpers_cover_security_and_status_paths() {
     let (port, handler) = spawn_server(HttpConfig::default());
-    let shared = HttpShared::default();
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     // write_simple error writer via malformed request line. With no message the
     // advertised Content-Length must be zero (never a body-less truncation).
@@ -293,26 +259,6 @@ fn route_helpers_cover_security_and_status_paths() {
         &["custom-host.example.com".into()]
     ));
     assert!(!origin_host_allowed("http://evil.example.com", &[]));
-    // DELETE without session id → 400.
-    let del = request(port, "DELETE /mcp HTTP/1.1\r\nHost: localhost\r\n\r\n");
-    assert_eq!(del.status, 400);
-    // DELETE unknown session id → 404.
-    let del = request(
-        port,
-        "DELETE /mcp HTTP/1.1\r\nHost: localhost\r\nMCP-Session-Id: nope\r\nContent-Length: 0\r\n\r\n",
-    );
-    assert_eq!(del.status, 404);
-    // mint_session mints unique ids and registers them unowned.
-    let a = mint_session(&shared, None);
-    let b = mint_session(&shared, None);
-    assert_ne!(a, b);
-    assert!(a.starts_with("sess-"));
-    assert_eq!(a.len(), 37, "16-byte hex session id: {a}");
-    assert!(shared.is_live(&a, None), "the minted id is registered");
-    assert!(
-        !shared.is_live(&b, None) || b != a,
-        "each id is its own entry"
-    );
     // handler + state accessors.
     let _ = handler.protocol_revision();
     assert_eq!(addr.port(), port);
@@ -383,11 +329,10 @@ fn retention_tools_parity_stdio_vs_http() {
     let stdio_state =
         McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
             .expect("state");
-    let stdio_handler = McpHandler::new(stdio_state);
     let frames = format!("{batch}\n{profile}\n");
     let mut out: Vec<u8> = Vec::new();
     crate::stdio::serve(
-        &stdio_handler,
+        &stdio_state,
         std::io::Cursor::new(frames.into_bytes()),
         &mut out,
     )

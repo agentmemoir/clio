@@ -25,7 +25,7 @@
 //!
 //! Keep this module focused on the candidate's stdio listing walk.
 
-use super::serve_candidate;
+use super::serve;
 use crate::runtime::McpState;
 use crate::stateless_fixtures::{
     CANDIDATE_FIXTURE_REVISION, catalogue_names, check_listing_walk, check_success_envelope,
@@ -39,7 +39,7 @@ fn serve_one(state: &McpState, frame: &Value) -> Value {
     let mut input = serde_json::to_string(frame).expect("a fixture serializes");
     input.push('\n');
     let mut output = Vec::new();
-    serve_candidate(state, Cursor::new(input.into_bytes()), &mut output)
+    serve(state, Cursor::new(input.into_bytes()), &mut output)
         .expect("the candidate stdio adapter serves the frame");
     let text = String::from_utf8(output).expect("the adapter writes UTF-8");
     let line = text

@@ -30,8 +30,8 @@
 
 use crate::http::HttpConfig;
 use crate::http::http_test_support_tests::{Response, post_json, request as raw_request};
+use crate::http::serve_with_listener;
 use crate::http_auth::CredentialStore;
-use crate::http_candidate::serve_candidate;
 use crate::runtime::McpState;
 use crate::stateless_fixtures::{CANDIDATE_FIXTURE_REVISION, domain_state, state};
 use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};
@@ -75,7 +75,7 @@ fn spawn_candidate_state(state: Arc<McpState>, cfg: HttpConfig) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {
-        serve_candidate(state, cfg, listener);
+        let _ = serve_with_listener(state, cfg, listener);
     });
     port
 }

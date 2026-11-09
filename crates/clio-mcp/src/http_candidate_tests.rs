@@ -33,7 +33,6 @@ use crate::http_candidate_fixtures::{
     body, check_complete_result, check_discovery_identity, check_error_envelope,
     check_success_envelope, headers, name_headers, post, spawn_candidate, spawn_domain_candidate,
 };
-use crate::stateless::CANDIDATE_REVISION;
 use crate::stateless_fixtures::{
     CANDIDATE_FIXTURE_REVISION, DOMAIN_ITEM_ID, check_domain_listing, check_gist_read, full_meta,
     read_call, request, required_meta,
@@ -181,20 +180,16 @@ fn every_scenario_records_one_owner_and_one_bounded_check() {
 }
 
 #[test]
-fn the_candidate_fixture_pin_is_a_future_expectation() {
+fn the_fixture_pin_is_the_one_served_revision() {
     assert_eq!(
-        CANDIDATE_FIXTURE_REVISION, CANDIDATE_REVISION,
-        "the fixture pin follows the candidate dispatcher"
-    );
-    assert_eq!(
-        crate::MCP_PROTOCOL_REVISION,
-        "2025-11-25",
-        "the live pin does not move"
-    );
-    assert_ne!(
         CANDIDATE_FIXTURE_REVISION,
         crate::MCP_PROTOCOL_REVISION,
-        "the candidate pin is not a second live protocol setting"
+        "the fixture pin is the served revision"
+    );
+    assert_eq!(
+        crate::MCP_PROTOCOL_REVISION,
+        "2026-07-28",
+        "the served pin is the stateless revision"
     );
 }
 

@@ -23,7 +23,7 @@
 //!
 //! Keep this module focused on the admission path's fixtures.
 
-use super::{CANDIDATE_REVISION, PROTOCOL_VERSION_HEADER, SUPPORTED_REVISIONS, admit};
+use super::{PROTOCOL_VERSION_HEADER, SUPPORTED_REVISIONS, admit};
 use crate::conditional_http::{MCP_METHOD_HEADER, MCP_NAME_HEADER};
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
@@ -81,8 +81,8 @@ fn notification_frame(method: &str, version: &str) -> String {
 #[test]
 fn a_matching_supported_version_reaches_dispatch() {
     let state = state();
-    let msg = request("tools/list", &required_meta(CANDIDATE_REVISION));
-    let served = run(&state, &headers(CANDIDATE_REVISION), &frame(&msg))
+    let msg = request("tools/list", &required_meta(crate::MCP_PROTOCOL_REVISION));
+    let served = run(&state, &headers(crate::MCP_PROTOCOL_REVISION), &frame(&msg))
         .expect("the request is admitted")
         .expect("a request carrying an id is answered");
     let expected = super::dispatch(&state, &msg).expect("dispatch answers");
@@ -110,11 +110,14 @@ fn a_matching_unsupported_version_is_refused() {
 
 #[test]
 fn a_missing_capability_the_request_needs_is_refused_at_admission() {
-    let msg = tool_call(&required_meta(CANDIDATE_REVISION), elicitation_answer());
+    let msg = tool_call(
+        &required_meta(crate::MCP_PROTOCOL_REVISION),
+        elicitation_answer(),
+    );
     let supplied = vec![
         (MCP_METHOD_HEADER, "tools/call"),
         (MCP_NAME_HEADER, "consolidate"),
-        (PROTOCOL_VERSION_HEADER, CANDIDATE_REVISION),
+        (PROTOCOL_VERSION_HEADER, crate::MCP_PROTOCOL_REVISION),
     ];
     let (status, body) = refused(&state(), &supplied, &frame(&msg));
     assert_eq!(status, 400, "{body}");
@@ -129,8 +132,8 @@ fn a_missing_capability_the_request_needs_is_refused_at_admission() {
 
 #[test]
 fn an_absent_method_header_is_refused_at_admission() {
-    let msg = tool_call(&required_meta(CANDIDATE_REVISION), json!({}));
-    let supplied = vec![(PROTOCOL_VERSION_HEADER, CANDIDATE_REVISION)];
+    let msg = tool_call(&required_meta(crate::MCP_PROTOCOL_REVISION), json!({}));
+    let supplied = vec![(PROTOCOL_VERSION_HEADER, crate::MCP_PROTOCOL_REVISION)];
     let (status, body) = refused(&state(), &supplied, &frame(&msg));
     assert_eq!(status, 400, "{body}");
     assert_eq!(code(&body), -32020, "{body}");
@@ -142,11 +145,11 @@ fn an_absent_method_header_is_refused_at_admission() {
 
 #[test]
 fn a_mismatched_name_header_is_refused_at_admission() {
-    let msg = tool_call(&required_meta(CANDIDATE_REVISION), json!({}));
+    let msg = tool_call(&required_meta(crate::MCP_PROTOCOL_REVISION), json!({}));
     let supplied = vec![
         (MCP_METHOD_HEADER, "tools/call"),
         (MCP_NAME_HEADER, "summarize"),
-        (PROTOCOL_VERSION_HEADER, CANDIDATE_REVISION),
+        (PROTOCOL_VERSION_HEADER, crate::MCP_PROTOCOL_REVISION),
     ];
     let (status, body) = refused(&state(), &supplied, &frame(&msg));
     assert_eq!(status, 400, "{body}");
@@ -159,7 +162,7 @@ fn a_mismatched_name_header_is_refused_at_admission() {
 
 #[test]
 fn the_method_guard_runs_before_the_version_header_check() {
-    let frame = list_frame(CANDIDATE_REVISION);
+    let frame = list_frame(crate::MCP_PROTOCOL_REVISION);
     let supplied = vec![(MCP_METHOD_HEADER, "tools/call")];
     let (status, body) = refused(&state(), &supplied, &frame);
     assert_eq!(status, 400, "{body}");
@@ -178,7 +181,7 @@ fn the_method_guard_runs_before_the_version_header_check() {
 fn an_unequal_header_and_body_version_is_refused() {
     let (status, body) = refused(
         &state(),
-        &headers(CANDIDATE_REVISION),
+        &headers(crate::MCP_PROTOCOL_REVISION),
         &list_frame("2025-11-25"),
     );
     assert_eq!(status, 400, "{body}");
@@ -193,7 +196,7 @@ fn an_unequal_header_and_body_version_is_refused() {
 #[test]
 fn a_missing_or_empty_version_header_is_refused() {
     let state = state();
-    let frame = list_frame(CANDIDATE_REVISION);
+    let frame = list_frame(crate::MCP_PROTOCOL_REVISION);
     for (label, supplied) in [
         ("absent", vec![(MCP_METHOD_HEADER, "tools/list")]),
         ("empty", headers("")),
@@ -230,9 +233,9 @@ fn a_notification_is_admitted_without_an_answer() {
         &state(),
         &[
             (MCP_METHOD_HEADER, "notifications/initialized"),
-            (PROTOCOL_VERSION_HEADER, CANDIDATE_REVISION),
+            (PROTOCOL_VERSION_HEADER, crate::MCP_PROTOCOL_REVISION),
         ],
-        &notification_frame("notifications/initialized", CANDIDATE_REVISION),
+        &notification_frame("notifications/initialized", crate::MCP_PROTOCOL_REVISION),
     )
     .expect("the notification is admitted");
     assert!(
@@ -249,7 +252,7 @@ fn a_notification_with_an_unequal_header_is_refused() {
             (MCP_METHOD_HEADER, "notifications/initialized"),
             (PROTOCOL_VERSION_HEADER, "2025-11-25"),
         ],
-        &notification_frame("notifications/initialized", CANDIDATE_REVISION),
+        &notification_frame("notifications/initialized", crate::MCP_PROTOCOL_REVISION),
     );
     assert_eq!(status, 400, "{body}");
     assert_eq!(code(&body), -32020, "{body}");
@@ -259,9 +262,9 @@ fn a_notification_with_an_unequal_header_is_refused() {
 fn missing_client_capabilities_is_invalid_params_at_http_400() {
     let frame = frame(&json!({
         "jsonrpc": "2.0", "id": 7, "method": "tools/list",
-        "params": { "_meta": { "io.modelcontextprotocol/protocolVersion": CANDIDATE_REVISION } }
+        "params": { "_meta": { "io.modelcontextprotocol/protocolVersion": crate::MCP_PROTOCOL_REVISION } }
     }));
-    let (status, body) = refused(&state(), &headers(CANDIDATE_REVISION), &frame);
+    let (status, body) = refused(&state(), &headers(crate::MCP_PROTOCOL_REVISION), &frame);
     assert_eq!(status, 400, "{body}");
     assert_eq!(code(&body), -32602, "{body}");
     assert!(
@@ -277,7 +280,7 @@ fn missing_required_metadata_is_invalid_params_at_http_400() {
         "jsonrpc": "2.0", "id": 7, "method": "tools/list",
         "params": { "_meta": { "io.modelcontextprotocol/clientCapabilities": {} } }
     }));
-    let (status, body) = refused(&state(), &headers(CANDIDATE_REVISION), &frame);
+    let (status, body) = refused(&state(), &headers(crate::MCP_PROTOCOL_REVISION), &frame);
     assert_eq!(status, 400, "{body}");
     assert_eq!(code(&body), -32602, "{body}");
     assert!(
@@ -289,13 +292,13 @@ fn missing_required_metadata_is_invalid_params_at_http_400() {
 
 #[test]
 fn both_optional_metadata_fields_may_be_absent() {
-    let meta = required_meta(CANDIDATE_REVISION);
+    let meta = required_meta(crate::MCP_PROTOCOL_REVISION);
     assert!(meta.get("io.modelcontextprotocol/clientInfo").is_none());
     assert!(meta.get("io.modelcontextprotocol/logLevel").is_none());
     let served = run(
         &state(),
-        &headers(CANDIDATE_REVISION),
-        &list_frame(CANDIDATE_REVISION),
+        &headers(crate::MCP_PROTOCOL_REVISION),
+        &list_frame(crate::MCP_PROTOCOL_REVISION),
     )
     .expect("the request is admitted")
     .expect("a request carrying an id is answered");
@@ -312,7 +315,7 @@ fn invalid_json_is_a_parse_error_before_the_header_check() {
 #[test]
 fn a_refused_request_returns_no_dispatch_result() {
     let state = state();
-    let frame = list_frame(CANDIDATE_REVISION);
+    let frame = list_frame(crate::MCP_PROTOCOL_REVISION);
     let (status, raw) = run(&state, &headers("2025-11-25"), &frame)
         .expect_err("the admission returns a refusal and no result to dispatch");
     let body: Value = serde_json::from_str(&raw).expect("the refusal body is JSON");
@@ -322,20 +325,22 @@ fn a_refused_request_returns_no_dispatch_result() {
 }
 
 #[test]
-fn the_served_pin_and_live_route_stay_off_the_candidate_surface() {
-    assert_eq!(crate::MCP_PROTOCOL_REVISION, "2025-11-25");
+fn the_served_pin_is_the_one_supported_revision() {
+    assert_eq!(crate::MCP_PROTOCOL_REVISION, "2026-07-28");
     assert_eq!(SUPPORTED_REVISIONS.len(), 1);
-    assert_eq!(SUPPORTED_REVISIONS[0], CANDIDATE_REVISION);
-    assert_ne!(CANDIDATE_REVISION, crate::MCP_PROTOCOL_REVISION);
-    assert_eq!(McpHandler::new(state()).protocol_revision(), "2025-11-25");
+    assert_eq!(SUPPORTED_REVISIONS[0], crate::MCP_PROTOCOL_REVISION);
+    assert_eq!(
+        McpHandler::new(state()).protocol_revision(),
+        crate::MCP_PROTOCOL_REVISION
+    );
     let lib = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
         .expect("the crate root is readable");
     assert!(
-        lib.contains("#[cfg(test)]\nmod stateless;"),
-        "the candidate module stays test-only"
+        lib.contains("\nmod stateless;"),
+        "the stateless dispatcher is a production module"
     );
     assert!(
-        lib.contains("#[cfg(test)]\nmod conditional_http;"),
-        "the guard module stays test-only"
+        lib.contains("\nmod conditional_http;"),
+        "the conditional-header guard is a production module"
     );
 }

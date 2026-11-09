@@ -15,7 +15,6 @@
 mod mcp_principal_binding_support;
 
 use clio_mcp::http::HttpConfig;
-use clio_mcp::protocol::McpHandler;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
 use clio_types::{Actor, ErrorCode};
 use mcp_principal_binding_support::{
@@ -24,7 +23,6 @@ use mcp_principal_binding_support::{
     post, spawn_server, stored, tool_error_code, tool_ok,
 };
 use serde_json::{Value, json};
-use std::sync::Arc;
 
 #[test]
 fn a_harness_credential_may_erase_and_export() {
@@ -263,11 +261,10 @@ fn stdio_and_the_in_process_dispatcher_keep_the_unbound_contract() {
         &serde_json::json!({}),
     )
     .expect("state");
-    let handler = McpHandler::new(Arc::clone(&state));
     let frame = store_item_declaring("anywhere-at-all", "stdio-1", "harness");
     let mut out: Vec<u8> = Vec::new();
     clio_mcp::stdio::serve(
-        &handler,
+        &state,
         std::io::Cursor::new(format!("{frame}\n").into_bytes()),
         &mut out,
     )

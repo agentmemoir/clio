@@ -22,7 +22,6 @@
 //!
 //! Keep this module focused on the recorded session guard.
 
-use clio_mcp::protocol::McpHandler;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
 use clio_mcp::stdio::serve;
 use serde_json::{Value, json};
@@ -85,9 +84,8 @@ fn session_input(frames: &[Value]) -> String {
 fn responses(input: &str) -> Vec<String> {
     let state = McpState::open_with_effective(&McpOpenOptions::default(), &json!({}))
         .expect("open the in-memory state");
-    let handler = McpHandler::new(state);
     let mut out = Vec::new();
-    serve(&handler, Cursor::new(input.as_bytes().to_vec()), &mut out).expect("serve the session");
+    serve(&state, Cursor::new(input.as_bytes().to_vec()), &mut out).expect("serve the session");
     String::from_utf8(out)
         .expect("responses are UTF-8")
         .lines()

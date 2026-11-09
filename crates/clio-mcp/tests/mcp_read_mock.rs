@@ -163,7 +163,6 @@ fn spawn_http_session_server() -> SocketAddr {
     let state = seed_state();
     std::thread::spawn(move || {
         let cfg = clio_mcp::http::HttpConfig {
-            sessions_enabled: true,
             insecure_no_auth: true,
             ..clio_mcp::http::HttpConfig::default()
         };

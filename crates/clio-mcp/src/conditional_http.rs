@@ -156,22 +156,6 @@ pub(crate) fn refusal(body: &Value, err: &RpcError) -> Refusal {
     (400, serde_json::to_string(&envelope).unwrap_or_default())
 }
 
-/// The candidate refusal for one request: the status and the JSON-RPC body a
-/// route answers when the guard fails.
-///
-/// `None` is a request whose headers agree with its body, which the route goes
-/// on to serve.
-///
-/// `get` reads one header value by its lowercase wire name, as in
-/// [`check_headers`].
-pub(crate) fn refuse<'a, F>(get: F, body: &Value) -> Option<Refusal>
-where
-    F: Fn(&str) -> Option<&'a str>,
-{
-    let err = check_headers(get, body).err()?;
-    Some(refusal(body, &err))
-}
-
 #[cfg(test)]
 #[path = "conditional_http_event_id_tests.rs"]
 mod conditional_http_event_id_tests;

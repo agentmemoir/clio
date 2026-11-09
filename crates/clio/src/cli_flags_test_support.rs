@@ -47,7 +47,6 @@ pub(crate) const RESERVED_FLAGS: &[&str] = &[
     "profiles",
     "scope",
     "services",
-    "sessions",
     "shared-bank",
     "target",
     "token-file",

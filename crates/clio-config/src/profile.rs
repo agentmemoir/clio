@@ -83,7 +83,7 @@ impl Profile {
                 "streamable_http".into(),
             ],
             // Legacy HTTP+SSE is compatibility-only; not listed as primary.
-            mcp_revision: "2025-11-25".into(),
+            mcp_revision: "2026-07-28".into(),
             fr10_satisfied: false,
         }
     }

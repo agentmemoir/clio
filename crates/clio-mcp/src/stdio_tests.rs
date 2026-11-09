@@ -20,7 +20,6 @@
 //! Keep this module focused on stdio transport tests.
 
 use super::serve;
-use crate::protocol::McpHandler;
 use crate::runtime::{McpOpenOptions, McpState};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Cursor, Read};
@@ -133,10 +132,9 @@ fn t04_stdio_session_flows_end_to_end() {
         &serde_json::json!({}),
     )
     .expect("state");
-    let handler = McpHandler::new(state);
     let input = Cursor::new(frames().into_bytes());
     let mut out: Vec<u8> = Vec::new();
-    serve(&handler, input, &mut out).expect("serve");
+    serve(&state, input, &mut out).expect("serve");
     let text = String::from_utf8(out).expect("utf8");
     // Every output line is exactly one JSON-RPC response (no embedded newlines).
     let lines: Vec<&str> = text.lines().collect();
@@ -169,10 +167,9 @@ fn t13_stdout_purity_no_log_lines() {
         &serde_json::json!({}),
     )
     .expect("state");
-    let handler = McpHandler::new(state);
     let input = Cursor::new(frames().into_bytes());
     let mut out: Vec<u8> = Vec::new();
-    serve(&handler, input, &mut out).expect("serve");
+    serve(&state, input, &mut out).expect("serve");
     let text = String::from_utf8(out).expect("utf8");
     for line in text.lines() {
         let parsed = serde_json::from_str::<Value>(line);
@@ -188,10 +185,9 @@ fn eof_terminates_cleanly() {
         &serde_json::json!({}),
     )
     .expect("state");
-    let handler = McpHandler::new(state);
     let input = Cursor::new(Vec::<u8>::new());
     let mut out: Vec<u8> = Vec::new();
-    serve(&handler, input, &mut out).expect("clean EOF");
+    serve(&state, input, &mut out).expect("clean EOF");
     assert!(out.is_empty(), "stdout was not empty: {out:?}");
 }
 
@@ -199,7 +195,6 @@ fn eof_terminates_cleanly() {
 fn stdio_store_retrieve_end_to_end() {
     let state =
         McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
-    let handler = McpHandler::new(state.clone());
     let item_id = "itm-stdio-e2e";
     let store = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -231,9 +226,10 @@ fn stdio_store_retrieve_end_to_end() {
         }}
     });
     // Drain between frames so retrieval does not depend on sweeper scheduling.
-    let mut input = DrainBeforeRetrieve::new(state, format!("{store}\n{retrieve}\n").into_bytes());
+    let mut input =
+        DrainBeforeRetrieve::new(state.clone(), format!("{store}\n{retrieve}\n").into_bytes());
     let mut out: Vec<u8> = Vec::new();
-    serve(&handler, &mut input, &mut out).expect("store then retrieve over stdio");
+    serve(&state, &mut input, &mut out).expect("store then retrieve over stdio");
 
     let text = String::from_utf8(out).expect("utf8");
     let lines: Vec<&str> = text.lines().collect();
@@ -282,7 +278,6 @@ fn stdio_store_retrieve_end_to_end() {
 fn stdio_retrieve_rejects_wrongly_typed_optional_arguments() {
     let state =
         McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
-    let handler = McpHandler::new(state);
     let store = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": "store", "arguments": {
@@ -304,7 +299,7 @@ fn stdio_retrieve_rejects_wrongly_typed_optional_arguments() {
     });
     let input = Cursor::new(format!("{store}\n{bad_limit}\n{bad_anchor}\n").into_bytes());
     let mut out = Vec::new();
-    serve(&handler, input, &mut out).expect("rejected calls serve over stdio");
+    serve(&state, input, &mut out).expect("rejected calls serve over stdio");
 
     let text = String::from_utf8(out).expect("utf8");
     let lines: Vec<&str> = text.lines().collect();
