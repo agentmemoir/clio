@@ -29,15 +29,24 @@
 //!
 //! Keep this module focused on the candidate revision's request handling.
 
+use crate::conditional_http::{ERR_HEADER_MISMATCH, Refusal, check_headers, refusal};
 use crate::protocol::{
-    ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND, McpHandler,
-    RpcError,
+    ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND, ERR_PARSE,
+    McpHandler, RpcError, invalid_params,
 };
 use crate::runtime::McpState;
 use serde_json::{Map, Value, json};
 
 /// The revision this dispatcher answers as.
 pub(crate) const CANDIDATE_REVISION: &str = "2026-07-28";
+
+/// Wire name of the header carrying the revision the client is using.
+///
+/// The transport lowercases header keys, so this is the key the getter sees.
+pub(crate) const PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
+
+/// The header's name as a refusal message spells it.
+const PROTOCOL_VERSION_HEADER_NAME: &str = "MCP-Protocol-Version";
 
 /// Revisions this dispatcher accepts.
 pub(crate) const SUPPORTED_REVISIONS: &[&str] = &[CANDIDATE_REVISION];
@@ -89,6 +98,80 @@ pub(crate) const CACHE_HINTS: CacheHints = CacheHints {
     ttl_ms: 300_000,
     scope: "private",
 };
+
+/// Admit one candidate-revision HTTP request and, when it passes, serve it.
+///
+/// The checks run in one fixed order and stop at the first failure: the conditional headers, JSON syntax, the required version header, the required metadata, header/body equality, the supported revision, and the client capability the request needs. Only a request that passes every check reaches [`dispatch`].
+///
+/// `get` reads one header value by its lowercase wire name. A refused request
+/// answers the status and JSON-RPC body [`refusal`] renders; a notification
+/// that passes answers `None`, like [`dispatch`].
+///
+/// # Errors
+/// The request fails one admission check. The refusal names the header that
+/// refuses it, or the metadata key it lacks.
+pub(crate) fn admit<'a, F>(state: &McpState, get: F, frame: &str) -> Result<Option<Value>, Refusal>
+where
+    F: Fn(&str) -> Option<&'a str>,
+{
+    let parsed = serde_json::from_str::<Value>(frame);
+    // The guard checks a body it can read; an unreadable frame belongs to the
+    // syntax step, which owns the parse error.
+    if let Ok(body) = &parsed
+        && let Err(err) = check_headers(&get, body)
+    {
+        return Err(refusal(body, &err));
+    }
+    let Ok(body) = parsed else {
+        let err = RpcError::new(ERR_PARSE, "Parse error: invalid JSON");
+        return Err(refusal(&Value::Null, &err));
+    };
+    let declared = get(PROTOCOL_VERSION_HEADER)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| missing_version_header(&body))?;
+    let (capabilities, requested) =
+        request_meta(&body).map_err(|message| refusal(&body, &invalid_params(message)))?;
+    if declared != requested {
+        let err = RpcError::new(
+            ERR_HEADER_MISMATCH,
+            format!(
+                "the `{PROTOCOL_VERSION_HEADER_NAME}` header `{declared}` is not the request metadata version `{requested}`"
+            ),
+        );
+        return Err(refusal(&body, &err));
+    }
+    if !SUPPORTED_REVISIONS.contains(&requested) {
+        let data = json!({ "supported": SUPPORTED_REVISIONS, "requested": requested });
+        let err = RpcError::new(
+            ERR_UNSUPPORTED_PROTOCOL_VERSION,
+            format!("Unsupported protocol version in `{PROTOCOL_VERSION_HEADER_NAME}`"),
+        )
+        .with_data(data);
+        return Err(refusal(&body, &err));
+    }
+    if let Some(method) = body.get("method").and_then(Value::as_str)
+        && let Some(capability) = required_capability(method, body.get("params"))
+        && !capabilities.contains_key(capability)
+    {
+        let data = json!({ "requiredCapabilities": { (capability): {} } });
+        let err = RpcError::new(
+            ERR_MISSING_REQUIRED_CLIENT_CAPABILITY,
+            format!("request requires the client capability `{capability}`"),
+        )
+        .with_data(data);
+        return Err(refusal(&body, &err));
+    }
+    Ok(dispatch(state, &body))
+}
+
+/// The refusal for a request whose version header is absent or empty.
+fn missing_version_header(body: &Value) -> Refusal {
+    let err = RpcError::new(
+        ERR_HEADER_MISMATCH,
+        format!("the `{PROTOCOL_VERSION_HEADER_NAME}` header is required"),
+    );
+    refusal(body, &err)
+}
 
 /// Answer one candidate-revision message; `None` for a message without an `id`.
 ///
@@ -310,3 +393,7 @@ mod stateless_tests;
 #[cfg(test)]
 #[path = "stateless_cache_tests.rs"]
 mod stateless_cache_tests;
+
+#[cfg(test)]
+#[path = "version_header_tests.rs"]
+mod version_header_tests;

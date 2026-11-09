@@ -300,7 +300,7 @@ impl RpcError {
         }
     }
 
-    fn with_data(mut self, data: Value) -> Self {
+    pub(crate) fn with_data(mut self, data: Value) -> Self {
         self.data = Some(data);
         self
     }

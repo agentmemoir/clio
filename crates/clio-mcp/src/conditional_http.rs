@@ -144,23 +144,32 @@ fn missing_method() -> RpcError {
     RpcError::new(ERR_HEADER_MISMATCH, "the `Mcp-Method` header is required")
 }
 
+/// The HTTP status and JSON-RPC body a route answers one refused request.
+pub(crate) type Refusal = (u16, String);
+
+/// Render one refusal for a request: status 400 and the shared error envelope.
+///
+/// The body is [`error_response`]'s envelope over `err`, so it carries no
+/// `result`, and the request's own id, or `null` when the body has none.
+pub(crate) fn refusal(body: &Value, err: &RpcError) -> Refusal {
+    let envelope = error_response(body.get("id"), err);
+    (400, serde_json::to_string(&envelope).unwrap_or_default())
+}
+
 /// The candidate refusal for one request: the status and the JSON-RPC body a
 /// route answers when the guard fails.
 ///
 /// `None` is a request whose headers agree with its body, which the route goes
-/// on to serve. The body is [`error_response`]'s envelope over the
-/// header-mismatch error, so it carries no `result`, and the request's own id,
-/// or `null` when the body has none.
+/// on to serve.
 ///
 /// `get` reads one header value by its lowercase wire name, as in
 /// [`check_headers`].
-pub(crate) fn refuse<'a, F>(get: F, body: &Value) -> Option<(u16, String)>
+pub(crate) fn refuse<'a, F>(get: F, body: &Value) -> Option<Refusal>
 where
     F: Fn(&str) -> Option<&'a str>,
 {
     let err = check_headers(get, body).err()?;
-    let envelope = error_response(body.get("id"), &err);
-    Some((400, serde_json::to_string(&envelope).unwrap_or_default()))
+    Some(refusal(body, &err))
 }
 
 #[cfg(test)]
