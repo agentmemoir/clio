@@ -9,7 +9,8 @@
 //! modules assert with.
 //!
 //! ## Owns
-//! - The candidate fixture revision pin and the live-server helper
+//! - The candidate fixture revision pin and the live-server helpers, including
+//!   the one that serves the seeded domain-read state
 //! - The candidate conditional-header builders and the POST helper
 //! - The success, error, discovery, and removed-method checkers
 //!
@@ -31,11 +32,13 @@ use crate::http::HttpConfig;
 use crate::http::http_test_support_tests::{Response, post_json, request as raw_request};
 use crate::http_auth::CredentialStore;
 use crate::http_candidate::serve_candidate;
-use crate::stateless_fixtures::state;
+use crate::runtime::McpState;
+use crate::stateless_fixtures::{domain_state, state};
 use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};
 use clio_types::Actor;
 use serde_json::{Value, json};
 use std::net::TcpListener;
+use std::sync::Arc;
 
 /// The candidate fixture pin: the revision a future activation test expects.
 ///
@@ -57,7 +60,24 @@ pub(crate) fn spawn_candidate() -> u16 {
 
 /// Serve the candidate endpoint with `cfg` on an OS-assigned port.
 pub(crate) fn spawn_candidate_with(cfg: HttpConfig) -> u16 {
-    let state = state();
+    spawn_candidate_state(state(), cfg)
+}
+
+/// Serve the candidate endpoint on an OS-assigned port over the seeded
+/// domain-read state, so a read scenario reaches a store that holds the one
+/// fixture item.
+pub(crate) fn spawn_domain_candidate() -> u16 {
+    spawn_candidate_state(
+        domain_state(),
+        HttpConfig {
+            insecure_no_auth: true,
+            ..HttpConfig::default()
+        },
+    )
+}
+
+/// Serve `state` with `cfg` on an OS-assigned port and return that port.
+fn spawn_candidate_state(state: Arc<McpState>, cfg: HttpConfig) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {
