@@ -17,7 +17,7 @@ The committed manifest's own command, `git revert --no-edit 1b9b3e5..HEAD`, prod
 
 ## Restoration proof
 
-All checks ran at HEAD `fcf4b2d81175ce5a50f5312e63d5cc0e419c702a` in the clone.
+All drill checks ran at HEAD `fcf4b2d81175ce5a50f5312e63d5cc0e419c702a` in the clone; the two reused manifest rows came from the manifest's earlier dry run of the reverted tree and not from this clone.
 
 - `git diff --stat 1b9b3e5 HEAD` printed nothing and `git diff --quiet 1b9b3e5 HEAD` exited 0, so the tree equals PRECUT byte for byte.
 - `git rev-list --count 90b7f3b..HEAD` printed `1`, so the scratch branch carries exactly one commit over the activation merge.
@@ -29,11 +29,11 @@ The tree object ids make that equality recomputable: the pre-cut commit `1b9b3e5
 
 ## Build
 
-`command -v cargo` resolved to a wrapper earlier on PATH, so the real toolchain binary was called by absolute path as `"$HOME"/.cargo/bin/cargo build --locked -p clio --bin clio`. The build ran in the background under `timeout --kill-after=30s 1500s`, its output went to a log, and its status went to a separate file. The exit status was 0 and the log ends `Finished` with the `dev` profile in `1m 12s`.
+`command -v cargo` resolved to the gate shim earlier on PATH, so the drill called cargo by absolute path as `"$HOME"/.cargo/bin/cargo build --locked -p clio --bin clio`, which bypassed that shim. The build ran in the background under `timeout --kill-after=30s 1500s`, its output went to a log, and its status went to a separate file. The exit status was 0 and the log ends `Finished` with the `dev` profile in `1m 12s`.
 
 ## Smoke
 
-The binary ran as `./target/debug/clio mcp stdio --db sqlite::memory:` under `timeout --kill-after=5s 60s` with the three request lines on stdin. Exit status was 0 and stderr was empty; the notification line produced no response, so stdout holds exactly two response lines.
+The binary from the drill commit `fcf4b2d81175ce5a50f5312e63d5cc0e419c702a` ran as `./target/debug/clio mcp stdio --db sqlite::memory:` under `timeout --kill-after=5s 60s` with the three request lines on stdin. Exit status was 0 and stderr was empty; the notification line produced no response, so stdout holds exactly two response lines.
 
 Request stream:
 
@@ -53,7 +53,7 @@ Raw stdout, one JSON line per exchange:
 Assertions and observed values:
 
 - The `initialize` result `protocolVersion` is `2025-11-25`: observed `"2025-11-25"`.
-- The `tools/list` result carries a `tools` array: observed an array of 6 tools.
+- The `tools/list` result carries a `tools` array: observed the six tools of the default `minimal` profile, whose groups are Retrieval and Graph, in the order the raw line shows: `graph_link`, `intent_gate`, `retrieve`, `compose_context`, `associations`, and `graph_query`. The result carried no `nextCursor`.
 - The byte string `resultType` appears zero times in stdout: observed 0.
 
 ## Manifest rows reused, and rows that are not evidence for this tree
