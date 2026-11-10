@@ -33,9 +33,7 @@ The other workflows in the repository were either path-filtered out of this chan
 
 ## Freshness and staleness
 
-A receipt is fresh for this build only when its build identity is this head or its relevant source paths are byte-identical to this tree.
-Stale evidence is rejected and recorded as `missing`, never as `pass`.
-A row that cannot be produced is recorded as `missing` with its cause, and never estimated.
+A receipt is fresh for this build only when its build identity is this head or its relevant source paths are byte-identical to this tree. Stale evidence is rejected and recorded as `missing`, never as `pass`. A row that cannot be produced is recorded as `missing` with its cause, and never estimated.
 
 ## Category receipts
 
