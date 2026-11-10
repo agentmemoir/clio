@@ -25,6 +25,8 @@ All checks ran at HEAD `fcf4b2d81175ce5a50f5312e63d5cc0e419c702a` in the clone.
 - The pin is restored at `crates/clio-mcp/src/lib.rs:130` as `pub const MCP_PROTOCOL_REVISION: &str = "2025-11-25";`.
 - The three files the activation deleted are present at HEAD: `crates/clio-mcp/src/http_binding_tests.rs`, `crates/clio-mcp/tests/mcp_session_binding.rs`, and `crates/clio/src/mcp_cli_sessions_tests.rs`.
 
+The tree object ids make that equality recomputable: the pre-cut commit `1b9b3e51d7c18e76a9fc0dc1d96363ee00202f95` has tree `dd01ab70b8bd5801bf449db37f4cec0d457ee097`, and the drill commit `fcf4b2d81175ce5a50f5312e63d5cc0e419c702a`, whose parent is `90b7f3b4ae3770960a0636ef98c2ac456f4967f9`, carries the same tree id, which the empty diff above proves because the drill commit itself lived only in the deleted clone. A reader can recompute the pre-cut tree id with `git rev-parse 1b9b3e51d7c18e76a9fc0dc1d96363ee00202f95^{tree}` in the public repository and compare it with the equal value recorded here.
+
 ## Build
 
 `command -v cargo` resolved to a wrapper earlier on PATH, so the real toolchain binary was called by absolute path as `"$HOME"/.cargo/bin/cargo build --locked -p clio --bin clio`. The build ran in the background under `timeout --kill-after=30s 1500s`, its output went to a log, and its status went to a separate file. The exit status was 0 and the log ends `Finished` with the `dev` profile in `1m 12s`.
