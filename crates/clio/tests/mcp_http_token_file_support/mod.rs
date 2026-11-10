@@ -275,14 +275,32 @@ pub fn minted_token(stderr: &str) -> Option<String> {
 
 /// One `POST /mcp` and the status plus body that came back.
 ///
-/// The write side is half-closed once the request is sent, so the server's read
-/// of the declared body completes on this client rather than waiting for a close
-/// it will never see.
+/// The conditional headers are read from the body and the revision header from
+/// the served revision, because the stateless revision requires both. The write
+/// side is half-closed once the request is sent, so the server's read of the
+/// declared body completes on this client rather than waiting for a close it
+/// will never see.
 pub fn post(port: u16, body: &str, extra: &str) -> (u16, String) {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    let frame: Value = serde_json::from_str(body).expect("one JSON-RPC frame");
+    let method = frame["method"].as_str().expect("string method");
+    let name_header = if method == "tools/call" {
+        let name = frame
+            .pointer("/params/name")
+            .and_then(Value::as_str)
+            .expect("tools/call carries a name");
+        format!("Mcp-Name: {name}\r\n")
+    } else {
+        String::new()
+    };
+    let conditional = format!(
+        "Mcp-Method: {method}\r\nMCP-Protocol-Version: {}\r\n{name_header}",
+        clio_mcp::MCP_PROTOCOL_REVISION
+    );
     let request = format!(
         "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
-         Accept: application/json, text/event-stream\r\nContent-Length: {}\r\n{extra}\r\n{body}",
+         Accept: application/json, text/event-stream\r\nContent-Length: {}\r\n\
+         {extra}{conditional}\r\n{body}",
         body.len()
     );
     stream.write_all(request.as_bytes()).expect("write");
@@ -312,12 +330,20 @@ pub fn bearer(secret: &str) -> String {
     format!("Authorization: Bearer {secret}\r\n")
 }
 
-/// One JSON-RPC `tools/call` frame for `tool` with `arguments`.
+/// One JSON-RPC `tools/call` frame for `tool` with `arguments`, carrying the
+/// request metadata the stateless revision requires.
 #[allow(clippy::needless_pass_by_value)]
 pub fn call(tool: &str, arguments: Value) -> String {
     serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": tool, "arguments": arguments}
+        "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": clio_mcp::MCP_PROTOCOL_REVISION,
+                "io.modelcontextprotocol/clientCapabilities": {}
+            },
+            "name": tool,
+            "arguments": arguments
+        }
     })
     .to_string()
 }
