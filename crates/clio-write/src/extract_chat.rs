@@ -77,12 +77,11 @@ pub fn endpoint_url(base: &str) -> String {
 /// Neutralize this module's own section delimiters inside interpolated content
 /// so a crafted value cannot close a section early and smuggle instructions.
 ///
-/// Every spelling of a reserved tag becomes its canonical bracketed form:
-/// case variants, inner whitespace, attributes, and a self-closing slash all
-/// collapse to `[tag]` or `[/tag]`. Other `<` text is copied unchanged.
+/// A reserved name that starts a tag is rewritten to `[tag]` or `[/tag]`. The
+/// bytes after the name are kept and rescanned, so no source text is dropped.
+/// Text that is not a reserved tag is copied unchanged.
 fn neutralize_delimiters(text: &str) -> String {
     let bytes = text.as_bytes();
-    let last_gt = bytes.iter().rposition(|&b| b == b'>');
     let mut out = String::with_capacity(text.len());
     let mut copied = 0;
     let mut i = 0;
@@ -91,7 +90,7 @@ fn neutralize_delimiters(text: &str) -> String {
             i += 1;
             continue;
         }
-        if let Some((tag, closing, end)) = reserved_tag_at(bytes, i + 1, last_gt) {
+        if let Some((tag, closing, end)) = reserved_tag_at(bytes, i + 1) {
             out.push_str(&text[copied..i]);
             out.push('[');
             if closing {
@@ -112,18 +111,10 @@ fn neutralize_delimiters(text: &str) -> String {
 /// Read a reserved delimiter tag whose content starts right after a `<`.
 ///
 /// Returns the canonical name, whether the tag closes, and the byte index just
-/// past the first `>` when the bytes form a reserved tag. A tag is reserved
-/// when its name matches [`DELIMITER_TAGS`] case-insensitively and the byte
-/// after the name is `>`, `/`, or ASCII whitespace.
-fn reserved_tag_at(
-    bytes: &[u8],
-    mut i: usize,
-    last_gt: Option<usize>,
-) -> Option<(&'static str, bool, usize)> {
-    let last_gt = last_gt?;
-    if last_gt < i {
-        return None;
-    }
+/// past the tag name when the bytes form a reserved tag. A tag is reserved when
+/// its name matches [`DELIMITER_TAGS`] case-insensitively and the byte after the
+/// name is `>`, `/`, `:`, or ASCII whitespace, or the text ends there.
+fn reserved_tag_at(bytes: &[u8], mut i: usize) -> Option<(&'static str, bool, usize)> {
     while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
         i += 1;
     }
@@ -148,12 +139,13 @@ fn reserved_tag_at(
     let tag = *DELIMITER_TAGS
         .iter()
         .find(|tag| tag.as_bytes().eq_ignore_ascii_case(name))?;
-    let after = *bytes.get(i)?;
-    if after != b'>' && after != b'/' && !after.is_ascii_whitespace() {
+    let accepted = bytes.get(i).is_none_or(|b| {
+        *b == b'>' || *b == b'/' || *b == b':' || b.is_ascii_whitespace()
+    });
+    if !accepted {
         return None;
     }
-    let end = i + bytes[i..].iter().position(|&b| b == b'>')? + 1;
-    Some((tag, closing, end))
+    Some((tag, closing, i))
 }
 
 /// Serialize a tool payload for egress after masking secret-looking fields and
