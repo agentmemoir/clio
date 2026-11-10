@@ -5,13 +5,16 @@
 //!
 //! This module tests the MCP transport's per-request byte and time bounds
 //! against the real `serve_with_listener` entry point over real TCP: the
-//! 64 KiB head cap, the 10 MiB body cap, and the total request deadline.
+//! 64 KiB head cap, the 10 MiB body cap, the total request deadline, and the
+//! shorter header-read budget inside it.
 //!
 //! ## Owns
 //! - Socket-level tests proving each bound is enforced and its refusal names
 //!   the bound and its value
 //! - The slow-drip deadline cut, including the bound that distinguishes the
 //!   configured deadline from a merely-bounded read
+//! - The header-budget cut, which must arrive inside a longer total and name
+//!   the header bound
 //! - The head cap boundary from the accepted side: a header block whose
 //!   terminator lands on the cap is served, in one write and in two, and a
 //!   client that sends nothing is answered a 408 naming the total deadline
@@ -30,7 +33,9 @@
 //! Keep this module focused on per-request resource-bound tests. Tests assert
 //! outcomes and generous bounds, never precise durations.
 
-use crate::http::{HttpConfig, MAX_BODY, MAX_HEAD_BYTES, serve_with_listener};
+use crate::http::{
+    DEFAULT_HEAD_DEADLINE_SECS, HttpConfig, MAX_BODY, MAX_HEAD_BYTES, serve_with_listener,
+};
 use crate::runtime::{McpOpenOptions, McpState};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -160,6 +165,69 @@ fn slow_drip_request_is_cut_at_the_total_deadline() {
          {elapsed:?} elapsed for a {deadline:?} deadline"
     );
 }
+
+#[test]
+fn slow_header_drip_is_cut_at_the_header_deadline() {
+    // The header budget is a slice of the total, not a second clock: the total
+    // here is 30 s, so a refusal that arrives at all inside the drip, and names
+    // the header bound, can only come from the header budget. The drip sends
+    // the first 13 bytes of a head with no terminator, one byte every 200 ms,
+    // so it passes 1 s after five bytes. A whole-drip upper bound keeps a
+    // correct cut from hiding a cut that only lands at the 30 s total.
+    assert_eq!(DEFAULT_HEAD_DEADLINE_SECS, 2, "2 s header-read default");
+    let cfg = HttpConfig {
+        deadline_secs: Some(30),
+        head_deadline_secs: Some(1),
+        ..HttpConfig::default()
+    };
+    let port = spawn_server(cfg);
+    let mut stream = connect(port);
+    // A dedicated reader consumes the refusal as soon as it arrives, so a later
+    // drip write that trips a reset cannot discard it.
+    let mut reader = stream.try_clone().expect("clone for reader");
+    let reader_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        // The server always closes this connection (header cut, handled
+        // request, or clean EOF), so the blocking read terminates.
+        let _ = reader.read_to_end(&mut buf);
+        buf
+    });
+    let drip_start = Instant::now();
+    for byte in b"POST /mcp HTT" {
+        if stream.write_all(&[*byte]).is_err() {
+            break; // the server already cut the connection at the header budget
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    drop(stream);
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(reader_handle.join().expect("reader thread"));
+    });
+    let buf = rx
+        .recv_timeout(Duration::from_secs(15))
+        .expect("the server must close the connection at the header deadline");
+    let elapsed = drip_start.elapsed();
+    let (status, body) =
+        parse_response(&buf).expect("the header cut must produce a readable refusal");
+    assert_eq!(
+        status, 408,
+        "a slow header drip must be cut at the header budget"
+    );
+    assert!(
+        body.contains("1 s header read deadline"),
+        "the refusal must name the header bound and its value, proving the header \
+         budget produced it and not the 30 s total: {body}"
+    );
+    // Upper bound only: the 13-byte drip itself ends in about 2.6 s, and the
+    // 30 s total is far above this, so a cut that waited for the total cannot
+    // pass here.
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "the cut must land at the 1 s header budget, not the 30 s total: {elapsed:?} elapsed"
+    );
+}
+
 #[test]
 fn declared_body_over_cap_rejected_before_body_arrives() {
     let port = spawn_server(HttpConfig::default());

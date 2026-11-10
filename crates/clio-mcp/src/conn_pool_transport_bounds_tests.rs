@@ -274,6 +274,9 @@ fn connection_cap_refuses_above_cap_and_releases_on_close() {
         // Longer than the probe windows below, so a pass proves close-driven
         // release rather than deadline-driven slot recycling.
         deadline_secs: Some(30),
+        // The header budget is part of the same premise: an idle or partial
+        // connection must be held by its slot, not recycled under the probe.
+        head_deadline_secs: Some(30),
         ..HttpConfig::default()
     };
     let port = spawn_server(cfg);
@@ -304,6 +307,8 @@ fn idle_flood_beyond_cap_is_refused_not_served() {
         // Longer than the poll window below, so holders never get served and
         // released slots cannot muddy the count.
         deadline_secs: Some(30),
+        // Held past the poll window on both bounds, for the same reason.
+        head_deadline_secs: Some(30),
         ..HttpConfig::default()
     };
     let port = spawn_server(cfg);
@@ -372,6 +377,9 @@ fn mid_request_disconnect_releases_the_slot() {
         // Longer than every window below, so leaked slots cannot recycle
         // their way to a false pass.
         deadline_secs: Some(60),
+        // The partial heads must stay held on both bounds, or the head budget
+        // would recycle them and the disconnect proof would pass for free.
+        head_deadline_secs: Some(60),
         ..HttpConfig::default()
     };
     let port = spawn_server(cfg);

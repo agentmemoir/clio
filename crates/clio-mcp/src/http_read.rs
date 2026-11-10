@@ -5,7 +5,8 @@
 //!
 //! This module is responsible for reading one HTTP/1.1 request off a
 //! Streamable HTTP connection under the transport resource bounds: the 64 KiB
-//! head cap, the 10 MiB body cap, and the total request deadline.
+//! head cap, the 10 MiB body cap, the total request deadline, and the shorter
+//! header-read budget that is a slice of it.
 //!
 //! ## Owns
 //! - Byte-level request reading and header parsing for the HTTP transport
@@ -25,11 +26,11 @@ use crate::http::{MAX_BODY, MAX_HEAD_BYTES};
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read};
 use std::net::TcpStream;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Longest single blocking read wait. The total deadline still governs: the
 /// wait never exceeds the time left before the deadline.
-const READ_SLICE: std::time::Duration = std::time::Duration::from_secs(5);
+const READ_SLICE: Duration = Duration::from_secs(5);
 
 /// Refusal message for the head cap, naming the bound and its value.
 fn head_cap_message() -> String {
@@ -62,25 +63,27 @@ impl HttpRequest {
     }
 }
 
-/// Read one request under the total deadline.
+/// Read one request under the total deadline and the header budget.
 ///
-/// The error carries the refusal status and a message naming the bound and
-/// its value; an empty message means a plain bad request (unchanged
-/// behavior). `Ok(None)` is a clean EOF before a request (no response).
+/// The head loop is charged to the header budget; the body loop is charged to
+/// the total deadline. The error carries the refusal status and a message
+/// naming the bound and its value; an empty message means a plain bad request
+/// (unchanged behavior). `Ok(None)` is a clean EOF before a request (no
+/// response).
 ///
 /// # Errors
 /// Deadline expiry (408), an oversize head or body (413), or an I/O failure
 /// on the read path (400).
 pub(crate) fn read_request(
     stream: &mut TcpStream,
-    deadline: Instant,
-    deadline_secs: u64,
+    total: &ReadBound,
+    head: &ReadBound,
 ) -> Result<Option<HttpRequest>, (u16, String)> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
     let header_end;
     loop {
-        let n = read_bounded(stream, deadline, deadline_secs, &mut chunk)?;
+        let n = read_bounded(stream, head, &mut chunk)?;
         if n == 0 {
             return Ok(None);
         }
@@ -133,7 +136,7 @@ pub(crate) fn read_request(
         return Err((413, body_cap_message()));
     }
     while buf.len() < header_end + 4 + content_length {
-        let n = read_bounded(stream, deadline, deadline_secs, &mut chunk)?;
+        let n = read_bounded(stream, total, &mut chunk)?;
         if n == 0 {
             break;
         }
@@ -154,26 +157,61 @@ pub(crate) fn read_request(
     }))
 }
 
+/// One instant a read is bounded by, and the words that name it in a 408.
+pub(crate) struct ReadBound {
+    deadline: Instant,
+    secs: u64,
+    name: &'static str,
+}
+
+impl ReadBound {
+    /// The total request deadline, charged to the whole read.
+    pub(crate) fn total(now: Instant, secs: u64) -> Self {
+        Self {
+            deadline: now + Duration::from_secs(secs),
+            secs,
+            name: "total request deadline",
+        }
+    }
+
+    /// The header budget, clamped to the total deadline it is a slice of. When
+    /// it is not shorter than the total, the total is the bound and keeps its
+    /// own words, so a single configured deadline still reports itself.
+    pub(crate) fn head(now: Instant, total_secs: u64, secs: u64) -> Self {
+        if secs >= total_secs {
+            return Self::total(now, total_secs);
+        }
+        Self {
+            deadline: now + Duration::from_secs(secs),
+            secs,
+            name: "header read deadline",
+        }
+    }
+
+    fn expired(&self) -> (u16, String) {
+        (
+            408,
+            format!("request exceeded the {} s {}", self.secs, self.name),
+        )
+    }
+}
+
 /// One deadline-bounded read of at most `chunk.len()` bytes.
 ///
 /// Returns the byte count; `0` is a clean EOF. The wait never exceeds the
-/// time left before the deadline; expiry is a 408 naming the deadline. A read
-/// that times out while deadline time remains is retried: the total deadline
-/// is the only cut point, so a scheduler stall cannot manufacture a spurious
-/// 400 for a client that is still inside its budget.
+/// time left before the bound; expiry is a 408 naming that bound and its
+/// value. A read that times out while bound time remains is retried: the
+/// bound is the only cut point, so a scheduler stall cannot manufacture a
+/// spurious 400 for a client that is still inside its budget.
 fn read_bounded(
     stream: &mut TcpStream,
-    deadline: Instant,
-    deadline_secs: u64,
+    bound: &ReadBound,
     chunk: &mut [u8],
 ) -> Result<usize, (u16, String)> {
     loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
+        let remaining = bound.deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err((
-                408,
-                format!("request exceeded the {deadline_secs} s total request deadline"),
-            ));
+            return Err(bound.expired());
         }
         // Socket setup results are propagated into the read error path: a
         // socket that cannot take a timeout cannot be bounded.
