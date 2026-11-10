@@ -25,7 +25,7 @@ All checks ran at HEAD `fcf4b2d81175ce5a50f5312e63d5cc0e419c702a` in the clone.
 
 ## Build
 
-`command -v cargo` resolved to a wrapper earlier on PATH, so the real toolchain binary was called by absolute path as `"$HOME"/.cargo/bin/cargo build --locked -p clio --bin clio`. The build ran in the background under `timeout --kill-after=30s 1500s`, its output went to a log, and its status went to a separate file. `env | grep '^GATE_'` printed nothing, so no `GATE_*` variable was set. The exit status was 0 and the log ends `Finished` with the `dev` profile in `1m 12s`.
+`command -v cargo` resolved to a wrapper earlier on PATH, so the real toolchain binary was called by absolute path as `"$HOME"/.cargo/bin/cargo build --locked -p clio --bin clio`. The build ran in the background under `timeout --kill-after=30s 1500s`, its output went to a log, and its status went to a separate file. The exit status was 0 and the log ends `Finished` with the `dev` profile in `1m 12s`.
 
 ## Smoke
 
