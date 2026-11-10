@@ -128,8 +128,8 @@ pub struct HttpConfig {
     /// write are not covered; the write is bounded by `WRITE_SLICE`.
     pub deadline_secs: Option<u64>,
     /// Header-read deadline override in seconds, bounding the head read until
-    /// the blank line. `None` keeps `DEFAULT_HEAD_DEADLINE_SECS` (2 s),
-    /// clamped to the total deadline.
+    /// the blank line. `None` keeps `DEFAULT_HEAD_DEADLINE_SECS` (2 s). The
+    /// value has a 1 s floor and is clamped to the total deadline.
     pub head_deadline_secs: Option<u64>,
 }
 
@@ -390,22 +390,18 @@ fn write_simple(stream: &mut TcpStream, status: u16, message: &str) -> std::io::
     Ok(())
 }
 
-/// Half-close the write side, so dropping the socket is a graceful FIN rather
-/// than an abortive reset.
+/// Half-close the write side, so dropping the socket queues a FIN behind the
+/// bytes the peer has already been promised.
 ///
-/// The head promised `Connection: close`, so the FIN belongs here and is queued
-/// behind the payload the peer has already been promised. It matters on the
-/// refusal paths, which answer without reading the whole request: a socket
-/// closed with the peer's bytes still unread in its receive queue is closed
-/// abortively (RFC 9293 ABORT), and the resulting RST discards the
-/// response the peer has not read yet — a refusal that arrived as a truncated
-/// body and a connection error. Draining instead would fix it too, but the
-/// cap refusal runs in the accept loop, so waiting for a client to stop sending
-/// is the accept-loop stall that waiting for a client to stop sending would
-/// reintroduce. One syscall, no wait.
-///
-/// Best-effort by decision: a peer that has already gone makes this fail, and
-/// there is nothing left to say to it.
+/// The head promised `Connection: close`, so the FIN belongs here. It is
+/// best-effort on the refusal paths, which answer without reading the whole
+/// request: a close with the peer's bytes still unread in its receive queue
+/// can still be abortive, and the kernel then sends a RST (RFC 9293 3.6.1,
+/// RFC 1122 4.2.2.13), which can discard a refusal the peer has not read.
+/// Draining would avoid that, but the cap refusal runs in the accept loop, so
+/// waiting for a client to stop sending would stall the accept loop. The
+/// refusal is best-effort, and the slot is released by `Drop` on every path,
+/// read or not.
 fn finish(stream: &mut TcpStream) {
     let _ = stream.shutdown(std::net::Shutdown::Write);
 }

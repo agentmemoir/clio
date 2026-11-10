@@ -116,6 +116,27 @@ fn complete_head_inside_the_header_deadline_is_served() {
 }
 
 #[test]
+fn zero_header_budget_is_floored_and_serves_a_complete_head() {
+    let (mut client, mut server) = socket_pair();
+    client
+        .write_all(b"POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n")
+        .expect("write a complete head");
+    let now = Instant::now();
+    let total = ReadBound::total(now, TOTAL_SECS);
+    // A head already queued must be served under any configured value: the
+    // header budget has a one-second floor, so zero cannot refuse the client
+    // before the first read.
+    let head = ReadBound::head(now, TOTAL_SECS, 0);
+    let Ok(Some(request)) = read_request(&mut server, &total, &head) else {
+        panic!("a zero header budget must be floored, not refuse every client");
+    };
+    assert_eq!(
+        request.path, "/mcp",
+        "the head queued inside the floored budget must be served"
+    );
+}
+
+#[test]
 fn starved_body_fails_at_the_body_progress_deadline_with_408() {
     let (mut client, mut server) = socket_pair();
     // A complete head that declares one body byte. The client then stays open

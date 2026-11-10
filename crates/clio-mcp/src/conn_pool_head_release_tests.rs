@@ -35,10 +35,10 @@ use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 /// Ceiling on the wait for the header budget to expire a parked partial head.
-/// The budget under test is 1 s, so this is an order of magnitude above the
-/// expiry it waits for and still turns a release that never fires into a
-/// bounded failure instead of a hung gate.
-const HEAD_EXPIRY_BUDGET: Duration = Duration::from_secs(8);
+/// The budget under test is 5 s, so this leaves a wide margin above the expiry
+/// it waits for and still turns a release that never fires into a bounded
+/// failure instead of a hung gate.
+const HEAD_EXPIRY_BUDGET: Duration = Duration::from_secs(15);
 
 /// Ceiling on the full-cap reacquisition once the header deadline has fired.
 /// Wide enough for a loaded host to schedule 32 contending threads.
@@ -78,12 +78,13 @@ fn await_head_expiry(held: &[TcpStream], budget: Duration) -> bool {
 #[test]
 fn header_deadline_releases_partial_head_slots() {
     let cfg = HttpConfig {
-        // Far longer than the header budget below and longer than this whole
-        // test, so the header budget is the only bound that can free a slot. If
-        // the total deadline were the binding bound, a release would prove
-        // nothing about the header budget.
+        // Six times shorter than the total deadline below, so the header budget
+        // is the only bound that can free a slot: if the total deadline were
+        // the binding bound, a release would prove nothing about the header
+        // budget. Long enough that saturating all 32 slots inside one budget is
+        // not a scheduling race.
         deadline_secs: Some(30),
-        head_deadline_secs: Some(1),
+        head_deadline_secs: Some(5),
         ..HttpConfig::default()
     };
     let port = spawn_server(cfg);

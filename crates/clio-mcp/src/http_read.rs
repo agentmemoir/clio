@@ -28,9 +28,15 @@ use std::io::{ErrorKind, Read};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-/// Longest single blocking read wait. The total deadline still governs: the
-/// wait never exceeds the time left before the deadline.
+/// Longest single blocking read wait. The bound in force governs the read —
+/// the total deadline, the header budget, or one body-progress slice — and a
+/// single wait never exceeds the time left before that bound.
 const READ_SLICE: Duration = Duration::from_secs(5);
+
+/// Floor for the header budget. A budget of zero would expire before the first
+/// read and refuse every client, even one whose whole head is already queued,
+/// so no configured value can take the header budget below one second.
+const HEAD_FLOOR_SECS: u64 = 1;
 
 /// Refusal message for the head cap, naming the bound and its value.
 fn head_cap_message() -> String {
@@ -179,10 +185,12 @@ impl ReadBound {
         }
     }
 
-    /// The header budget, clamped to the total deadline it is a slice of. When
-    /// it is not shorter than the total, the total is the bound and keeps its
-    /// own words, so a single configured deadline still reports itself.
+    /// The header budget, floored at `HEAD_FLOOR_SECS` and clamped to the total
+    /// deadline it is a slice of. When it is not shorter than the total, the
+    /// total is the bound and keeps its own words, so a single configured
+    /// deadline still reports itself.
     pub(crate) fn head(now: Instant, total_secs: u64, secs: u64) -> Self {
+        let secs = secs.max(HEAD_FLOOR_SECS);
         if secs >= total_secs {
             return Self::total(now, total_secs);
         }
