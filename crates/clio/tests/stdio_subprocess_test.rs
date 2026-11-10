@@ -194,13 +194,22 @@ fn terminate(child: &mut Child, budget: Duration) -> String {
     }
 }
 
+/// One JSON-RPC `tools/call` frame for `name` with `arguments`, carrying the
+/// request metadata the stateless revision requires.
 #[allow(clippy::needless_pass_by_value)]
 fn call(id: i64, name: &str, arguments: Value) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
         "method": "tools/call",
-        "params": {"name": name, "arguments": arguments}
+        "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": clio_mcp::MCP_PROTOCOL_REVISION,
+                "io.modelcontextprotocol/clientCapabilities": {}
+            },
+            "name": name,
+            "arguments": arguments
+        }
     })
 }
 
