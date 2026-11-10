@@ -1,1 +1,1 @@
-Add `clio uninstall --skill-only` so a project can remove just the skill files Clio installed, leaving the rest of the project untouched.
+Add `clio uninstall --skill-only` so a project can remove just the skill files Clio installed, leaving the rest of the project untouched. `clio uninstall --skill-only` takes no `--harness`; every other `clio uninstall` still requires it.

@@ -1,1 +1,1 @@
-Every MCP tool preset now fails the budget build when its live measurement exceeds its token or byte target, and the failure names the preset, the unit, the target, the measured value, and the headroom.
+Every MCP tool preset now fails the budget build when its live measurement exceeds its token or byte target, and the failure names the preset, the unit, the target, the measured value, the excess, and the headroom.
