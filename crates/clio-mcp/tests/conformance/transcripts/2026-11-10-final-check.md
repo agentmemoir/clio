@@ -58,11 +58,32 @@ The table below follows the contract: each row names its producing receipt, the 
 
 ## Final smoke
 
-This record owns one bounded final smoke with no earlier owner at this build head. Its command, output, and verdict will be recorded here.
+This record owns one bounded final smoke with no earlier owner at this build head. The `initialize` then `tools/list` exchange is not it: that exchange already has an owner, and at this revision `initialize` is a removed method answered `-32601`, which the same-head conformance job asserts on both transports. A category row is never marked passing because a source file was read.
+
+The unowned smoke is one `server/discover` then `tools/list` exchange over the built binary's own stdio transport. No job at this head drives the `clio` binary over stdio. The smoke ran after `make build`, at the build head.
+
+```
+make build
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | timeout --kill-after=5s 60s ./target/debug/clio mcp stdio --db sqlite::memory:
+```
+
+| Check | Observed |
+| --- | --- |
+| Verdict | pass |
+| Build | `make build` exit 0 |
+| Process | exit 0 |
+| Stderr | empty, 0 bytes |
+| Stdout | exactly two compact JSON-RPC response lines; 13,689 bytes in total |
+| `server/discover` result | `supportedVersions` equals `["2026-07-28"]`; `serverInfo.name` equals `clio-mcp` |
+| `tools/list` result | six tool names: `graph_link`, `intent_gate`, `retrieve`, `compose_context`, `associations`, `graph_query`; no `nextCursor` |
+| `resultType` | `complete` on both results |
+| Session id | zero `MCP-Session-Id` bytes in stdout |
+
+This is a bounded smoke, not a suite. It shows the built binary serves the revision-valid discovery exchange over its own stdio transport; it does not cover a category that the table marks missing.
 
 ## Limits
 
-A run URL points at a workflow run, and GitHub may expire old run logs; the commit and tree ids are the durable identity. A category with only an earlier-head receipt stays incomplete here.
+A run URL points at a workflow run, and GitHub may expire old run logs; the commit and tree ids are the durable identity. A category with only an earlier-head receipt stays incomplete here. The smoke's full stdout is 13,689 bytes and is summarized here rather than committed, and a workflow run URL may expire while the commit and tree ids stay durable.
 
 ## Incomplete receipt
 
