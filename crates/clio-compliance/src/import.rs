@@ -140,12 +140,7 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
         ));
     }
     let raw = read_bundle_source(args.source, MAX_BUNDLE_BYTES)?;
-    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
-        AmError::new(
-            ErrorCode::InvalidArgument,
-            format!("bundle JSON invalid: {e}"),
-        )
-    })?;
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|_| source_unreadable())?;
     let parsed = bundle::parse_bundle(&value)?;
     verify_checksums(&parsed)?;
     if args.force && args.reason.unwrap_or("").trim().is_empty() {
@@ -205,27 +200,12 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
     })
 }
 
-/// The failure shape the bundle read has always reported for an I/O error.
-fn bundle_read_error(e: &std::io::Error) -> AmError {
+/// The single refusal every unreadable bundle source reports, whatever the
+/// underlying reason, so a caller cannot tell one failure from another.
+fn source_unreadable() -> AmError {
     AmError::new(
         ErrorCode::InvalidArgument,
-        format!("bundle read failed: {e}"),
-    )
-}
-
-/// The refusal for a source that is not a regular file.
-fn not_a_regular_file() -> AmError {
-    AmError::new(
-        ErrorCode::InvalidArgument,
-        "bundle source is not a regular file",
-    )
-}
-
-/// The refusal for a source over the byte cap.
-fn size_limit_exceeded(max_bytes: u64) -> AmError {
-    AmError::new(
-        ErrorCode::OutOfRange,
-        format!("bundle source exceeds {max_bytes} byte limit"),
+        "bundle source is not a readable bundle file",
     )
 }
 
@@ -241,35 +221,26 @@ fn size_limit_exceeded(max_bytes: u64) -> AmError {
 /// passes. The open is re-checked because the path can be replaced between the
 /// two calls.
 fn read_bundle_source(path: &str, max_bytes: u64) -> Result<String, AmError> {
-    let meta = std::fs::metadata(path).map_err(|e| bundle_read_error(&e))?;
+    let meta = std::fs::metadata(path).map_err(|_| source_unreadable())?;
     if !meta.is_file() {
-        return Err(not_a_regular_file());
+        return Err(source_unreadable());
     }
     if meta.len() > max_bytes {
-        return Err(size_limit_exceeded(max_bytes));
+        return Err(source_unreadable());
     }
-    let file = std::fs::File::open(path).map_err(|e| bundle_read_error(&e))?;
-    if !file
-        .metadata()
-        .map_err(|e| bundle_read_error(&e))?
-        .is_file()
-    {
-        return Err(not_a_regular_file());
+    let file = std::fs::File::open(path).map_err(|_| source_unreadable())?;
+    if !file.metadata().map_err(|_| source_unreadable())?.is_file() {
+        return Err(source_unreadable());
     }
     let mut bytes = Vec::new();
     let mut bounded = file.take(max_bytes + 1);
     bounded
         .read_to_end(&mut bytes)
-        .map_err(|e| bundle_read_error(&e))?;
+        .map_err(|_| source_unreadable())?;
     if bytes.len() as u64 > max_bytes {
-        return Err(size_limit_exceeded(max_bytes));
+        return Err(source_unreadable());
     }
-    String::from_utf8(bytes).map_err(|e| {
-        AmError::new(
-            ErrorCode::InvalidArgument,
-            format!("bundle source is invalid UTF-8: {e}"),
-        )
-    })
+    String::from_utf8(bytes).map_err(|_| source_unreadable())
 }
 
 /// Verify the completeness manifest before any write.
