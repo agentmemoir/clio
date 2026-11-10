@@ -49,8 +49,7 @@ const HIDDEN: &str = "config_profiles";
 
 /// A server state whose configuration layer is exactly `config`.
 ///
-/// The runtime reads no process environment, so the profile in force depends on
-/// the given document alone.
+/// The runtime reads no environment, so the profile in force is the document's alone.
 fn state_with(config: &str) -> Arc<McpState> {
     let mut runtime = clio_config::Runtime::with_env(&|_: &str| None);
     runtime
@@ -59,8 +58,7 @@ fn state_with(config: &str) -> Arc<McpState> {
     McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state")
 }
 
-/// The same state carrying one credential, so the administrative gate has an
-/// actor to read.
+/// The same state carrying one credential, so the administrative gate has an actor.
 fn bound(state: &Arc<McpState>, actor: Actor) -> Arc<McpState> {
     Arc::new(state.as_ref().clone().with_principal(Principal::new(
         format!("{}-key", actor.as_str()),
@@ -76,8 +74,7 @@ fn request(state: &Arc<McpState>, message: &Value) -> Value {
         .expect("a request with an id has a response")
 }
 
-/// Send one `tools/call` and return the whole response, so a gate refusal (a
-/// JSON-RPC `error`) and a tool refusal (a structured result) stay distinct.
+/// Send one `tools/call` and return its whole response, keeping gate and tool refusals apart.
 fn call(state: &Arc<McpState>, name: &str, args: &Value) -> Value {
     request(
         state,
@@ -120,8 +117,7 @@ fn listed(state: &Arc<McpState>) -> Vec<String> {
     names
 }
 
-/// The minimal preset's tool names, written out so a membership change fails
-/// these tests instead of moving the expectation with the code.
+/// The minimal preset's tool names, so a membership change fails these tests.
 const MINIMAL_TOOLS: [&str; 6] = [
     "associations",
     "compose_context",
@@ -139,8 +135,7 @@ fn expected_minimal() -> Vec<String> {
         .collect()
 }
 
-/// The full bound set the dispatcher reads, which the `all` preset advertises
-/// unchanged, sorted.
+/// The full bound set the dispatcher reads, which the `all` preset advertises sorted.
 fn full_catalog() -> Vec<String> {
     let mut names: Vec<String> = McpHandler::tools_list()["tools"]
         .as_array()
@@ -325,6 +320,7 @@ fn replacing_the_server_config_changes_the_next_listing() {
             .reload_deployment_overlay()
             .expect("the replaced document loads");
     }
+    let _ = state.replace_tool_view();
 
     let after = listed(&state);
     assert_eq!(after, full_catalog());
@@ -373,9 +369,13 @@ fn every_catalog_tool_answers_when_hidden() {
     let visible_state = state_with(r#"{"mcp": {"tool_profile": "all"}}"#);
     let set_profile = |state: &Arc<McpState>, preset: &str| {
         let mut runtime = state.config.lock().expect("config runtime mutex poisoned");
+        let layer = format!(r#"{{"mcp": {{"tool_profile": "{preset}"}}}}"#);
         runtime
-            .load_file_json(&format!(r#"{{"mcp": {{"tool_profile": "{preset}"}}}}"#))
+            .load_file_json(&layer)
             .expect("a valid config layer");
+        // The seam reads the same runtime, so the guard is gone by now.
+        drop(runtime);
+        let _ = state.replace_tool_view();
     };
     // What the call says about itself, apart from the payload: a JSON-RPC
     // refusal, and the tool outcome behind the envelope.

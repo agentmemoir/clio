@@ -37,6 +37,7 @@
 
 use crate::protocol::{ERR_INVALID_PARAMS, McpHandler, RpcError};
 use crate::runtime::{McpOpenOptions, McpState};
+use crate::tool_snapshot::ToolSnapshot;
 use crate::tools_page::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PAGE_SIZE_KEY, ToolView, page};
 use base64::Engine;
 use clio_types::ToolPreset;
@@ -103,7 +104,10 @@ fn view(preset: ToolPreset) -> ToolView {
 
 /// One page of a synthetic catalog under `preset`.
 fn preset_page(tools: &[Value], preset: ToolPreset, params: &Value) -> Result<Value, RpcError> {
-    page(tools, &view(preset), Some(params))
+    page(
+        &ToolSnapshot::build(view(preset), tools.to_vec()),
+        Some(params),
+    )
 }
 
 /// One page of a synthetic catalog under the `all` preset.
@@ -361,7 +365,8 @@ fn a_changed_revision_invalidates_a_cursor() {
     let encoded = first_cursor(&tools, 10);
     let mut changed = view(ToolPreset::All);
     changed.revision = "2026-01-01".to_owned();
-    let error = page(&tools, &changed, Some(&json!({ "cursor": encoded })))
+    let snapshot = ToolSnapshot::build(changed, tools);
+    let error = page(&snapshot, Some(&json!({ "cursor": encoded })))
         .expect_err("a cursor from another revision is refused");
     assert_eq!(error.code, ERR_INVALID_PARAMS);
     assert!(
@@ -380,8 +385,7 @@ fn a_cursor_from_another_group_selection_is_refused() {
         revision: "2025-11-25".to_owned(),
     };
     let first = page(
-        &tools,
-        &selected,
+        &ToolSnapshot::build(selected.clone(), tools.clone()),
         Some(&json!({ "_meta": { PAGE_SIZE_KEY: 10 } })),
     )
     .expect("a valid first page");
@@ -389,8 +393,11 @@ fn a_cursor_from_another_group_selection_is_refused() {
         .expect("a first page with more tools carries a cursor")
         .to_owned();
     selected.groups = clio_types::custom(&["ops", "task"]).expect("a known group");
-    let error = page(&tools, &selected, Some(&json!({ "cursor": encoded })))
-        .expect_err("a cursor from another group selection is refused");
+    let error = page(
+        &ToolSnapshot::build(selected, tools),
+        Some(&json!({ "cursor": encoded })),
+    )
+    .expect_err("a cursor from another group selection is refused");
     assert_eq!(error.code, ERR_INVALID_PARAMS);
     assert!(
         error.message.contains("different tool view"),

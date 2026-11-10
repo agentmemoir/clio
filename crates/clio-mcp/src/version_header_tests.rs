@@ -85,7 +85,7 @@ fn a_matching_supported_version_reaches_dispatch() {
     let served = run(&state, &headers(crate::MCP_PROTOCOL_REVISION), &frame(&msg))
         .expect("the request is admitted")
         .expect("a request carrying an id is answered");
-    let expected = super::dispatch(&state, &msg).expect("dispatch answers");
+    let expected = super::dispatch(&state, super::Transport::Http, &msg).expect("dispatch answers");
     assert_eq!(served, expected, "the admission serves the dispatch result");
     assert!(served.get("error").is_none(), "{served}");
 }

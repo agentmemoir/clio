@@ -40,9 +40,9 @@ Config and export consumers that carry the same value: `crates/clio-config/src/c
 
 ## Routing and dispatcher wiring
 
-HTTP: `crates/clio-mcp/src/http.rs` installs `CandidatePost` as the POST strategy in `serve_with_listener` (via `serve_with_listener_and`), and `route` refuses every verb but `POST` through `method_guard::refuse` before the Origin, auth, path, and media-type gates run, so a `GET` is a 405 with no body and there is no server-initiated SSE stream.
+HTTP: `crates/clio-mcp/src/http.rs` installs `CandidatePost` as the POST strategy in `serve_with_listener` (via `serve_with_listener_and`), and `route` refuses every verb but `POST` through `method_guard::refuse` before the Origin, auth, path, and media-type gates run, so a `GET` is a 405 with no body, and a POST `subscriptions/listen` request answers with a `text/event-stream` body.
 
-HTTP POST strategy: `crates/clio-mcp/src/http_candidate.rs` holds `CandidatePost` and `method_not_found_status` as live code, compiled unconditionally, and `crates/clio-mcp/src/http_post.rs` keeps only the `PostRoute` trait and the request-scoped `PostContext` (`state` and `req`) that the strategy reads. `crates/clio-mcp/src/method_guard.rs` is compiled unconditionally and owns the POST-only verb refusal.
+HTTP POST strategy: `crates/clio-mcp/src/http_candidate.rs` holds `CandidatePost` and `method_not_found_status` as live code, compiled unconditionally, and `crates/clio-mcp/src/http_post.rs` owns the `PostRoute` trait, the request-scoped `PostContext` (`state` and `req`) that the strategy reads, and the `PostBody` answer kind (`Buffered` JSON or `Stream`). `crates/clio-mcp/src/method_guard.rs` is compiled unconditionally and owns the POST-only verb refusal.
 
 stdio: `crates/clio-mcp/src/stdio.rs`'s `serve(state, input, output)` is the dispatcher itself, not a handler wrapper; `crates/clio/src/mcp_cli.rs` (`clio mcp stdio`) constructs the state and calls it directly. `crates/clio-mcp/src/lib.rs` registers `conditional_http`, `http_candidate`, `method_guard`, and `stateless` as ordinary modules, so nothing on the serving path is test-gated.
 

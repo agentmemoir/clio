@@ -19,7 +19,7 @@
   "exchanges": [
     {
       "request": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server/discover\",\"params\":{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}",
-      "response": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"_meta\":{\"io.modelcontextprotocol/serverInfo\":{\"name\":\"clio-mcp\",\"version\":\"0.1.0\"}},\"cacheScope\":\"private\",\"capabilities\":{\"tools\":{\"listChanged\":false}},\"resultType\":\"complete\",\"supportedVersions\":[\"2026-07-28\"],\"ttlMs\":300000}}"
+      "response": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"_meta\":{\"io.modelcontextprotocol/serverInfo\":{\"name\":\"clio-mcp\",\"version\":\"0.1.0\"}},\"cacheScope\":\"private\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"resultType\":\"complete\",\"supportedVersions\":[\"2026-07-28\"],\"ttlMs\":300000}}"
     },
     {
       "request": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}},\"name\":\"ranking_env_get\",\"arguments\":{}}}",

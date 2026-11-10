@@ -152,8 +152,8 @@ impl McpHandler {
     /// know and no installed selection governs the view.
     #[cfg(test)]
     pub(crate) fn tools_list_visible(state: &McpState) -> Result<Value, RpcError> {
-        let (_, tools) = crate::tools_page::visible_view(state)?;
-        Ok(json!({ "tools": tools }))
+        let snapshot = crate::tools_page::visible_view(state)?;
+        Ok(json!({ "tools": snapshot.tools() }))
     }
 
     /// `tools/list` with the page the request selects.
@@ -170,8 +170,8 @@ impl McpHandler {
         state: &McpState,
         params: Option<&Value>,
     ) -> Result<Value, RpcError> {
-        let (view, tools) = crate::tools_page::visible_view(state)?;
-        crate::tools_page::page(&tools, &view, params)
+        let snapshot = crate::tools_page::visible_view(state)?;
+        crate::tools_page::page(&snapshot, params)
     }
 
     fn tools_call(state: &McpState, params: Option<&Value>) -> Result<Value, RpcError> {

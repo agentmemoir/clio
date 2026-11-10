@@ -9,6 +9,7 @@
 //! ## Owns
 //! - The strategy trait's notification, refused-method, and served branches
 //! - `scoped_state` and the principal it carries
+//! - The `Debug` rendering of both body kinds
 //!
 //! ## Does not own
 //! - The strategy trait or the route gates (see `http_post` and `http`)
@@ -20,11 +21,13 @@
 //! require changes here. Changes to a gate or a tool should not.
 
 use super::*;
+use crate::event_stream::{EventStream, FrameSource, frame};
 use crate::http_candidate::CandidatePost;
 use crate::principal::Principal;
 use crate::runtime::McpOpenOptions;
 use clio_types::Actor;
 use serde_json::json;
+use std::time::Duration;
 
 /// A fresh runtime state for one test.
 fn state() -> Arc<McpState> {
@@ -41,6 +44,14 @@ fn request(body: &str, headers: &[(&str, &str)]) -> HttpRequest {
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
             .collect(),
         body: body.into(),
+    }
+}
+
+/// The bytes of a buffered answer, which is the only kind the candidate sends.
+fn buffered(body: PostBody) -> String {
+    match body {
+        PostBody::Buffered(bytes) => bytes,
+        PostBody::Stream(_) => panic!("the candidate answers with a buffered body"),
     }
 }
 
@@ -66,6 +77,7 @@ fn a_notification_is_answered_with_202_and_no_body() {
         state: &state,
         req: &req,
     });
+    let body = buffered(body);
     assert_eq!(status, 202);
     assert!(body.is_empty(), "{body}");
     assert!(extra.is_empty(), "no header is answered with a body alone");
@@ -85,6 +97,7 @@ fn a_removed_method_is_answered_with_404() {
         state: &state,
         req: &req,
     });
+    let body = buffered(body);
     assert_eq!(status, 404, "{body}");
     let value: serde_json::Value = serde_json::from_str(&body).expect("a JSON answer");
     assert_eq!(value["error"]["code"], json!(-32601), "{value}");
@@ -102,6 +115,7 @@ fn a_stateless_listing_is_served_with_200() {
         state: &state,
         req: &req,
     });
+    let body = buffered(body);
     assert_eq!(status, 200, "{body}");
     let value: serde_json::Value = serde_json::from_str(&body).expect("a JSON answer");
     assert!(value["result"]["tools"].is_array(), "{value}");
@@ -128,5 +142,30 @@ fn scoped_state_carries_the_request_principal() {
     assert!(
         bound.authorize_admin().is_err(),
         "the bound principal's actor decides the administrative rule"
+    );
+}
+
+#[test]
+fn a_buffered_body_renders_its_payload() {
+    let body = PostBody::Buffered("ready".into());
+    assert_eq!(format!("{body:?}"), "Buffered(\"ready\")");
+}
+
+#[test]
+fn a_streamed_body_hides_its_source() {
+    struct Silent;
+    impl FrameSource for Silent {
+        fn next(&mut self, _timeout: Duration) -> Option<Vec<u8>> {
+            None
+        }
+    }
+    let body = PostBody::Stream(EventStream {
+        head: frame("{}"),
+        source: Box::new(Silent),
+    });
+    assert_eq!(
+        format!("{body:?}"),
+        "Stream(..)",
+        "a stream's source is not rendered"
     );
 }

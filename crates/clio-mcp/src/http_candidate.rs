@@ -25,8 +25,9 @@
 //!
 //! Keep this module focused on the POST strategy.
 
-use crate::http_post::{PostContext, PostResponse, PostRoute};
+use crate::http_post::{PostBody, PostContext, PostResponse, PostRoute};
 use crate::protocol::ERR_METHOD_NOT_FOUND;
+use crate::stateless::{Admitted, Transport};
 use serde_json::Value;
 
 /// HTTP status for a request whose method this server does not implement.
@@ -41,20 +42,31 @@ pub(crate) struct CandidatePost;
 
 impl PostRoute for CandidatePost {
     fn respond(&self, ctx: PostContext<'_>) -> PostResponse {
-        match crate::stateless::admit(ctx.state, |header| ctx.req.get(header), ctx.req.body.trim())
-        {
-            Ok(Some(response)) => {
-                let status = method_not_found_status(&response);
-                (
-                    status,
-                    serde_json::to_string(&response).unwrap_or_default(),
-                    Vec::new(),
-                )
+        match crate::stateless::validate(|header| ctx.req.get(header), ctx.req.body.trim()) {
+            Ok(Admitted::Removed(response)) => buffered_json(&response),
+            Ok(Admitted::Request(body)) => {
+                if body.get("method").and_then(Value::as_str)
+                    == Some(crate::tool_listen::LISTEN_METHOD)
+                {
+                    return crate::tool_listen::serve(ctx.state, &body);
+                }
+                match crate::stateless::dispatch(ctx.state, Transport::Http, &body) {
+                    Some(response) => buffered_json(&response),
+                    None => (202, PostBody::Buffered(String::new()), Vec::new()),
+                }
             }
-            Ok(None) => (202, String::new(), Vec::new()),
-            Err((status, body)) => (status, body, Vec::new()),
+            Err((status, body)) => (status, PostBody::Buffered(body), Vec::new()),
         }
     }
+}
+
+/// Answer one JSON-RPC envelope with its HTTP status.
+fn buffered_json(response: &Value) -> PostResponse {
+    (
+        method_not_found_status(response),
+        PostBody::Buffered(serde_json::to_string(response).unwrap_or_default()),
+        Vec::new(),
+    )
 }
 
 /// The HTTP status for one admitted answer: `404` when this server does not
@@ -78,3 +90,7 @@ mod http_candidate_guard_tests;
 #[cfg(test)]
 #[path = "http_candidate_listing_tests.rs"]
 mod http_candidate_listing_tests;
+
+#[cfg(test)]
+#[path = "http_candidate_subscription_tests.rs"]
+mod http_candidate_subscription_tests;

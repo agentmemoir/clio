@@ -1,0 +1,1 @@
+The HTTP transport now answers `subscriptions/listen` with a `text/event-stream` body: the stream opens with an acknowledgement and sends one `notifications/tools/list_changed` frame per server-owned tool-view change, and discovery advertises the `tools.listChanged` capability.
