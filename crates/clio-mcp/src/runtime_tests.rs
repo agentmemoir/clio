@@ -352,8 +352,7 @@ fn authorize_admin_allows_an_unbound_state() {
         .expect("a local, unbound state administers");
 }
 
-/// Only `harness` and `system` carry the privilege, so an `agent` or `user`
-/// credential is refused — and the refusal is the code, not the message text.
+/// Only `harness` and `system` administer, and the refusal names what it guards.
 #[test]
 fn authorize_admin_refuses_a_non_administrative_credential() {
     for actor in [Actor::Agent, Actor::User] {
@@ -366,6 +365,7 @@ fn authorize_admin_refuses_a_non_administrative_credential() {
             .authorize_admin()
             .expect_err("a non-administrative credential must not administer");
         assert_eq!(err.code, ErrorCode::Forbidden, "{actor:?} credential");
+        assert!(err.message.contains("bundle import"), "{}", err.message);
     }
 }
 

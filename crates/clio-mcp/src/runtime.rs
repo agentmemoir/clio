@@ -326,10 +326,10 @@ impl McpState {
     /// administrator.
     ///
     /// A credential names one actor, and only `harness` and `system` carry the
-    /// privilege the config, ranking, and deployment-retention mutations need —
-    /// the same administrative set the compliance verbs use. An unbound state
-    /// (a local transport with no credential edge) is allowed, because the
-    /// process owner already holds the store.
+    /// privilege the config, ranking, deployment-retention, and bundle import
+    /// mutations need — the same administrative set the compliance verbs use.
+    /// An unbound state is allowed, because the process owner already holds the
+    /// store.
     ///
     /// # Errors
     /// [`ErrorCode::Forbidden`] when a bound credential's actor is not an
@@ -343,8 +343,8 @@ impl McpState {
             Actor::Agent | Actor::User => Err(AmError::new(
                 ErrorCode::Forbidden,
                 "this credential is not an administrator; config, ranking, \
-                 and deployment-retention changes need a harness or system \
-                 credential",
+                 deployment-retention, and bundle import changes need a \
+                 harness or system credential",
             )),
         }
     }

@@ -140,7 +140,7 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
         ));
     }
     let raw = read_bundle_source(args.source, MAX_BUNDLE_BYTES)?;
-    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|_| source_unreadable())?;
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|_| source_not_json())?;
     let parsed = bundle::parse_bundle(&value)?;
     verify_checksums(&parsed)?;
     if args.force && args.reason.unwrap_or("").trim().is_empty() {
@@ -200,13 +200,27 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
     })
 }
 
-/// The single refusal every unreadable bundle source reports, whatever the
-/// underlying reason, so a caller cannot tell one failure from another.
+/// The refusal every filesystem access, type, or UTF-8 failure reports, so a
+/// caller cannot tell one of those failures from another.
 fn source_unreadable() -> AmError {
     AmError::new(
         ErrorCode::InvalidArgument,
         "bundle source is not a readable bundle file",
     )
+}
+
+/// The refusal an over-cap source reports: no size, no cap, no host metadata.
+fn source_oversize() -> AmError {
+    AmError::new(
+        ErrorCode::InvalidArgument,
+        "bundle source exceeds the size limit",
+    )
+}
+
+/// The refusal a source whose text is not JSON reports, without the parse
+/// detail or its offset.
+fn source_not_json() -> AmError {
+    AmError::new(ErrorCode::InvalidArgument, "bundle JSON invalid")
 }
 
 /// Read one bundle source, refusing a non-regular file and any size over
@@ -226,7 +240,7 @@ fn read_bundle_source(path: &str, max_bytes: u64) -> Result<String, AmError> {
         return Err(source_unreadable());
     }
     if meta.len() > max_bytes {
-        return Err(source_unreadable());
+        return Err(source_oversize());
     }
     let file = std::fs::File::open(path).map_err(|_| source_unreadable())?;
     if !file.metadata().map_err(|_| source_unreadable())?.is_file() {
@@ -238,7 +252,7 @@ fn read_bundle_source(path: &str, max_bytes: u64) -> Result<String, AmError> {
         .read_to_end(&mut bytes)
         .map_err(|_| source_unreadable())?;
     if bytes.len() as u64 > max_bytes {
-        return Err(source_unreadable());
+        return Err(source_oversize());
     }
     String::from_utf8(bytes).map_err(|_| source_unreadable())
 }

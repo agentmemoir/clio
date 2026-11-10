@@ -396,7 +396,7 @@ fn invalid_caller_inputs_fail_closed() {
     ))
     .unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidArgument);
-    assert_eq!(err.message, "bundle source is not a readable bundle file");
+    assert_eq!(err.message, "bundle JSON invalid");
 
     // Manifest version disagreeing with the envelope version.
     let mut mismatched: serde_json::Value = serde_json::from_str(&bundle.text()).unwrap();
