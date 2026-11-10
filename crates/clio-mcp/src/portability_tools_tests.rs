@@ -280,6 +280,34 @@ fn import_rejects_unsupported_format() {
     fs::remove_file(&src).ok();
 }
 
+/// The `source` path is a local read, so a bound `agent` or `user` credential is
+/// refused by the administrative gate, while an unbound local state still imports.
+#[test]
+fn import_is_refused_for_a_bound_non_administrative_credential() {
+    let s = state();
+    assert_eq!(store_probe(&s, "pimg-gate")["ok"], Value::Bool(true));
+    let dest = temp_path("gate");
+    let export = json!({"destination": dest, "bank": "bank-a", "actor": "harness"});
+    assert_eq!(call(&s, "export", export)["ok"], Value::Bool(true));
+    let args = json!({"source": dest, "bank": "bank-a", "actor": "harness"});
+    for actor in [clio_types::Actor::Agent, clio_types::Actor::User] {
+        let bound = s.with_principal(crate::principal::Principal::new(
+            format!("{}-key", actor.as_str()),
+            actor,
+            vec!["bank-a".to_owned()],
+        ));
+        let denied = call(&bound, "import", args.clone());
+        assert_eq!(denied["code"], "forbidden", "{actor:?}: {denied}");
+        assert!(
+            denied.to_string().contains("not an administrator"),
+            "{denied}"
+        );
+    }
+
+    assert_eq!(call(&s, "import", args)["ok"], Value::Bool(true));
+    fs::remove_file(&dest).ok();
+}
+
 // ---------- import_provider stub ----------
 
 #[test]
