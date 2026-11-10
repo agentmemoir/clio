@@ -193,6 +193,7 @@ fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
 /// admission-gated restore.
 #[inline(never)]
 fn import_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
+    state.authorize_admin()?;
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args)?;
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));

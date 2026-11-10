@@ -380,7 +380,8 @@ fn invalid_caller_inputs_fail_closed() {
         None,
     ))
     .unwrap_err();
-    assert!(err.message.contains("bundle read failed"), "{err:?}");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    assert_eq!(err.message, "bundle source is not a readable bundle file");
 
     // Non-JSON source file.
     let junk_path = std::env::temp_dir().join(unique("am-import-junk"));
@@ -394,7 +395,8 @@ fn invalid_caller_inputs_fail_closed() {
         None,
     ))
     .unwrap_err();
-    assert!(err.message.contains("bundle JSON invalid"), "{err:?}");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    assert_eq!(err.message, "bundle JSON invalid");
 
     // Manifest version disagreeing with the envelope version.
     let mut mismatched: serde_json::Value = serde_json::from_str(&bundle.text()).unwrap();

@@ -19,19 +19,17 @@
 //! Test-only. Never compiled into production builds.
 
 use clio_store::LocalEventIntent;
+use clio_types::Actor;
 use serde_json::{Value, json};
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Calls served so far in this process, so this helper never hands two
-/// callers the same path.
+/// Calls served so far, so this helper never hands two callers the same path.
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-/// Default sqlite-backed test state (matches the additive fixture builder).
-///
-/// The export root is the OS temp directory, because the destinations these
-/// tests use are absolute paths under it and an `export` / `review_export`
-/// destination outside the root is refused.
+/// Default sqlite-backed test state (matches the additive fixture builder), with
+/// the OS temp directory as the export root, so these tests' absolute
+/// destinations lie inside it.
 pub(crate) fn state() -> std::sync::Arc<crate::runtime::McpState> {
     let mut state = crate::runtime::McpState::open_with_effective(
         &crate::runtime::McpOpenOptions::default(),
@@ -46,8 +44,7 @@ pub(crate) fn state() -> std::sync::Arc<crate::runtime::McpState> {
 
 /// One per-test scratch directory, removed when the guard drops.
 ///
-/// `tempfile` is not a workspace dependency, so this is the repo's own fixture
-/// pattern: a unique path under the OS temp directory with explicit cleanup.
+/// `tempfile` is not a workspace dependency, so this is the repo's own pattern.
 struct Scratch {
     dir: std::path::PathBuf,
 }
@@ -278,6 +275,38 @@ fn import_rejects_unsupported_format() {
     );
     assert_eq!(out["ok"], Value::Bool(false), "{out}");
     fs::remove_file(&src).ok();
+}
+
+/// One copy of `state` bound as `actor` over the one bank these tests reach.
+fn bound_as(state: &crate::runtime::McpState, actor: Actor) -> crate::runtime::McpState {
+    state.with_principal(crate::principal::Principal::new(
+        format!("{}-key", actor.as_str()),
+        actor,
+        vec!["bank-a".to_owned()],
+    ))
+}
+
+/// The `source` path is a local read, so the gate decides by the credential's
+/// actor: `agent` and `user` are refused, `harness` and an unbound state are not.
+#[test]
+fn import_is_refused_for_a_bound_non_administrative_credential() {
+    let s = state();
+    assert_eq!(store_probe(&s, "pimg-gate")["ok"], Value::Bool(true));
+    let dest = temp_path("gate");
+    let export = json!({"destination": dest, "bank": "bank-a", "actor": "harness"});
+    assert_eq!(call(&s, "export", export)["ok"], Value::Bool(true));
+    let args = json!({"source": dest, "bank": "bank-a", "actor": "harness"});
+    for actor in [Actor::Agent, Actor::User] {
+        let denied = call(&bound_as(&s, actor), "import", args.clone());
+        let text = denied.to_string();
+        assert_eq!(denied["code"], "forbidden", "{actor:?}: {denied}");
+        assert!(text.contains("not an administrator"), "{text}");
+    }
+
+    let admin = bound_as(&s, Actor::Harness);
+    assert_eq!(call(&s, "import", args.clone())["ok"], Value::Bool(true));
+    assert_eq!(call(&admin, "import", args)["ok"], Value::Bool(true));
+    fs::remove_file(&dest).ok();
 }
 
 // ---------- import_provider stub ----------
