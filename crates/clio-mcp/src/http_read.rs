@@ -229,3 +229,7 @@ fn read_bounded(
 fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
+
+#[cfg(test)]
+#[path = "http_read_tests.rs"]
+mod http_read_tests;
