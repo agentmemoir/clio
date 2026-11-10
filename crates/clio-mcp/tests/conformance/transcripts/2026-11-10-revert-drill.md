@@ -8,6 +8,8 @@ This record is the durable evidence for a clean rehearsal of the documented reve
 
 The drill used a throwaway clone outside the working tree, created with `git clone --shared --no-hardlinks <repository-checkout> <scratch-clone>` and removed when the drill ended. In that clone I ran `git checkout -B revert-drill-546 90b7f3b`, then `git revert --no-commit 1b9b3e5..4540278` (92 paths staged), then exactly one commit with `git commit -F -`. Nothing was pushed, and no local path, host name, or private repository is recorded here.
 
+The committed manifest's own command, `git revert --no-edit 1b9b3e5..HEAD`, produces one revert commit per commit in the range, so on this range it yields eight revert commits and not one; this drill uses `git revert --no-commit` and squashes the result into the single commit issue 546 requires. The manifest already records its own dry run of that command over the full eight-commit range, first seven commits at `4c5681e` and then the rewrite as the eighth, so this record does not claim the manifest prescribes squashing.
+
 - Branch: `revert-drill-546`
 - Commit: `fcf4b2d81175ce5a50f5312e63d5cc0e419c702a`
 - Subject: `Revert the MCP activation range to restore the pre-cut revision`
