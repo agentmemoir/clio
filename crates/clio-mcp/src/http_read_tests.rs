@@ -39,6 +39,15 @@ const HEAD_SECS: u64 = 1;
 /// above the budget, so a budget that never fires fails instead of hanging.
 const HEAD_EXPIRY_CEILING: Duration = Duration::from_secs(10);
 
+/// Total deadline for the starved-body case. Short so the red proof (a head
+/// budget equal to the total, which disables the body-progress bound) fails in
+/// seconds instead of waiting the 30 s total, yet far above the loopback cost
+/// of the complete head that starts it.
+const STARVED_BODY_TOTAL_SECS: u64 = 5;
+
+/// Body-progress budget under test: the same 1 s slice the head uses.
+const STARVED_BODY_HEAD_SECS: u64 = 1;
+
 /// A connected loopback socket pair on an OS-assigned port, with a generous
 /// receive timeout on the reading side so a stuck read fails the test instead
 /// of hanging it.
@@ -103,5 +112,37 @@ fn complete_head_inside_the_header_deadline_is_served() {
         (request.method.as_str(), request.path.as_str()),
         ("POST", "/mcp"),
         "the served request must be parsed from the head that was in budget"
+    );
+}
+
+#[test]
+fn starved_body_fails_at_the_body_progress_deadline_with_408() {
+    let (mut client, mut server) = socket_pair();
+    // A complete head that declares one body byte. The client then stays open
+    // and silent, so only the body-progress bound can end the read. Without
+    // that bound the connection would hold its slot for the whole total.
+    client
+        .write_all(b"POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\n\r\n")
+        .expect("write a complete head");
+    let now = Instant::now();
+    let total = ReadBound::total(now, STARVED_BODY_TOTAL_SECS);
+    let head = ReadBound::head(now, STARVED_BODY_TOTAL_SECS, STARVED_BODY_HEAD_SECS);
+    let started = Instant::now();
+    let outcome = read_request(&mut server, &total, &head);
+    let elapsed = started.elapsed();
+    let Err((status, message)) = outcome else {
+        panic!("a starved body must not be read as a request");
+    };
+    assert_eq!(
+        status, 408,
+        "an expired body-progress budget is a request timeout"
+    );
+    assert!(
+        message.contains("1 s body read deadline"),
+        "the refusal must name the body-progress budget and its value: {message}"
+    );
+    assert!(
+        elapsed < HEAD_EXPIRY_CEILING,
+        "the 1 s body-progress budget must end the read long before the 5 s total: {elapsed:?}"
     );
 }

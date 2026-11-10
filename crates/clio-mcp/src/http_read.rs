@@ -65,11 +65,13 @@ impl HttpRequest {
 
 /// Read one request under the total deadline and the header budget.
 ///
-/// The head loop is charged to the header budget; the body loop is charged to
-/// the total deadline. The error carries the refusal status and a message
-/// naming the bound and its value; an empty message means a plain bad request
-/// (unchanged behavior). `Ok(None)` is a clean EOF before a request (no
-/// response).
+/// The head loop is charged to the header budget. Each body read is charged to
+/// the earlier of the total deadline and a fresh header-budget slice, so a body
+/// that makes no progress fails inside the header budget while a body that
+/// keeps making progress keeps the total deadline as its hard cap. The error
+/// carries the refusal status and a message naming the bound and its value; an
+/// empty message means a plain bad request (unchanged behavior). `Ok(None)` is
+/// a clean EOF before a request (no response).
 ///
 /// # Errors
 /// Deadline expiry (408), an oversize head or body (413), or an I/O failure
@@ -77,13 +79,13 @@ impl HttpRequest {
 pub(crate) fn read_request(
     stream: &mut TcpStream,
     total: &ReadBound,
-    head: &ReadBound,
+    head_bound: &ReadBound,
 ) -> Result<Option<HttpRequest>, (u16, String)> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
     let header_end;
     loop {
-        let n = read_bounded(stream, head, &mut chunk)?;
+        let n = read_bounded(stream, head_bound, &mut chunk)?;
         if n == 0 {
             return Ok(None);
         }
@@ -136,7 +138,10 @@ pub(crate) fn read_request(
         return Err((413, body_cap_message()));
     }
     while buf.len() < header_end + 4 + content_length {
-        let n = read_bounded(stream, total, &mut chunk)?;
+        // Recompute per read, not once for the body: a body that keeps moving
+        // restarts its slice, and the total deadline stays the hard ceiling.
+        let progress = head_bound.body_progress(total, Instant::now());
+        let n = read_bounded(stream, &progress, &mut chunk)?;
         if n == 0 {
             break;
         }
@@ -193,6 +198,26 @@ impl ReadBound {
             408,
             format!("request exceeded the {} s {}", self.secs, self.name),
         )
+    }
+
+    /// The body-progress budget for one read, as the earlier of the total
+    /// deadline and now plus the header budget. Its message names the body
+    /// wait, so a starved body is never reported in the header's words.
+    fn body_progress(&self, total: &Self, now: Instant) -> Self {
+        let progress = now + Duration::from_secs(self.secs);
+        if progress < total.deadline {
+            Self {
+                deadline: progress,
+                secs: self.secs,
+                name: "body read deadline",
+            }
+        } else {
+            Self {
+                deadline: total.deadline,
+                secs: total.secs,
+                name: "total request deadline",
+            }
+        }
     }
 }
 
