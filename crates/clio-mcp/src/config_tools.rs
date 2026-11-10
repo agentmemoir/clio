@@ -63,7 +63,7 @@ pub(crate) fn dispatch_write(state: &McpState, name: &str, args: &Value) -> Resu
             // before it runs. A failed set changes no tool view.
             drop(rt);
             if outcome.is_ok() {
-                state.announce_tool_view();
+                state.replace_tool_view();
             }
             outcome
         }
@@ -76,7 +76,7 @@ pub(crate) fn dispatch_write(state: &McpState, name: &str, args: &Value) -> Resu
             drop(rt);
             if outcome.is_ok() {
                 state.apply_ranking_policy();
-                state.announce_tool_view();
+                state.replace_tool_view();
             }
             outcome
         }

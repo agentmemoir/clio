@@ -111,6 +111,7 @@ mod summarize_tools;
 pub mod sync_tools;
 mod tool_listen;
 mod tool_signals;
+mod tool_snapshot;
 mod tools_page;
 pub mod write_tools;
 mod write_tools_handlers;

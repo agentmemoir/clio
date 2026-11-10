@@ -31,7 +31,7 @@ use crate::tool_listen::acknowledged;
 use serde_json::{Value, json};
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The body one listen request carries.
 fn listen_frame(id: u64) -> Value {
@@ -75,6 +75,17 @@ impl Sse {
                 false
             }
             Err(_) => false,
+        }
+    }
+
+    /// Assert that no frame arrives before EOF or the hang guard expires.
+    ///
+    /// The timeout is generous on purpose: a short wait would read a late
+    /// frame as silence.
+    fn assert_silent(&mut self) {
+        self.timeout = Duration::from_secs(5);
+        if let Some(frame) = self.frame() {
+            panic!("an unexpected frame arrived: {frame:?}");
         }
     }
 
@@ -148,7 +159,7 @@ fn change_view(state: &McpState, all_groups: bool) -> bool {
         let mut config = state.config.lock().expect("config mutex");
         config.set_mcp_tool_groups(groups);
     }
-    state.announce_tool_view()
+    state.replace_tool_view()
 }
 
 #[test]
@@ -252,37 +263,52 @@ fn each_change_reaches_only_the_streams_that_are_still_open() {
             json!(id),
             "the frame names its own subscription"
         );
-        sse.timeout = Duration::from_millis(300);
-        assert!(
-            sse.frame().is_none(),
-            "one change sends one frame to subscription {id}"
-        );
+        sse.assert_silent();
     }
 
-    live.timeout = Duration::from_millis(300);
-    assert!(!state.announce_tool_view(), "no change, no publish");
-    assert!(
-        live.frame().is_none(),
-        "a repeated announce with no change sends nothing"
-    );
+    assert!(!state.replace_tool_view(), "no change, no publish");
+    live.assert_silent();
 
     closed
         .stream
         .shutdown(std::net::Shutdown::Both)
         .expect("the client closes the stream");
     drop(closed);
-    live.timeout = Duration::from_secs(5);
-    assert!(change_view(state, false), "the second view change");
-    let frame = live
-        .frame()
-        .expect("the live stream still receives changes");
+
+    // The server notices a closed peer only when a write fails. A client that
+    // half-closes its write side leaves the server's writes succeeding, so the
+    // close is published to until the registry drops the dead entry.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut all_groups = false;
+    let mut published = 0;
+    while state.tool_signals.subscribers() != 1 {
+        assert!(
+            Instant::now() < deadline,
+            "the closed stream unregisters within two seconds"
+        );
+        published += 1;
+        assert!(
+            change_view(state, all_groups),
+            "publish {published} is a change"
+        );
+        all_groups = !all_groups;
+        let frame = live
+            .frame()
+            .expect("the live stream receives each published change");
+        let value = data(&frame);
+        assert_eq!(value["method"], json!("notifications/tools/list_changed"));
+        assert_eq!(
+            value["params"]["_meta"]["io.modelcontextprotocol/subscriptionId"],
+            json!(1),
+            "one frame per change, naming the live subscription"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
     assert_eq!(
-        data(&frame)["params"]["_meta"]["io.modelcontextprotocol/subscriptionId"],
-        json!(1)
+        state.tool_signals.subscribers(),
+        1,
+        "the closed stream is gone and the live stream remains"
     );
-    live.timeout = Duration::from_millis(300);
-    assert!(
-        live.frame().is_none(),
-        "the live stream receives exactly one frame for the second change"
-    );
+    assert!(published >= 1, "the close is noticed after a publication");
+    live.assert_silent();
 }

@@ -4,17 +4,18 @@
 //! # Responsibility
 //!
 //! This module is responsible for telling live listeners that the server's
-//! tool view changed: one bounded subscriber set, one published digest, and
+//! tool view changed: one installed snapshot, one bounded subscriber set, and
 //! one change counter that a waiting listener observes.
 //!
 //! ## Owns
-//! - The published view digest and the change counter derived from it
+//! - The installed view snapshot and the change counter derived from it
 //! - The bounded subscriber registry, keyed by a monotonic serial
 //! - The condition a listener waits on, with a bounded timeout
 //! - The refusal a transport reports when the registry is full
 //!
 //! ## Does not own
-//! - Computing the tool-view digest (see `tools_page`)
+//! - Building a snapshot from the live configuration (see `tools_page`)
+//! - The snapshot value and its digest inputs (see `tool_snapshot`)
 //! - Transport framing, request routing, or protocol capability
 //!
 //! ## Boundary
@@ -25,6 +26,7 @@
 //!
 //! Keep this module focused on the in-process change signal.
 
+use crate::tool_snapshot::ToolSnapshot;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -88,13 +90,20 @@ impl Subscriber {
     }
 }
 
+/// The snapshot and change counter one critical section guards.
+#[derive(Default)]
+struct SignalState {
+    /// The snapshot the server installed, if any.
+    snapshot: Option<Arc<ToolSnapshot>>,
+    /// The number of installed changes after the seed.
+    changes: u64,
+}
+
 /// The tool-view change signal for live listeners.
 #[derive(Default)]
 pub(crate) struct ToolSignals {
-    /// The digest of the view the server last announced.
-    published: Mutex<Option<String>>,
-    /// The number of announced changes.
-    changes: Mutex<u64>,
+    /// The installed snapshot and its change counter.
+    state: Mutex<SignalState>,
     /// The registered listeners, keyed by a monotonic serial.
     subscribers: Mutex<BTreeMap<u64, Arc<Subscriber>>>,
     /// The serial the next registration takes.
@@ -102,27 +111,68 @@ pub(crate) struct ToolSignals {
 }
 
 impl ToolSignals {
+    /// The installed snapshot, if one exists.
+    pub(crate) fn current(&self) -> Option<Arc<ToolSnapshot>> {
+        self.state
+            .lock()
+            .expect("signal state mutex poisoned")
+            .snapshot
+            .clone()
+    }
+
+    /// Install the first snapshot without counting it as a change.
+    ///
+    /// A snapshot that another caller installed first wins; this call then
+    /// returns that one. Seeding never moves the counter and never wakes a
+    /// listener.
+    pub(crate) fn seed(&self, next: ToolSnapshot) -> Arc<ToolSnapshot> {
+        let mut state = self.state.lock().expect("signal state mutex poisoned");
+        if let Some(installed) = &state.snapshot {
+            return Arc::clone(installed);
+        }
+        let installed = Arc::new(next);
+        state.snapshot = Some(Arc::clone(&installed));
+        installed
+    }
+
+    /// Install `next` when it differs from the current snapshot.
+    ///
+    /// Returns the installed snapshot and wakes every listener, all after one
+    /// critical section moved the counter. Returns `None` when the digest is
+    /// already installed: nothing is swapped, the counter does not move, and
+    /// nobody is woken. With no snapshot yet, this seeds and returns `None`.
+    pub(crate) fn replace(&self, next: ToolSnapshot) -> Option<Arc<ToolSnapshot>> {
+        let (installed, current) = {
+            let mut state = self.state.lock().expect("signal state mutex poisoned");
+            if let Some(existing) = &state.snapshot {
+                if existing.digest() == next.digest() {
+                    return None;
+                }
+            } else {
+                state.snapshot = Some(Arc::new(next));
+                return None;
+            }
+            let installed = Arc::new(next);
+            state.snapshot = Some(Arc::clone(&installed));
+            state.changes += 1;
+            (installed, state.changes)
+        };
+        self.wake(current);
+        Some(installed)
+    }
+
     /// Register one listener and return its serial and the condition it waits
     /// on.
     ///
-    /// The first registration seeds the published baseline and notifies
-    /// nobody. Every registration inserts its own entry, so two requests never
-    /// share one. A full registry refuses the registration with
+    /// Every registration inserts its own entry, so two requests never share
+    /// one. A full registry refuses the registration with
     /// [`NotRegistered::Capacity`].
-    pub(crate) fn register(
-        &self,
-        baseline: String,
-    ) -> Result<(u64, Arc<Subscriber>), NotRegistered> {
-        {
-            let mut published: std::sync::MutexGuard<'_, Option<String>> = self
-                .published
-                .lock()
-                .expect("published digest mutex poisoned");
-            if published.is_none() {
-                *published = Some(baseline);
-            }
-        }
-        let current = *self.changes.lock().expect("change counter mutex poisoned");
+    pub(crate) fn register(&self) -> Result<(u64, Arc<Subscriber>), NotRegistered> {
+        let current = self
+            .state
+            .lock()
+            .expect("signal state mutex poisoned")
+            .changes;
         let mut subscribers: std::sync::MutexGuard<'_, BTreeMap<u64, Arc<Subscriber>>> = self
             .subscribers
             .lock()
@@ -136,6 +186,18 @@ impl ToolSignals {
         Ok((serial, subscriber))
     }
 
+    /// Move every registered listener to `current`, then wake it.
+    fn wake(&self, current: u64) {
+        let subscribers = self
+            .subscribers
+            .lock()
+            .expect("subscriber registry mutex poisoned");
+        for subscriber in subscribers.values() {
+            *subscriber.seen.lock().expect("subscriber mutex poisoned") = current;
+            subscriber.ready.notify_all();
+        }
+    }
+
     /// Drop one listener by its serial, and only that listener.
     pub(crate) fn unregister(&self, serial: u64) {
         self.subscribers
@@ -144,45 +206,14 @@ impl ToolSignals {
             .remove(&serial);
     }
 
-    /// Publish one view digest and wake every listener when it is new.
-    ///
-    /// Returns false when the digest is already published, or when the first
-    /// publish only seeds the baseline. Otherwise it stores the digest, moves
-    /// the change counter, and wakes every listener.
+    /// Publish one digest as a change, for tests of the signal itself.
+    #[cfg(test)]
     pub(crate) fn publish(&self, digest: &str) -> bool {
-        {
-            let mut published: std::sync::MutexGuard<'_, Option<String>> = self
-                .published
-                .lock()
-                .expect("published digest mutex poisoned");
-            match published.as_deref() {
-                Some(current) if current == digest => return false,
-                Some(_) => {}
-                None => {
-                    *published = Some(digest.to_owned());
-                    return false;
-                }
-            }
-            *published = Some(digest.to_owned());
-        }
-        let current = {
-            let mut changes = self.changes.lock().expect("change counter mutex poisoned");
-            *changes += 1;
-            *changes
-        };
-        let subscribers: std::sync::MutexGuard<'_, BTreeMap<u64, Arc<Subscriber>>> = self
-            .subscribers
-            .lock()
-            .expect("subscriber registry mutex poisoned");
-        for subscriber in subscribers.values() {
-            *subscriber.seen.lock().expect("subscriber mutex poisoned") = current;
-            subscriber.ready.notify_all();
-        }
-        true
+        self.replace(ToolSnapshot::with_digest(digest)).is_some()
     }
 
     /// The number of registered listeners.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn subscribers(&self) -> usize {
         self.subscribers
             .lock()

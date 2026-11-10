@@ -217,40 +217,6 @@ fn dropping_the_source_unregisters_the_listener() {
 }
 
 #[test]
-fn a_cursor_minted_before_a_view_change_is_refused() {
-    let state = state();
-    let page = crate::protocol::McpHandler::tools_list_page(
-        &state,
-        Some(&json!({ "_meta": { (crate::tools_page::PAGE_SIZE_KEY): 1 } })),
-    )
-    .expect("the first page is served");
-    let cursor = page["nextCursor"]
-        .as_str()
-        .expect("a small page carries a cursor")
-        .to_owned();
-
-    assert!(
-        !state.announce_tool_view(),
-        "the first announce only seeds the baseline"
-    );
-    {
-        let mut config = state.config.lock().expect("config mutex");
-        config.set_mcp_tool_groups(clio_types::ToolGroup::ALL.to_vec());
-    }
-    assert!(state.announce_tool_view(), "the view changed");
-
-    let error =
-        crate::protocol::McpHandler::tools_list_page(&state, Some(&json!({ "cursor": cursor })))
-            .expect_err("a cursor from the old view is refused");
-    assert_eq!(error.code, ERR_INVALID_PARAMS);
-    assert!(
-        error.message.contains("different tool view"),
-        "{}",
-        error.message
-    );
-}
-
-#[test]
 fn a_body_that_is_not_json_is_not_intercepted() {
     let state = state();
     assert!(

@@ -4,23 +4,23 @@
 //! # Responsibility
 //!
 //! This module is responsible for paginating one visible `tools/list` view:
-//! the page-size extension, the opaque cursor, the view digest, and the slice
-//! that carries `nextCursor` only while more tools remain.
+//! the page-size extension, the opaque cursor, and the slice that carries
+//! `nextCursor` only while more tools remain.
 //!
 //! ## Owns
 //! - The default page size, the maximum page size, and the request key that
 //!   selects a page size
-//! - The advertised view: the bound catalog narrowed to the effective group
-//!   selection, plus the discovery entries the gate turns on
+//! - Building the advertised view from the live configuration on first use:
+//!   the bound catalog narrowed to the effective group selection, plus the
+//!   discovery entries the gate turns on
 //! - Cursor encoding and decoding, including its format version
-//! - The visible-view digest over the catalog hash, the effective group
-//!   selection, the preset that names it, and the configuration revision
 //! - The page slice and its optional `nextCursor`
 //!
 //! ## Does not own
+//! - The immutable snapshot value and its digest (see `tool_snapshot`)
+//! - Installing or replacing the snapshot (see `tool_signals`)
 //! - Tool semantics and dispatch (see `write_tools` and `protocol`)
 //! - The catalog hash convention (see `schema`)
-//! - JSON-RPC envelope shaping and the error code set (see `protocol`)
 //!
 //! ## Boundary
 //!
@@ -32,10 +32,11 @@
 
 use crate::protocol::{ERR_INTERNAL, RpcError, invalid_params};
 use crate::runtime::McpState;
-use crate::schema::{catalog_hash, fnv1a64_hex};
+use crate::tool_snapshot::ToolSnapshot;
 use base64::Engine;
 use clio_types::{ToolGroup, ToolPreset, tools_of};
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 /// The page size a request gets when it asks for none.
 pub(crate) const DEFAULT_PAGE_SIZE: usize = 25;
@@ -50,14 +51,11 @@ pub(crate) const PAGE_SIZE_KEY: &str = "com.agentmemoir/pageSize";
 /// The cursor format version this build writes and accepts.
 const CURSOR_VERSION: u64 = 1;
 
-/// The digest word for a view an installed selection governs, so it cannot be
-/// read as one of the preset names.
-const INSTALLED_SELECTION: &str = "installed";
-
 /// The identity of one visible view, read under one configuration lock.
 ///
 /// One snapshot holds every digest input, so a configuration change between two
 /// reads cannot bind a cursor to a state that never existed.
+#[derive(Debug, Clone)]
 pub(crate) struct ToolView {
     /// The preset that names the view, or `None` when an installed selection
     /// governs it and no document preset applies.
@@ -80,8 +78,19 @@ struct Cursor {
     offset: usize,
 }
 
-/// The selected profile, the effective group selection, and the visible
-/// definitions it advertises, read under one configuration lock.
+/// The installed snapshot, seeding it from the live configuration on first use.
+///
+/// Every caller shares one immutable value, so a listing and a listener agree
+/// on the view even when the configuration changes between their calls.
+pub(crate) fn visible_view(state: &McpState) -> Result<Arc<ToolSnapshot>, RpcError> {
+    if let Some(snapshot) = state.tool_signals.current() {
+        return Ok(snapshot);
+    }
+    Ok(state.tool_signals.seed(live_snapshot(state)?))
+}
+
+/// Build a snapshot from the live configuration, the effective selection, and
+/// the visible definitions, all read under one configuration lock.
 ///
 /// The discovery entries sit first, so a default first page carries all three
 /// whatever preset governs the view; the catalog follows them in catalog order.
@@ -91,7 +100,7 @@ struct Cursor {
 /// `mcp_tool_groups` answers without the document, so a missing or unknown
 /// document preset cannot fail the request; the profile is then absent from the
 /// snapshot.
-pub(crate) fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), RpcError> {
+fn live_snapshot(state: &McpState) -> Result<ToolSnapshot, RpcError> {
     let rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
         state.config.lock().expect("config runtime mutex poisoned");
     let groups = rt.mcp_tool_groups();
@@ -122,7 +131,7 @@ pub(crate) fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), R
         groups,
         revision: revision.unwrap_or_else(|| crate::MCP_PROTOCOL_REVISION.to_owned()),
     };
-    Ok((view, tools))
+    Ok(ToolSnapshot::build(view, tools))
 }
 
 /// Slice one visible tool list into the page a request selects.
@@ -134,12 +143,9 @@ pub(crate) fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), R
 /// an empty page. A page that ends before the list does carries `nextCursor`;
 /// the last page omits it. An empty view answers an initial request with an
 /// empty page and no cursor.
-pub(crate) fn page(
-    tools: &[Value],
-    view: &ToolView,
-    params: Option<&Value>,
-) -> Result<Value, RpcError> {
-    let digest = visible_digest(tools, view);
+pub(crate) fn page(snapshot: &ToolSnapshot, params: Option<&Value>) -> Result<Value, RpcError> {
+    let digest = snapshot.digest();
+    let tools = snapshot.tools();
     let requested = requested_size(params)?;
     let (size, offset) = match requested_cursor(params)? {
         Some(encoded) => {
@@ -166,7 +172,7 @@ pub(crate) fn page(
     let end = offset.saturating_add(size).min(tools.len());
     let mut result = json!({ "tools": tools[offset..end].to_vec() });
     if end < tools.len() {
-        result["nextCursor"] = Value::String(encode_cursor(&digest, size, end));
+        result["nextCursor"] = Value::String(encode_cursor(digest, size, end));
     }
     Ok(result)
 }
@@ -198,25 +204,6 @@ fn requested_cursor(params: Option<&Value>) -> Result<Option<&str>, RpcError> {
         Some(Value::String(cursor)) => Ok(Some(cursor.as_str())),
         Some(_) => Err(invalid_params("tools/list cursor must be a string")),
     }
-}
-
-/// The digest of the view a cursor belongs to.
-///
-/// It covers the hash of the visible definitions, the preset name when one
-/// applies, the effective group selection, and the configuration revision, so a
-/// cursor stops working when any of them changes.
-fn visible_digest(tools: &[Value], view: &ToolView) -> String {
-    let mut canonical = String::new();
-    canonical.push_str(&catalog_hash(tools));
-    canonical.push('\n');
-    canonical.push_str(view.preset.map_or(INSTALLED_SELECTION, ToolPreset::as_str));
-    canonical.push('\n');
-    for group in &view.groups {
-        canonical.push_str(group.as_str());
-        canonical.push('\n');
-    }
-    canonical.push_str(&view.revision);
-    fnv1a64_hex(canonical.as_bytes())
 }
 
 /// Encode one cursor as base64url without padding over a JSON tuple:
@@ -271,23 +258,15 @@ fn cursor_integer(value: &Value) -> Result<usize, RpcError> {
         .map_err(|_| invalid_params("tools/list cursor carries an out-of-range field"))
 }
 
-/// The digest of the view the live configuration advertises now.
-///
-/// It reads the same snapshot `tools/list` pages, so a listener and a paging
-/// caller agree on what changed.
-pub(crate) fn current_view_digest(state: &McpState) -> Result<String, RpcError> {
-    let (view, tools) = visible_view(state)?;
-    Ok(visible_digest(&tools, &view))
-}
-
 impl McpState {
-    /// Announce the current tool-view digest to every live listener.
+    /// Install the tool view the live configuration describes now.
     ///
-    /// Returns true when the published digest changed. A digest that cannot be
-    /// computed publishes nothing and returns false.
-    pub(crate) fn announce_tool_view(&self) -> bool {
-        match current_view_digest(self) {
-            Ok(digest) => self.tool_signals.publish(&digest),
+    /// Returns true only when the installed digest changed, so a caller can
+    /// tell a real change from a repeat. A view that cannot be built installs
+    /// nothing and returns false.
+    pub(crate) fn replace_tool_view(&self) -> bool {
+        match live_snapshot(self) {
+            Ok(snapshot) => self.tool_signals.replace(snapshot).is_some(),
             Err(_) => false,
         }
     }

@@ -30,7 +30,6 @@ use crate::http_post::{PostBody, PostResponse};
 use crate::protocol::{ERR_INTERNAL, ERR_INVALID_REQUEST, RpcError, invalid_params};
 use crate::runtime::McpState;
 use crate::tool_signals::{NotRegistered, Subscriber, ToolSignals};
-use crate::tools_page::current_view_digest;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
@@ -69,11 +68,12 @@ pub(crate) fn serve(state: &McpState, body: &Value) -> PostResponse {
         Ok(value) => value,
         Err(err) => return refused(body, &err),
     };
-    let baseline = match current_view_digest(state) {
-        Ok(digest) => digest,
-        Err(err) => return refused(body, &err),
-    };
-    let (serial, subscriber) = match state.tool_signals.register(baseline) {
+    // Seed the snapshot first: a listener registered before any listing must
+    // still observe the first real replacement as a change.
+    if let Err(err) = crate::tools_page::visible_view(state) {
+        return refused(body, &err);
+    }
+    let (serial, subscriber) = match state.tool_signals.register() {
         Ok(registered) => registered,
         Err(NotRegistered::Capacity) => {
             return refused(
@@ -196,3 +196,7 @@ impl Drop for ListenSource {
 #[cfg(test)]
 #[path = "tool_listen_tests.rs"]
 mod tool_listen_tests;
+
+#[cfg(test)]
+#[path = "tool_listen_view_tests.rs"]
+mod tool_listen_view_tests;

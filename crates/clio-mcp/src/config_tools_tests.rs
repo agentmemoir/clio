@@ -339,23 +339,23 @@ fn config_set_schema_states_session_default() {
     );
 }
 
-/// A profile change through the live runtime publishes one tool-view change,
+/// A group change through the live runtime publishes one tool-view change,
 /// and an immediate repeat publishes nothing.
 #[test]
-fn announce_after_profile_change_publishes_once() {
+fn replace_after_a_group_change_publishes_once() {
     let state = state();
-    let (_, subscriber) = state
-        .tool_signals
-        .register("seed".to_owned())
-        .expect("register");
+    let (_, subscriber) = state.tool_signals.register().expect("register");
+    assert!(
+        !state.replace_tool_view(),
+        "the first replace seeds the baseline"
+    );
     {
         let mut rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
             state.config.lock().expect("config runtime mutex poisoned");
-        crate::read_tools::tool_result_value(rt.config_profile_apply("coding_local"))
-            .expect("apply");
+        rt.set_mcp_tool_groups(clio_types::ToolGroup::ALL.to_vec());
     }
     assert!(
-        state.announce_tool_view(),
+        state.replace_tool_view(),
         "a real profile change announces the new view"
     );
     assert_eq!(
@@ -364,7 +364,7 @@ fn announce_after_profile_change_publishes_once() {
         "the registered listener sees one change"
     );
     assert!(
-        !state.announce_tool_view(),
+        !state.replace_tool_view(),
         "an immediate repeat announces nothing"
     );
     assert_eq!(
@@ -379,7 +379,7 @@ fn announce_after_profile_change_publishes_once() {
 fn announce_without_a_subscriber_is_quiet() {
     let state = state();
     assert!(
-        !state.announce_tool_view(),
+        !state.replace_tool_view(),
         "the first announce only seeds the baseline"
     );
 }

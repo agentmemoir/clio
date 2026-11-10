@@ -34,17 +34,16 @@ fn signals() -> Arc<ToolSignals> {
     Arc::new(ToolSignals::default())
 }
 
-fn registered(signals: &ToolSignals, baseline: &str) -> (u64, Arc<Subscriber>) {
-    signals
-        .register(baseline.to_owned())
-        .expect("registration below capacity")
+fn registered(signals: &ToolSignals) -> (u64, Arc<Subscriber>) {
+    signals.register().expect("registration below capacity")
 }
 
 #[test]
 fn publish_wakes_every_registered_subscriber_once() {
     let signals = signals();
-    let (_, first) = registered(&signals, "seed");
-    let (_, second) = registered(&signals, "seed");
+    assert!(!signals.publish("seed"), "the first publish seeds only");
+    let (_, first) = registered(&signals);
+    let (_, second) = registered(&signals);
 
     assert!(signals.publish("view-1"));
     assert_eq!(first.wait(SHORT_WAIT), 1, "first listener sees one change");
@@ -62,7 +61,8 @@ fn publish_wakes_every_registered_subscriber_once() {
 #[test]
 fn republishing_the_same_digest_is_quiet() {
     let signals = signals();
-    let (_, subscriber) = registered(&signals, "seed");
+    assert!(!signals.publish("seed"), "the first publish seeds only");
+    let (_, subscriber) = registered(&signals);
 
     assert!(signals.publish("view-1"));
     assert_eq!(subscriber.wait(SHORT_WAIT), 1);
@@ -78,8 +78,9 @@ fn republishing_the_same_digest_is_quiet() {
 #[test]
 fn each_registration_keeps_its_own_entry_and_unregisters_only_itself() {
     let signals = signals();
-    let (first_serial, first) = registered(&signals, "seed");
-    let (second_serial, second) = registered(&signals, "another");
+    assert!(!signals.publish("seed"), "the first publish seeds only");
+    let (first_serial, first) = registered(&signals);
+    let (second_serial, second) = registered(&signals);
 
     assert!(!Arc::ptr_eq(&first, &second), "each stream owns its entry");
     assert_eq!(signals.subscribers(), 2);
@@ -101,7 +102,8 @@ fn each_registration_keeps_its_own_entry_and_unregisters_only_itself() {
 #[test]
 fn unregister_stops_delivery() {
     let signals = signals();
-    let (serial, subscriber) = registered(&signals, "seed");
+    assert!(!signals.publish("seed"), "the first publish seeds only");
+    let (serial, subscriber) = registered(&signals);
 
     signals.unregister(serial);
     assert_eq!(signals.subscribers(), 0);
@@ -117,12 +119,12 @@ fn unregister_stops_delivery() {
 #[test]
 fn registration_stops_at_capacity() {
     let signals = signals();
-    for index in 0..MAX_SUBSCRIPTIONS {
-        registered(&signals, &format!("seed-{index}"));
+    for _ in 0..MAX_SUBSCRIPTIONS {
+        registered(&signals);
     }
     assert_eq!(signals.subscribers(), MAX_SUBSCRIPTIONS);
 
-    let refused = signals.register("seed".to_owned());
+    let refused = signals.register();
     assert!(
         matches!(refused, Err(NotRegistered::Capacity)),
         "a full registry refuses another registration"
@@ -133,7 +135,7 @@ fn registration_stops_at_capacity() {
 #[test]
 fn wait_returns_the_unchanged_count_after_the_timeout() {
     let signals = signals();
-    let (_, subscriber) = registered(&signals, "seed");
+    let (_, subscriber) = registered(&signals);
 
     assert_eq!(
         subscriber.wait(SHORT_WAIT),
@@ -143,9 +145,9 @@ fn wait_returns_the_unchanged_count_after_the_timeout() {
 }
 
 #[test]
-fn first_registration_seeds_the_baseline() {
+fn the_first_publish_seeds_the_baseline() {
     let signals = signals();
-    let (_, subscriber) = registered(&signals, "baseline-digest");
+    let (_, subscriber) = registered(&signals);
 
     assert!(
         !signals.publish("baseline-digest"),
@@ -165,7 +167,7 @@ fn publish_without_a_subscriber_only_seeds_the_baseline() {
     let signals = signals();
 
     assert!(!signals.publish("seed"), "the first publish seeds only");
-    let (_, subscriber) = registered(&signals, "seed");
+    let (_, subscriber) = registered(&signals);
     assert_eq!(subscriber.wait(SHORT_WAIT), 0);
 
     assert!(signals.publish("view-1"));
