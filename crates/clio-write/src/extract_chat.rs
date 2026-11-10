@@ -76,14 +76,84 @@ pub fn endpoint_url(base: &str) -> String {
 
 /// Neutralize this module's own section delimiters inside interpolated content
 /// so a crafted value cannot close a section early and smuggle instructions.
+///
+/// Every spelling of a reserved tag becomes its canonical bracketed form:
+/// case variants, inner whitespace, attributes, and a self-closing slash all
+/// collapse to `[tag]` or `[/tag]`. Other `<` text is copied unchanged.
 fn neutralize_delimiters(text: &str) -> String {
-    let mut out = text.to_owned();
-    for tag in DELIMITER_TAGS {
-        out = out
-            .replace(&format!("<{tag}>"), &format!("[{tag}]"))
-            .replace(&format!("</{tag}>"), &format!("[/{tag}]"));
+    let bytes = text.as_bytes();
+    let last_gt = bytes.iter().rposition(|&b| b == b'>');
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        if let Some((tag, closing, end)) = reserved_tag_at(bytes, i + 1, last_gt) {
+            out.push_str(&text[copied..i]);
+            out.push('[');
+            if closing {
+                out.push('/');
+            }
+            out.push_str(tag);
+            out.push(']');
+            i = end;
+            copied = end;
+        } else {
+            i += 1;
+        }
     }
+    out.push_str(&text[copied..]);
     out
+}
+
+/// Read a reserved delimiter tag whose content starts right after a `<`.
+///
+/// Returns the canonical name, whether the tag closes, and the byte index just
+/// past the first `>` when the bytes form a reserved tag. A tag is reserved
+/// when its name matches [`DELIMITER_TAGS`] case-insensitively and the byte
+/// after the name is `>`, `/`, or ASCII whitespace.
+fn reserved_tag_at(
+    bytes: &[u8],
+    mut i: usize,
+    last_gt: Option<usize>,
+) -> Option<(&'static str, bool, usize)> {
+    let last_gt = last_gt?;
+    if last_gt < i {
+        return None;
+    }
+    while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+        i += 1;
+    }
+    let closing = bytes.get(i) == Some(&b'/');
+    if closing {
+        i += 1;
+        while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+            i += 1;
+        }
+    }
+    let name_start = i;
+    while bytes
+        .get(i)
+        .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'-')
+    {
+        i += 1;
+    }
+    if i == name_start {
+        return None;
+    }
+    let name = &bytes[name_start..i];
+    let tag = *DELIMITER_TAGS
+        .iter()
+        .find(|tag| tag.as_bytes().eq_ignore_ascii_case(name))?;
+    let after = *bytes.get(i)?;
+    if after != b'>' && after != b'/' && !after.is_ascii_whitespace() {
+        return None;
+    }
+    let end = i + bytes[i..].iter().position(|&b| b == b'>')? + 1;
+    Some((tag, closing, end))
 }
 
 /// Serialize a tool payload for egress after masking secret-looking fields and
