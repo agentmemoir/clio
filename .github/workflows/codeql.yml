@@ -26,7 +26,7 @@ on:
   workflow_call:
     inputs:
       ref:
-        description: The commit a pull request request analyses. Empty means the event commit.
+        description: The commit a pull request analysis checks. Empty means the event commit.
         type: string
         default: ""
       request_number:
