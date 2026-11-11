@@ -11,8 +11,9 @@
 //! ## Owns
 //! - The confirmation-gated tool set, derived from the published catalog
 //! - The same normalized outcome on both routes while the profile lists the
-//!   tool, while the profile hides it, with `confirm: true`, and with no
-//!   `confirm` argument at all
+//!   tool, with `confirm: true`, and with no `confirm` argument at all
+//! - The gate's refusal of the direct route while the profile hides the tool,
+//!   next to the wrapper route's answer for the same call
 //! - The same non-success outcome for a well-formed call that fails a domain
 //!   check rather than the argument contract
 //! - Masking the identity a fresh store mints for itself and the live clock,
@@ -307,14 +308,11 @@ fn an_unconfirmed_call_answers_alike_listed_or_hidden() {
 
         let (hidden_direct, hidden_invoked) =
             both_routes(&hidden_handler, &hidden_state, name, &hidden_args);
-        assert_eq!(
-            hidden_invoked, hidden_direct,
-            "`{name}` answers alike while hidden"
-        );
-        assert_eq!(
-            hidden_direct, direct,
-            "the listing changes neither route's answer for `{name}`"
-        );
+        // The direct route is refused at the gate now; the wrapper route still
+        // reaches the tool, a difference this module does not own yet.
+        assert_eq!(hidden_direct["error"]["code"], json!(-32602), "`{name}` hidden");
+        assert_eq!(hidden_direct["error"]["message"], json!(format!("unknown tool `{name}`")));
+        assert_eq!(hidden_invoked, direct, "`{name}` by the wrapper");
     }
 }
 

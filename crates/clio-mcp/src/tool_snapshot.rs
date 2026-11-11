@@ -69,6 +69,16 @@ impl ToolSnapshot {
         &self.tools
     }
 
+    /// Whether this snapshot advertises the tool `name`.
+    ///
+    /// Dispatch asks this one question, so a name the view leaves out is
+    /// refused before any tool body runs.
+    pub(crate) fn advertises(&self, name: &str) -> bool {
+        self.tools
+            .iter()
+            .any(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+    }
+
     /// The digest a cursor binds to.
     pub(crate) fn digest(&self) -> &str {
         &self.digest

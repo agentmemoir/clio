@@ -37,8 +37,10 @@ use std::sync::Arc;
 
 /// A state over the default in-memory backend, and a handler on it.
 fn handler() -> (McpHandler, Arc<McpState>) {
-    let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-        .expect("state");
+    // The tally, not the profile, is under test, so the state dispatches every
+    // bound tool.
+    let all = serde_json::json!({"mcp": {"tool_profile": "all"}});
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), &all).expect("state");
     let handler = McpHandler::new(Arc::clone(&state));
     (handler, state)
 }

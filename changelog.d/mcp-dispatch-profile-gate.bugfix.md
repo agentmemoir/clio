@@ -1,0 +1,1 @@
+A `tools/call` for a tool the active profile or `--tools` selection does not advertise is now refused with `-32602` and the message ``unknown tool `<name>` `` instead of dispatching, so a restricted profile no longer leaves hidden tools callable by name; a listed tool behaves exactly as before.

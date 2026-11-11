@@ -304,8 +304,8 @@ fn protocol_output_schema_guard_rejects_unvalidated_keywords() {
 /// A failure envelope is a real value too: the schema must accept it.
 #[test]
 fn protocol_output_schema_accepts_the_handled_value_for_every_tool() {
-    let state =
-        McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
+    let all = json!({"mcp": {"tool_profile": "all"}});
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), &all).expect("state");
     let handler = McpHandler::new(Arc::clone(&state));
     let pack = schema_pack();
     let tools = pack["tools"].as_array().expect("tools array");
