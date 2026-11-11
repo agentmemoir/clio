@@ -27,8 +27,13 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
-    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-        .expect("state")
+    // The `all` profile, so every tool this module drives is one the view
+    // advertises and the scope rule is what refuses a call.
+    McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({"mcp": {"tool_profile": "all"}}),
+    )
+    .expect("state")
 }
 
 #[allow(clippy::needless_pass_by_value)]
