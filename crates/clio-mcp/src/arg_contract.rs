@@ -217,7 +217,9 @@ impl Contract {
 ///
 /// The business definitions come from the full catalog by exact name, narrowed
 /// only by the bound set, so the contract for a tool a profile hides is the
-/// contract of that same tool when the profile lists it. The published
+/// contract of that same tool when the profile lists it. Whether a call reaches
+/// that contract at all is the visible view's decision, not this module's: a
+/// profile that hides a name refuses it before the check runs. The published
 /// discovery definitions join them: the `tool_invoke` wrapper is checked by
 /// these rules, and so is every target it is asked to call.
 pub(crate) fn contracts() -> &'static HashMap<String, Contract> {

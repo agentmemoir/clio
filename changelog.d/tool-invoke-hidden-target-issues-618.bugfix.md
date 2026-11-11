@@ -1,0 +1,1 @@
+A `tool_invoke` call for a target the active profile or `--tools` selection does not advertise is now refused with `-32602` and the message ``unknown tool `<name>` `` instead of dispatching, so a restricted profile no longer leaves hidden tools reachable through the wrapper, and a hidden target reads exactly like a name nothing binds.
