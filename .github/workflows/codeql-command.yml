@@ -94,7 +94,9 @@ jobs:
       security-events: write
       checks: write
       issues: write
-    uses: ./.github/workflows/codeql.yml
+    # `$/` is the self-repository form, the same one coverage-command.yml uses:
+    # zizmor's self-repository audit fails the workflow on `./`.
+    uses: $/.github/workflows/codeql.yml
     with:
       ref: ${{ needs.gate.outputs.ref }}
       request_number: ${{ needs.gate.outputs.number }}
