@@ -7,7 +7,7 @@
 # beside the 232 to 392 s CI job it duplicated on non-Rust changes.
 #
 # Default setup is not configured in this repository (state=not-configured), so
-# analyses come from this workflow only: once a day on the schedule below, on
+# analyses come from this workflow only: twice a day on the schedule below, on
 # manual dispatch, and on demand from a `/run-codeql` comment, which
 # codeql-command.yml gates and then calls this workflow with workflow_call.
 # Nothing here runs on push or on pull_request, so CodeQL is not on the
@@ -19,7 +19,9 @@ name: CodeQL
 
 on:
   schedule:
-    - cron: '17 3 * * *'
+    # Two runs a day, both at minute 17: GitHub documents the start of every
+    # hour as a high-load time and recommends a different time of the hour.
+    - cron: '17 3,21 * * *'
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -346,7 +348,7 @@ jobs:
           # gh label create is not available here; the API answers 422 when the
           # label already exists, which is not an error.
           if ! gh api -X POST "repos/$REPO/labels" \
-            -f name=codeql -f color=1d76db -f description="Daily CodeQL scan result" >/dev/null 2>&1; then
+            -f name=codeql -f color=1d76db -f description="CodeQL scan result" >/dev/null 2>&1; then
             echo "the codeql label already exists"
           fi
           # The oldest open issue, if one exists. Scheduled runs queue, so one run acts at a time.
@@ -362,7 +364,7 @@ jobs:
           fi
 
           if [ -z "$issue" ]; then
-            gh issue create -R "$REPO" --title "CodeQL daily scan" \
+            gh issue create -R "$REPO" --title "CodeQL scan" \
               --label codeql --body-file "$BODY"
             exit 0
           fi
