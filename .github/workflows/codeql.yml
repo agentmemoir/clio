@@ -6,30 +6,120 @@
 # 2026-10-20 its Rust job alone took 282 to 481 s (mean 412 s over ten runs),
 # beside the 232 to 392 s CI job it duplicated on non-Rust changes.
 #
+# Default setup is not configured in this repository (state=not-configured), so
+# analyses come from this workflow only: once a day on the schedule below, on
+# manual dispatch, and on demand from a `/run-codeql` comment, which
+# codeql-command.yml gates and then calls this workflow with workflow_call.
+# Nothing here runs on push or on pull_request, so CodeQL is not on the
+# pull-request path.
 #
-# Default setup is not configured in this repository (state=not-configured),
-# so analyses run from this workflow on the daily schedule below and on
-# manual dispatch only.
+# GitHub starts scheduled workflows only on the default branch, and disables
+# them in a public repository after 60 days without repository activity.
 name: CodeQL
 
 on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit a pull request request analyses. Empty means the event commit.
+        type: string
+        default: ""
+      request_number:
+        description: The pull request number that asked for the run. Empty for the schedule.
+        type: string
+        default: ""
+      request_is_pr:
+        description: '"true" when request_number is a pull request.'
+        type: string
+        default: ""
+
+concurrency:
+  group: codeql
+  cancel-in-progress: false
 
 permissions:
   contents: read
   security-events: write
 
 jobs:
+  # A pull request request gets a check on its head, so progress and the result
+  # show on the pull request page. When no check can be created, the run is
+  # announced and reported in a comment instead.
+  announce:
+    name: announce the run
+    if: inputs.request_number != '' && inputs.request_is_pr == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      checks: write
+      issues: write
+    outputs:
+      sha: ${{ steps.check.outputs.sha }}
+      check_id: ${{ steps.check.outputs.id }}
+      comment_id: ${{ steps.comment.outputs.id }}
+    steps:
+      - name: Create a check on the pull request head
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD: ${{ inputs.ref || github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          id=""
+          sha="$HEAD"
+          # refs/pull/<n>/head names a ref, not a commit, so the check needs the commit it points at.
+          if [[ "$sha" == refs/pull/* ]] || [[ "$sha" == refs/heads/* ]]; then
+            sha=$(gh api "repos/$REPO/commits/$sha" --jq .sha)
+          fi
+          if ! id=$(gh api "repos/$REPO/check-runs" \
+            -f name="codeql / on demand" \
+            -f head_sha="$sha" \
+            -f status=in_progress \
+            -f details_url="$RUN_URL" \
+            --jq .id); then
+            id=""
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          if [ -z "$id" ]; then
+            echo "::warning::no check could be created on $sha, so the result goes in a comment"
+          fi
+
+      - name: Comment when no progress is visible on the request
+        id: comment
+        if: steps.check.outputs.id == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ inputs.request_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          id=$(gh api "repos/$REPO/issues/$NUMBER/comments" \
+            -f body="CodeQL started for this request. Run: $RUN_URL" \
+            --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
   analyze:
     name: Analyze (rust)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # A request names the pull request head commit, so the run analyses the
+          # code the comment asked about. Empty on the schedule, which scans the
+          # event commit.
+          ref: ${{ inputs.ref || github.sha }}
 
       # build-mode: none needs rustup and cargo, which the GitHub-hosted
       # ubuntu image ships, so there is no toolchain install here. The
@@ -41,7 +131,244 @@ jobs:
           languages: rust
           build-mode: none
 
+      # The output path is explicit. Left at its default, analyze writes to
+      # "../results" relative to the workspace, which is not runner.temp, and the
+      # collect step below would find nothing and report every scan broken.
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:
           category: '/language:rust'
+          output: ${{ runner.temp }}/results
+          upload-database: false
+
+      # Turns the SARIF into the small files the report job reads: one tab-separated
+      # line per result, a count, and the commit that was scanned. Always runs, so a
+      # failed scan is reported as a failed scan rather than as a clean one.
+      - name: Collect the findings
+        if: always()
+        shell: bash
+        env:
+          LANGUAGE: rust
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/codeql-findings"
+          mkdir -p "$out"
+          # The commit that was actually scanned, or the event commit when the
+          # checkout did not happen. Never fatal: the artifact must still upload.
+          git rev-parse HEAD > "$out/commit.txt" 2>/dev/null || echo "${GITHUB_SHA:-unknown}" > "$out/commit.txt"
+          shopt -s nullglob
+          # The same explicit path the analyze step writes to.
+          files=("$RUNNER_TEMP"/results/*.sarif)
+          if [ "${#files[@]}" -eq 0 ]; then
+            : > "$out/findings.tsv"
+            echo missing > "$out/count.txt"
+            echo "::warning::the scan of $LANGUAGE produced no SARIF file, so the run is reported as broken"
+            exit 0
+          fi
+          jq -r '
+            .runs[] as $run
+            | ($run.tool.driver.rules // []
+                | map({ (.id): (.properties["security-severity"] // "") })
+                | add // {}) as $severity
+            | $run.results[]?
+            | [
+                ((.level // "warning")
+                  + (if ($severity[.ruleId] // "") != "" then ":" + $severity[.ruleId] else "" end)),
+                (.ruleId // .rule.id // "unknown"),
+                ((.locations[0].physicalLocation.artifactLocation.uri // "?")
+                  + ":" + ((.locations[0].physicalLocation.region.startLine // 0) | tostring)),
+                ((.message.text // "") | gsub("[\t\n\r]"; " ") | gsub("\\|"; "\\|"))
+              ]
+            | @tsv
+          ' "${files[@]}" > "$out/findings.tsv"
+          wc -l < "$out/findings.tsv" | tr -d ' ' > "$out/count.txt"
+          echo "$LANGUAGE: $(cat "$out/count.txt") result(s)"
+
+      - name: Upload the findings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-findings-rust
+          path: ${{ runner.temp }}/codeql-findings
+          if-no-files-found: warn
+
+  # A scheduled run writes into one open issue labelled codeql, oldest first: a
+  # green scan comments on it and closes it, anything else creates it or comments
+  # on it. A request reports on the page that carried the command.
+  report:
+    name: report the result
+    needs: [analyze, announce]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      checks: write
+    steps:
+      - name: Download the findings
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+        # An empty download fails this step by default. Carrying on reports the
+        # run as broken instead of reporting nothing at all.
+        continue-on-error: true
+
+      - name: Build the result body
+        id: body
+        shell: bash
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # One language, so the table has one row. The loop is the report job's
+          # shape with the single entry that applies here.
+          languages="rust"
+          combined="$RUNNER_TEMP/findings.tsv"
+          counts="$RUNNER_TEMP/counts.md"
+          : > "$combined"
+          : > "$counts"
+          broken=""
+          total=0
+          sha=""
+          for language in $languages; do
+            dir="artifacts/codeql-findings-$language"
+            if [ -f "$dir/commit.txt" ] && [ -z "$sha" ]; then
+              # The checked-out commit, not the event commit: a request analyses the pull request head.
+              sha=$(tr -d '[:space:]' < "$dir/commit.txt")
+            fi
+            if [ ! -f "$dir/count.txt" ]; then
+              # No artifact at all: the job failed before it could collect anything.
+              broken="$broken $language"
+              printf '| %s | no artifact |\n' "$language" >> "$counts"
+              continue
+            fi
+            count=$(tr -d '[:space:]' < "$dir/count.txt")
+            if [ "$count" = "missing" ]; then
+              broken="$broken $language"
+              printf '| %s | no SARIF |\n' "$language" >> "$counts"
+              continue
+            fi
+            printf '| %s | %s |\n' "$language" "$count" >> "$counts"
+            total=$((total + count))
+            if [ -s "$dir/findings.tsv" ]; then
+              awk -F'\t' -v l="$language" 'BEGIN{OFS="\t"} {print l, $1, $2, $3, $4}' \
+                "$dir/findings.tsv" >> "$combined"
+            fi
+          done
+          [ -n "$sha" ] || sha="$EVENT_SHA"
+          if [ -n "$broken" ]; then
+            state=broken
+          elif [ "$total" -gt 0 ]; then
+            state=findings
+          else
+            state=green
+          fi
+          body="$RUNNER_TEMP/codeql-body.md"
+          {
+            printf 'Run: %s\n\n' "$RUN_URL"
+            printf 'Commit: %s\n\n' "$sha"
+            printf 'State: %s\n\n' "$state"
+            printf 'Results per language:\n\n| Language | Results |\n| --- | --- |\n'
+            cat "$counts"
+          } > "$body"
+          if [ -n "$broken" ]; then
+            {
+              printf '\nLanguages that did not complete a scan:\n'
+              for language in $broken; do printf -- '- %s\n' "$language"; done
+              printf '\nRun log: %s\n' "$RUN_URL"
+            } >> "$body"
+          fi
+          if [ "$total" -gt 0 ]; then
+            {
+              printf '\nFindings (up to 200 rows):\n\n'
+              printf '| Language | Severity | Rule | Location | Message |\n'
+              printf '| --- | --- | --- | --- | --- |\n'
+              head -n 200 "$combined" \
+                | awk -F'\t' '{printf "| %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5}'
+              if [ "$total" -gt 200 ]; then
+                printf '\n+%d more, in the codeql-findings artifacts of the run.\n' "$((total - 200))"
+              fi
+            } >> "$body"
+          fi
+          echo "$state: $total result(s) at $sha, broken languages:$broken"
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "body=$body" >> "$GITHUB_OUTPUT"
+          {
+            echo "## codeql: $state"
+            echo
+            echo "Commit: $sha"
+            echo
+            echo "Run: $RUN_URL"
+            echo
+            cat "$counts"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report on the request
+        if: inputs.request_number != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ inputs.request_number }}
+          STATE: ${{ steps.body.outputs.state }}
+          BODY: ${{ steps.body.outputs.body }}
+          CHECK_ID: ${{ needs.announce.outputs.check_id }}
+          COMMENT_ID: ${{ needs.announce.outputs.comment_id }}
+        run: |
+          set -euo pipefail
+          conclusion=success
+          [ "$STATE" = "green" ] || conclusion=failure
+          if [ -n "$CHECK_ID" ]; then
+            jq -n --arg conclusion "$conclusion" --arg title "codeql / on demand: $STATE" --rawfile summary "$BODY" \
+              '{status:"completed", conclusion:$conclusion, output:{title:$title, summary:$summary}}' \
+              | gh api -X PATCH "repos/$REPO/check-runs/$CHECK_ID" --input -
+            exit 0
+          fi
+          if [ -n "$COMMENT_ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" -F "body=@$BODY" >/dev/null
+            exit 0
+          fi
+          gh issue comment "$NUMBER" -R "$REPO" --body-file "$BODY"
+
+      - name: Record the result on the open codeql issue
+        if: inputs.request_number == ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          STATE: ${{ steps.body.outputs.state }}
+          SHA: ${{ steps.body.outputs.sha }}
+          BODY: ${{ steps.body.outputs.body }}
+        run: |
+          set -euo pipefail
+          # gh label create is not available here; the API answers 422 when the
+          # label already exists, which is not an error.
+          if ! gh api -X POST "repos/$REPO/labels" \
+            -f name=codeql -f color=1d76db -f description="Daily CodeQL scan result" >/dev/null 2>&1; then
+            echo "the codeql label already exists"
+          fi
+          # The oldest open issue, if one exists. Scheduled runs queue, so one run acts at a time.
+          issue=$(gh issue list -R "$REPO" --label codeql --state open --limit 100 \
+            --json number --jq 'sort_by(.number) | .[0].number // empty')
+
+          if [ "$STATE" = "green" ]; then
+            if [ -n "$issue" ]; then
+              gh issue comment "$issue" -R "$REPO" --body-file "$BODY"
+              gh issue close "$issue" -R "$REPO"
+            fi
+            exit 0
+          fi
+
+          if [ -z "$issue" ]; then
+            gh issue create -R "$REPO" --title "CodeQL daily scan" \
+              --label codeql --body-file "$BODY"
+            exit 0
+          fi
+          last=$(gh issue view "$issue" -R "$REPO" --json comments --jq '.comments | last | .body // ""')
+          if [[ "$last" == *"$SHA"* && "$last" == *"State: $STATE"* ]]; then
+            echo "The latest comment on issue $issue already names $SHA in state $STATE."
+          else
+            gh issue comment "$issue" -R "$REPO" --body-file "$BODY"
+          fi
