@@ -85,6 +85,9 @@ impl Drop for PoolGuard {
 }
 
 #[cfg(test)]
+#[path = "conn_pool_head_release_tests.rs"]
+mod conn_pool_head_release_tests;
+#[cfg(test)]
 #[path = "conn_pool_tests.rs"]
 mod conn_pool_tests;
 #[cfg(test)]

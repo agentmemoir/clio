@@ -9,33 +9,30 @@
 //!
 //! ## Owns
 //! - Minimal HTTP/1.1 request parsing and response writing for `/mcp`
-//! - The accept loop, connection cap, and per-request dispatch through the
-//!   stateless admission (see `http_candidate`)
-//! - The credential source this server accepts (the operator's token store);
-//!   the startup rule that requires one on every bind unless the operator
-//!   explicitly opted out lives in `http_start_guard`
+//! - The accept loop, connection cap, and per-request dispatch (`http_candidate`)
+//! - The credential source this server accepts (the operator's token store); the
+//!   bind rule that requires one unless explicitly opted out lives in `http_start_guard`
 //! - The transport resource bounds (values defined below):
 //!   - 64 KiB head cap (`MAX_HEAD_BYTES`) and 10 MiB body cap (`MAX_BODY`),
-//!     capped separately because a client controls the header block and the
-//!     body independently
-//!   - 30 s total request deadline, bounded to *reading* the request:
-//!     first accepted byte through the end of `read_request`, overridable per
-//!     deployment via `HttpConfig::deadline_secs` (`DEFAULT_DEADLINE_SECS`).
-//!     Routing and the response write run after the last check, so a slow route
-//!     is not cut off — writes are bounded separately by `WRITE_SLICE`
+//!     separate because a client controls the header block and body apart
+//!   - 30 s total request deadline for *reading* one request, from the first
+//!     accepted byte to the end of `read_request`
+//!     (`HttpConfig::deadline_secs`, `DEFAULT_DEADLINE_SECS`). Routing and the
+//!     write run after it; the write is bounded by `WRITE_SLICE` per call
+//!   - 2 s header-read slice of that total, clamped to it
+//!     (`DEFAULT_HEAD_DEADLINE_SECS`, `head_deadline_secs`), so a partial
+//!     unauthenticated head cannot hold a slot for the full total
 //!   - 32 concurrent-connection cap (`conn_pool::MAX_CONNECTIONS`); above the
 //!     cap the accept loop answers 503 and closes
-//!   - A streamed answer runs until the peer or its frame source ends it: it is
-//!     bounded by `WRITE_SLICE` per write and by the connection cap, not by the
-//!     request deadline, which stops at the end of the read
+//!   - A streamed answer is bounded by `WRITE_SLICE` per write and by the
+//!     connection cap, not by the request deadline, which stops at the read end
 //!
 //! ## Does not own
 //! - Protocol handling (see `protocol`)
 //! - Legacy HTTP+SSE (optional compatibility, not implemented as primary)
 //! - Request byte reading under those bounds (see `http_read`)
 //! - Origin validation (see `http_guard`)
-//! - Reading the credential store and resolving a presented secret (see
-//!   `http_auth`)
+//! - Reading the credential store and resolving a presented secret (`http_auth`)
 //! - Slot counting and release (see `conn_pool`)
 //!
 //! ## Boundary
@@ -52,7 +49,7 @@ use crate::http_auth::{CredentialStore, authorize_request};
 use crate::http_candidate::CandidatePost;
 use crate::http_guard::check_origin;
 use crate::http_post::{PostBody, PostContext, PostResponse, PostRoute, scoped_state};
-use crate::http_read::{HttpRequest, read_request};
+use crate::http_read::{HttpRequest, ReadBound, read_request};
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
 use std::fmt::Write as _;
@@ -83,6 +80,10 @@ pub(crate) const MAX_HEAD_BYTES: usize = 64 * 1024;
 /// check; the write is bounded per call by [`WRITE_SLICE`] instead.
 /// Recorded and pinned by a test.
 pub(crate) const DEFAULT_DEADLINE_SECS: u64 = 30;
+
+/// Header-read deadline, applied when `HttpConfig::head_deadline_secs` is
+/// `None` and clamped to the total deadline. Pinned by a test.
+pub(crate) const DEFAULT_HEAD_DEADLINE_SECS: u64 = 2;
 
 /// Longest single blocking write wait for response bytes, so a peer that
 /// never reads cannot hold a connection slot forever.
@@ -122,11 +123,14 @@ pub struct HttpConfig {
     pub allowed_origins: Vec<String>,
     /// Total request deadline override in seconds, bounding the *read* of one
     /// request (first accepted byte through the end of the read). `None` keeps
-    /// the 30 s default (`DEFAULT_DEADLINE_SECS`). This is the deployment
-    /// raise/lower knob; the default keeps a slow or silent client from holding
-    /// a connection slot forever. Routing and the response write are not
-    /// covered; the write is bounded per call by `WRITE_SLICE`.
+    /// the 30 s default (`DEFAULT_DEADLINE_SECS`); the default keeps a slow or
+    /// silent client from holding a slot forever. Routing and the response
+    /// write are not covered; the write is bounded by `WRITE_SLICE`.
     pub deadline_secs: Option<u64>,
+    /// Header-read deadline override in seconds, bounding the head read until
+    /// the blank line. `None` keeps `DEFAULT_HEAD_DEADLINE_SECS` (2 s). The
+    /// value has a 1 s floor and is clamped to the total deadline.
+    pub head_deadline_secs: Option<u64>,
 }
 
 impl Default for HttpConfig {
@@ -138,6 +142,7 @@ impl Default for HttpConfig {
             insecure_bind_any: false,
             allowed_origins: vec![],
             deadline_secs: None,
+            head_deadline_secs: None,
         }
     }
 }
@@ -236,16 +241,19 @@ fn handle_conn<P>(
 where
     P: PostRoute,
 {
-    // Total request deadline, measured from the first accepted byte (accept
-    // hands the connection over immediately) and bounding the read. A per-read
-    // timeout alone does not bound a client that drips bytes. Nothing checks it
-    // after `read_request` returns, so routing is not cut off.
+    // Total request deadline, from the first accepted byte (accept hands the
+    // connection over immediately) and bounding the read; the header budget is a
+    // slice of this same clock. A per-read timeout alone cannot bound a drip, and
+    // routing is not cut off because nothing checks it after the read returns.
+    let now = Instant::now();
     let deadline_secs = cfg.deadline_secs.unwrap_or(DEFAULT_DEADLINE_SECS);
-    let deadline = Instant::now() + Duration::from_secs(deadline_secs);
+    let total = ReadBound::total(now, deadline_secs);
+    let head_secs = cfg.head_deadline_secs.unwrap_or(DEFAULT_HEAD_DEADLINE_SECS);
+    let head = ReadBound::head(now, deadline_secs, head_secs);
     // Socket setup results are propagated: a socket that cannot take a
     // timeout cannot be bounded, so it must not hold a connection slot.
     stream.set_write_timeout(Some(WRITE_SLICE))?;
-    let req = match read_request(&mut stream, deadline, deadline_secs) {
+    let req = match read_request(&mut stream, &total, &head) {
         Ok(Some(req)) => req,
         Ok(None) => return Ok(()),
         Err((status, message)) => {
@@ -382,22 +390,18 @@ fn write_simple(stream: &mut TcpStream, status: u16, message: &str) -> std::io::
     Ok(())
 }
 
-/// Half-close the write side, so dropping the socket is a graceful FIN rather
-/// than an abortive reset.
+/// Half-close the write side, so dropping the socket queues a FIN behind the
+/// bytes the peer has already been promised.
 ///
-/// The head promised `Connection: close`, so the FIN belongs here and is queued
-/// behind the payload the peer has already been promised. It matters on the
-/// refusal paths, which answer without reading the whole request: a socket
-/// closed with the peer's bytes still unread in its receive queue is closed
-/// abortively (RFC 9293 ABORT), and the resulting RST discards the
-/// response the peer has not read yet — a refusal that arrived as a truncated
-/// body and a connection error. Draining instead would fix it too, but the
-/// cap refusal runs in the accept loop, so waiting for a client to stop sending
-/// is the accept-loop stall that waiting for a client to stop sending would
-/// reintroduce. One syscall, no wait.
-///
-/// Best-effort by decision: a peer that has already gone makes this fail, and
-/// there is nothing left to say to it.
+/// The head promised `Connection: close`, so the FIN belongs here. It is
+/// best-effort on the refusal paths, which answer without reading the whole
+/// request: a close with the peer's bytes still unread in its receive queue
+/// can still be abortive, and the kernel then sends a RST (RFC 9293 3.6.1,
+/// RFC 1122 4.2.2.13), which can discard a refusal the peer has not read.
+/// Draining would avoid that, but the cap refusal runs in the accept loop, so
+/// waiting for a client to stop sending would stall the accept loop. The
+/// refusal is best-effort, and the slot is released by `Drop` on every path,
+/// read or not.
 fn finish(stream: &mut TcpStream) {
     let _ = stream.shutdown(std::net::Shutdown::Write);
 }

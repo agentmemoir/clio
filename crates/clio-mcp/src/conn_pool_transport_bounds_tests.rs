@@ -51,7 +51,7 @@ const BARRIER_BUDGET: Duration = Duration::from_secs(20);
 /// Serve through the real `serve_with_listener` in a background thread. The
 /// thread runs until the per-test process exits, which matches the production
 /// loop shape.
-fn spawn_server(cfg: HttpConfig) -> u16 {
+pub(super) fn spawn_server(cfg: HttpConfig) -> u16 {
     let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
         .expect("state");
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -83,7 +83,7 @@ fn served_request(extra: &str) -> String {
 /// One admitted discovery POST over a fresh connection; returns `(status, body)` when
 /// a complete response arrived. A failed write does not bail: the server may
 /// already have answered (for example with the above-cap refusal).
-fn probe_served(port: u16, extra: &str) -> Option<(u16, String)> {
+pub(super) fn probe_served(port: u16, extra: &str) -> Option<(u16, String)> {
     let mut stream = connect(port);
     let _ = stream.write_all(served_request(extra).as_bytes());
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
@@ -93,7 +93,7 @@ fn probe_served(port: u16, extra: &str) -> Option<(u16, String)> {
 }
 
 /// Split a raw response into `(status, body)`; `None` without a full head.
-fn parse_response(buf: &[u8]) -> Option<(u16, String)> {
+pub(super) fn parse_response(buf: &[u8]) -> Option<(u16, String)> {
     let pos = buf.windows(4).position(|w| w == b"\r\n\r\n")?;
     let head = String::from_utf8_lossy(&buf[..pos]);
     let status = head
@@ -109,7 +109,7 @@ fn parse_response(buf: &[u8]) -> Option<(u16, String)> {
 
 /// Poll `f` until it returns true or `budget` elapses. Polling against a
 /// generous deadline instead of asserting exact accept timing.
-fn retry_until(budget: Duration, mut f: impl FnMut() -> bool) -> bool {
+pub(super) fn retry_until(budget: Duration, mut f: impl FnMut() -> bool) -> bool {
     let end = Instant::now() + budget;
     loop {
         if f() {
@@ -168,7 +168,7 @@ fn park_accepted_idle_connections(port: u16, count: usize) -> Vec<TcpStream> {
 /// Open `count` connections, write a partial request on each, and return them
 /// open. Every connection here is a request the server is *serving*, not
 /// refusing, so each one holds a slot until it is dropped.
-fn saturate_with_partials(port: u16, count: usize) -> Vec<TcpStream> {
+pub(super) fn saturate_with_partials(port: u16, count: usize) -> Vec<TcpStream> {
     let mut held = Vec::with_capacity(count);
     for _ in 0..count {
         let mut stream = connect(port);
@@ -194,7 +194,7 @@ fn saturate_with_partials(port: u16, count: usize) -> Vec<TcpStream> {
 /// requests compete for slots at the same moment. With `k` slots leaked, at
 /// most `MAX_CONNECTIONS - k` can be served; the rest read 503 or go
 /// unanswered, and a single leaking release path fails the check.
-fn full_cap_is_reacquirable_concurrently(port: u16, auth: &str) -> bool {
+pub(super) fn full_cap_is_reacquirable_concurrently(port: u16, auth: &str) -> bool {
     // A `Barrier` is the natural fit: every probe waits on it after writing
     // its request, so none can read a byte until all of them are connected and
     // outstanding. The wait is a synchronization, not a poll, so it cannot
@@ -274,6 +274,9 @@ fn connection_cap_refuses_above_cap_and_releases_on_close() {
         // Longer than the probe windows below, so a pass proves close-driven
         // release rather than deadline-driven slot recycling.
         deadline_secs: Some(30),
+        // The header budget is part of the same premise: an idle or partial
+        // connection must be held by its slot, not recycled under the probe.
+        head_deadline_secs: Some(30),
         ..HttpConfig::default()
     };
     let port = spawn_server(cfg);
@@ -304,6 +307,8 @@ fn idle_flood_beyond_cap_is_refused_not_served() {
         // Longer than the poll window below, so holders never get served and
         // released slots cannot muddy the count.
         deadline_secs: Some(30),
+        // Held past the poll window on both bounds, for the same reason.
+        head_deadline_secs: Some(30),
         ..HttpConfig::default()
     };
     let port = spawn_server(cfg);
@@ -372,6 +377,9 @@ fn mid_request_disconnect_releases_the_slot() {
         // Longer than every window below, so leaked slots cannot recycle
         // their way to a false pass.
         deadline_secs: Some(60),
+        // The partial heads must stay held on both bounds, or the head budget
+        // would recycle them and the disconnect proof would pass for free.
+        head_deadline_secs: Some(60),
         ..HttpConfig::default()
     };
     let port = spawn_server(cfg);

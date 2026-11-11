@@ -5,7 +5,8 @@
 //!
 //! This module is responsible for reading one HTTP/1.1 request off a
 //! Streamable HTTP connection under the transport resource bounds: the 64 KiB
-//! head cap, the 10 MiB body cap, and the total request deadline.
+//! head cap, the 10 MiB body cap, the total request deadline, and the shorter
+//! header-read budget that is a slice of it.
 //!
 //! ## Owns
 //! - Byte-level request reading and header parsing for the HTTP transport
@@ -25,11 +26,17 @@ use crate::http::{MAX_BODY, MAX_HEAD_BYTES};
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read};
 use std::net::TcpStream;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-/// Longest single blocking read wait. The total deadline still governs: the
-/// wait never exceeds the time left before the deadline.
-const READ_SLICE: std::time::Duration = std::time::Duration::from_secs(5);
+/// Longest single blocking read wait. The bound in force governs the read —
+/// the total deadline, the header budget, or one body-progress slice — and a
+/// single wait never exceeds the time left before that bound.
+const READ_SLICE: Duration = Duration::from_secs(5);
+
+/// Floor for the header budget. A budget of zero would expire before the first
+/// read and refuse every client, even one whose whole head is already queued,
+/// so no configured value can take the header budget below one second.
+const HEAD_FLOOR_SECS: u64 = 1;
 
 /// Refusal message for the head cap, naming the bound and its value.
 fn head_cap_message() -> String {
@@ -62,25 +69,29 @@ impl HttpRequest {
     }
 }
 
-/// Read one request under the total deadline.
+/// Read one request under the total deadline and the header budget.
 ///
-/// The error carries the refusal status and a message naming the bound and
-/// its value; an empty message means a plain bad request (unchanged
-/// behavior). `Ok(None)` is a clean EOF before a request (no response).
+/// The head loop is charged to the header budget. Each body read is charged to
+/// the earlier of the total deadline and a fresh header-budget slice, so a body
+/// that makes no progress fails inside the header budget while a body that
+/// keeps making progress keeps the total deadline as its hard cap. The error
+/// carries the refusal status and a message naming the bound and its value; an
+/// empty message means a plain bad request (unchanged behavior). `Ok(None)` is
+/// a clean EOF before a request (no response).
 ///
 /// # Errors
 /// Deadline expiry (408), an oversize head or body (413), or an I/O failure
 /// on the read path (400).
 pub(crate) fn read_request(
     stream: &mut TcpStream,
-    deadline: Instant,
-    deadline_secs: u64,
+    total: &ReadBound,
+    head_bound: &ReadBound,
 ) -> Result<Option<HttpRequest>, (u16, String)> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
     let header_end;
     loop {
-        let n = read_bounded(stream, deadline, deadline_secs, &mut chunk)?;
+        let n = read_bounded(stream, head_bound, &mut chunk)?;
         if n == 0 {
             return Ok(None);
         }
@@ -133,7 +144,10 @@ pub(crate) fn read_request(
         return Err((413, body_cap_message()));
     }
     while buf.len() < header_end + 4 + content_length {
-        let n = read_bounded(stream, deadline, deadline_secs, &mut chunk)?;
+        // Recompute per read, not once for the body: a body that keeps moving
+        // restarts its slice, and the total deadline stays the hard ceiling.
+        let progress = head_bound.body_progress(total, Instant::now());
+        let n = read_bounded(stream, &progress, &mut chunk)?;
         if n == 0 {
             break;
         }
@@ -154,26 +168,83 @@ pub(crate) fn read_request(
     }))
 }
 
+/// One instant a read is bounded by, and the words that name it in a 408.
+pub(crate) struct ReadBound {
+    deadline: Instant,
+    secs: u64,
+    name: &'static str,
+}
+
+impl ReadBound {
+    /// The total request deadline, charged to the whole read.
+    pub(crate) fn total(now: Instant, secs: u64) -> Self {
+        Self {
+            deadline: now + Duration::from_secs(secs),
+            secs,
+            name: "total request deadline",
+        }
+    }
+
+    /// The header budget, floored at `HEAD_FLOOR_SECS` and clamped to the total
+    /// deadline it is a slice of. When it is not shorter than the total, the
+    /// total is the bound and keeps its own words, so a single configured
+    /// deadline still reports itself.
+    pub(crate) fn head(now: Instant, total_secs: u64, secs: u64) -> Self {
+        let secs = secs.max(HEAD_FLOOR_SECS);
+        if secs >= total_secs {
+            return Self::total(now, total_secs);
+        }
+        Self {
+            deadline: now + Duration::from_secs(secs),
+            secs,
+            name: "header read deadline",
+        }
+    }
+
+    fn expired(&self) -> (u16, String) {
+        (
+            408,
+            format!("request exceeded the {} s {}", self.secs, self.name),
+        )
+    }
+
+    /// The body-progress budget for one read, as the earlier of the total
+    /// deadline and now plus the header budget. Its message names the body
+    /// wait, so a starved body is never reported in the header's words.
+    fn body_progress(&self, total: &Self, now: Instant) -> Self {
+        let progress = now + Duration::from_secs(self.secs);
+        if progress < total.deadline {
+            Self {
+                deadline: progress,
+                secs: self.secs,
+                name: "body read deadline",
+            }
+        } else {
+            Self {
+                deadline: total.deadline,
+                secs: total.secs,
+                name: "total request deadline",
+            }
+        }
+    }
+}
+
 /// One deadline-bounded read of at most `chunk.len()` bytes.
 ///
 /// Returns the byte count; `0` is a clean EOF. The wait never exceeds the
-/// time left before the deadline; expiry is a 408 naming the deadline. A read
-/// that times out while deadline time remains is retried: the total deadline
-/// is the only cut point, so a scheduler stall cannot manufacture a spurious
-/// 400 for a client that is still inside its budget.
+/// time left before the bound; expiry is a 408 naming that bound and its
+/// value. A read that times out while bound time remains is retried: the
+/// bound is the only cut point, so a scheduler stall cannot manufacture a
+/// spurious 400 for a client that is still inside its budget.
 fn read_bounded(
     stream: &mut TcpStream,
-    deadline: Instant,
-    deadline_secs: u64,
+    bound: &ReadBound,
     chunk: &mut [u8],
 ) -> Result<usize, (u16, String)> {
     loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
+        let remaining = bound.deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err((
-                408,
-                format!("request exceeded the {deadline_secs} s total request deadline"),
-            ));
+            return Err(bound.expired());
         }
         // Socket setup results are propagated into the read error path: a
         // socket that cannot take a timeout cannot be bounded.
@@ -191,3 +262,7 @@ fn read_bounded(
 fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
+
+#[cfg(test)]
+#[path = "http_read_tests.rs"]
+mod http_read_tests;
