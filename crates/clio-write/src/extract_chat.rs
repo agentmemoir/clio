@@ -139,9 +139,9 @@ fn reserved_tag_at(bytes: &[u8], mut i: usize) -> Option<(&'static str, bool, us
     let tag = *DELIMITER_TAGS
         .iter()
         .find(|tag| tag.as_bytes().eq_ignore_ascii_case(name))?;
-    let accepted = bytes.get(i).is_none_or(|b| {
-        *b == b'>' || *b == b'/' || *b == b':' || b.is_ascii_whitespace()
-    });
+    let accepted = bytes
+        .get(i)
+        .is_none_or(|b| *b == b'>' || *b == b'/' || *b == b':' || b.is_ascii_whitespace());
     if !accepted {
         return None;
     }
