@@ -1,1 +1,5 @@
 A `tools/call` for a tool the active profile or `--tools` selection does not advertise is now refused with `-32602` and the message ``unknown tool `<name>` `` instead of dispatching, so a restricted profile no longer leaves hidden tools callable by name; a listed tool behaves exactly as before.
+
+The same visible view now bounds every route into a tool, not only the direct one. A `tool_invoke` wrapper target, a `batch` op tool, and the discovery tools `tool_search` and `tool_describe` all answer from the view `tools/list` advertises, so a tool the profile hides cannot be called through the wrapper or through a batch, and cannot be found, enumerated, or described through discovery either.
+
+A hidden tool is now indistinguishable from a name this build does not bind. Both are refused with the same `-32602` and the same ``unknown tool `<name>` `` message on every route, and neither appears in a search result or a description, so a caller cannot map the hidden surface by trying names one at a time.
