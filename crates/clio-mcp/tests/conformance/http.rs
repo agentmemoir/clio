@@ -204,7 +204,7 @@ fn t06_http_discovery_and_removed_handshake() {
         .filter_map(|t| t["name"].as_str())
         .collect();
     let bound = clio_mcp::bound_tools();
-    let expected: Vec<&str> = clio_types::DEFAULT_PRESET
+    let expected: Vec<&str> = clio_types::ToolPreset::All
         .tools()
         .into_iter()
         .filter(|name| bound.contains(name))

@@ -11,8 +11,9 @@
 //! ## Owns
 //! - The confirmation-gated tool set, derived from the published catalog
 //! - The same normalized outcome on both routes while the profile lists the
-//!   tool, while the profile hides it, with `confirm: true`, and with no
-//!   `confirm` argument at all
+//!   tool, with `confirm: true`, and with no `confirm` argument at all
+//! - Both routes' refusal of a tool the profile hides, the wrapper's answer the
+//!   direct one's, so neither route reaches a hidden confirmation or body
 //! - The same non-success outcome for a well-formed call that fails a domain
 //!   check rather than the argument contract
 //! - Masking the identity a fresh store mints for itself and the live clock,
@@ -293,28 +294,26 @@ fn an_unconfirmed_call_answers_alike_listed_or_hidden() {
         );
         assert!(
             bound.contains(&name),
-            "`{name}` stays dispatchable while its profile hides it"
+            "`{name}` stays bound while its profile hides it"
         );
-        // The arguments each handler needs to reach its own gate, prepared on
-        // that handler's store: nothing about the two calls differs but the
-        // profile the state lists.
+        // The arguments the listed handler needs to reach its own gate. The
+        // hidden handler is asked for none: no route may reach the tool there.
         let args = super::gate_fixture_tests::prepare(&listed_handler, tool);
-        let hidden_args = super::gate_fixture_tests::prepare(&hidden_handler, tool);
-        assert_eq!(hidden_args, args, "`{name}` is given the same arguments");
 
         let (direct, invoked) = both_routes(&listed_handler, &listed_state, name, &args);
         assert_eq!(invoked, direct, "`{name}` answers alike while listed");
 
+        // A hidden target gets the one `unknown tool` answer on both routes, so
+        // the wrapper cannot reach a hidden confirmation prompt or tool body.
+        let expected = json!({
+            "error": { "code": -32602, "message": format!("unknown tool `{name}`") },
+            "is_error": Value::Null,
+            "payload": Value::Null,
+        });
         let (hidden_direct, hidden_invoked) =
-            both_routes(&hidden_handler, &hidden_state, name, &hidden_args);
-        assert_eq!(
-            hidden_invoked, hidden_direct,
-            "`{name}` answers alike while hidden"
-        );
-        assert_eq!(
-            hidden_direct, direct,
-            "the listing changes neither route's answer for `{name}`"
-        );
+            both_routes(&hidden_handler, &hidden_state, name, &args);
+        assert_eq!(hidden_direct, expected, "`{name}` is refused directly");
+        assert_eq!(hidden_invoked, expected, "`{name}` by the wrapper");
     }
 }
 

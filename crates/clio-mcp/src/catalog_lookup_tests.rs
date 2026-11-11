@@ -5,13 +5,14 @@
 //!
 //! This module is responsible for the tests that pin exact catalog lookup and
 //! the argument contract to the full catalog, so no tool profile and no visible
-//! listing can hide a definition or change the rules enforced for it.
+//! listing can hide a definition or change the contract registered for it.
 //!
 //! ## Owns
 //! - An exact lookup resolving a tool the selected profile hides
 //! - The contract set equalling the bound catalog plus the published discovery
 //!   definitions, rather than the listing
-//! - One refusal, of one code and one message, whether the tool is hidden or listed
+//! - The hidden name's refusal, which reaches the caller before the contract
+//!   the listed state enforces
 //!
 //! ## Does not own
 //! - What a profile advertises (`tool_profile_tests`)
@@ -25,7 +26,7 @@
 //! Keep this module focused on lookup and contract provenance.
 
 use crate::arg_contract::contracts;
-use crate::protocol::McpHandler;
+use crate::protocol::{ERR_INVALID_PARAMS, McpHandler};
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::schema::{catalog_def, catalog_defs};
 use serde_json::{Value, json};
@@ -85,6 +86,35 @@ fn refusal_of(state: &Arc<McpState>, name: &str, args: &Value) -> (String, Strin
     )
 }
 
+/// The code and message of one call the handler refused before any tool ran.
+///
+/// The refusal is the JSON-RPC error arm, so the response carries no result at
+/// all: no payload and no structured refusal.
+fn rpc_refusal_of(state: &Arc<McpState>, name: &str, args: &Value) -> (i64, String) {
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": { "name": name, "arguments": args }
+    });
+    let response = McpHandler::new(Arc::clone(state))
+        .handle_message(&request)
+        .expect("a request with an id has a response");
+    assert!(
+        response.get("result").is_none(),
+        "a refused name is no result: {response}"
+    );
+    (
+        response["error"]["code"]
+            .as_i64()
+            .expect("a JSON-RPC error code"),
+        response["error"]["message"]
+            .as_str()
+            .expect("a refusal message")
+            .to_owned(),
+    )
+}
+
 /// The arguments each case offers `store`: nothing declared, one declared
 /// property of the wrong type, and a name no schema declares. Each is refused
 /// before the tool body reads anything.
@@ -115,7 +145,7 @@ fn an_exact_lookup_resolves_a_tool_the_profile_hides() {
 }
 
 #[test]
-fn a_hidden_tool_keeps_the_contract_its_listed_state_enforces() {
+fn a_hidden_tool_is_refused_as_unknown_before_its_contract() {
     let hidden_state = state_with(r#"{"mcp": {"tool_profile": "minimal"}}"#);
     let listed_state = state_with(r#"{"mcp": {"tool_profile": "all"}}"#);
     assert!(!listed(&hidden_state).contains(&HIDDEN.to_owned()));
@@ -129,39 +159,46 @@ fn a_hidden_tool_keeps_the_contract_its_listed_state_enforces() {
         !declared.is_empty(),
         "a tool with no required argument proves nothing"
     );
+    // The visible view decides before the contract, so every argument set,
+    // valid or not, gets the one refusal a hidden name gets.
     for args in refused_arguments() {
-        let hidden = refusal_of(&hidden_state, HIDDEN, &args);
-        let visible = refusal_of(&listed_state, HIDDEN, &args);
-        assert_eq!(hidden, visible, "one contract, two listings: {args}");
+        assert_eq!(
+            rpc_refusal_of(&hidden_state, HIDDEN, &args),
+            (ERR_INVALID_PARAMS, format!("unknown tool `{HIDDEN}`")),
+            "a hidden tool is refused as an unknown one: {args}"
+        );
     }
 }
 
 #[test]
-fn an_invalid_argument_for_a_hidden_tool_is_refused_as_when_listed() {
+fn a_hidden_tool_refuses_an_invalid_argument_as_an_unknown_tool() {
     let hidden_state = state_with(r#"{"mcp": {"tool_profile": "minimal"}}"#);
     let listed_state = state_with(r#"{"mcp": {"tool_profile": "all"}}"#);
-    let missing = refusal_of(&hidden_state, HIDDEN, &json!({}));
+    // The listed state enforces the contract, so the same arguments answer two
+    // different refusals: the fault while listed, the hidden name while not.
+    let missing = refusal_of(&listed_state, HIDDEN, &json!({}));
     assert_eq!(missing.0, "invalid_argument", "{missing:?}");
     assert_eq!(missing.1, "item is required");
     assert_eq!(
-        missing,
-        refusal_of(&listed_state, HIDDEN, &json!({})),
-        "the hidden tool's refusal is the listed tool's refusal"
+        rpc_refusal_of(&hidden_state, HIDDEN, &json!({})),
+        (ERR_INVALID_PARAMS, format!("unknown tool `{HIDDEN}`")),
+        "a hidden tool never reaches its contract"
     );
     let mistyped = refusal_of(
-        &hidden_state,
+        &listed_state,
         HIDDEN,
         &json!({"item": "text", "epistemic_kind": "fact"}),
     );
     assert_eq!(mistyped.0, "invalid_type", "{mistyped:?}");
     assert_eq!(mistyped.1, "item must be an object");
     assert_eq!(
-        mistyped,
-        refusal_of(
-            &listed_state,
+        rpc_refusal_of(
+            &hidden_state,
             HIDDEN,
             &json!({"item": "text", "epistemic_kind": "fact"})
-        )
+        ),
+        (ERR_INVALID_PARAMS, format!("unknown tool `{HIDDEN}`")),
+        "the typed fault the listed state refuses is the hidden name's refusal"
     );
 }
 

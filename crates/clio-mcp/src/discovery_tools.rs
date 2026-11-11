@@ -8,8 +8,9 @@
 //!
 //! ## Owns
 //! - The `tool_describe` name and its `arguments` validation
-//! - The exact refusal for a name the catalog does not define
-//! - The definition this call returns, read from the full catalog
+//! - The exact refusal for a name the active view does not advertise
+//! - The definition this call returns, read from the tools the visible view
+//!   advertises
 //! - The discovery gate `protocol` reads under the config lock
 //!
 //! ## Does not own
@@ -36,14 +37,19 @@ pub(crate) const TOOL_DESCRIBE: &str = "tool_describe";
 
 /// Render the catalog definition named by `args`.
 ///
-/// The lookup reads the whole catalog, so the selected tool profile cannot
-/// narrow or hide the answer.
+/// A name the active view does not advertise is refused before the catalog is
+/// read, so the selected profile narrows and hides the answer. The refusal is
+/// the one an undefined name gets, so a hidden tool and a name this build never
+/// defines answer identically.
 ///
 /// # Errors
-/// `args` does not carry exactly one non-empty string `name`, or the name is
-/// absent from the catalog.
-pub(crate) fn describe(args: &Value) -> Result<Value, RpcError> {
+/// `args` does not carry exactly one non-empty string `name`, the active view
+/// cannot be built, or the name is not advertised by that view.
+pub(crate) fn describe(state: &McpState, args: &Value) -> Result<Value, RpcError> {
     let name = exact_name(args)?;
+    if !crate::tools_page::visible_view(state)?.advertises(name) {
+        return Err(unknown_tool(name));
+    }
     let def = catalog_def(name).ok_or_else(|| unknown_tool(name))?;
     Ok(def.to_tool())
 }
@@ -70,7 +76,7 @@ pub(crate) fn route(state: &McpState, name: &str, args: &Value) -> Option<Result
     if !enabled(state) {
         return Some(Err(unknown_tool(name)));
     }
-    Some(describe(args).map(|payload| {
+    Some(describe(state, args).map(|payload| {
         json!({
             "content": [{ "type": "text", "text": "ok" }],
             "isError": false,

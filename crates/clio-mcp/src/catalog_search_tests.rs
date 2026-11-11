@@ -71,9 +71,17 @@ fn dispatched(state: &Arc<McpState>, args: &Value) -> Value {
         .expect("a request with an id has a response")
 }
 
+/// A gate-on state whose view advertises the whole catalog, which is the only
+/// state that answers `tool_search`.
+fn searchable() -> Arc<McpState> {
+    state_with(r#"{"mcp": {"tool_profile": "all", "discovery": true}}"#)
+}
+
 /// The RPC code a refused argument object returns.
 fn refusal_code(args: &Value) -> i64 {
-    call(args).expect_err("the arguments are refused").code
+    call(&searchable(), args)
+        .expect_err("the arguments are refused")
+        .code
 }
 
 #[test]
@@ -235,7 +243,7 @@ fn a_non_boolean_discovery_value_reads_as_off() {
 
 #[test]
 fn discovery_on_lists_the_tool_and_answers_a_call() {
-    let state = state_with(r#"{"mcp": {"discovery": true}}"#);
+    let state = searchable();
     assert!(listed(&state).contains(&NAME.to_owned()));
     let response = dispatched(&state, &json!({"query": "store", "limit": 1}));
     let tools = response["result"]["structuredContent"]["tools"]

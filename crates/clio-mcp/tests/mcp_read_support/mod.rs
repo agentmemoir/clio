@@ -45,7 +45,7 @@ pub fn fresh_state() -> Arc<McpState> {
             default_bank: BANK.into(),
             ..McpOpenOptions::default()
         },
-        &serde_json::json!({}),
+        &serde_json::json!({ "mcp": { "tool_profile": "all" } }),
     )
     .expect("state")
 }

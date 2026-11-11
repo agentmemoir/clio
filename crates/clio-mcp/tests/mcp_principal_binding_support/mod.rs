@@ -210,11 +210,29 @@ fn unique_journal_path(tag: &str) -> PathBuf {
     ))
 }
 
+/// The `mcp` member of every harness document.
+///
+/// These scenarios drive compliance verbs, operator verbs, and the item tools,
+/// and the shipped default profile advertises none of them; the harness serves
+/// the whole catalog so a scenario fails on the rule it asserts and not on the
+/// visible view.
+fn mcp_member() -> Value {
+    json!({ "tool_profile": "all" })
+}
+
+/// The effective document a harness state is opened with: the whole-catalog
+/// profile, plus `extra` merged in when a scenario needs more.
+fn harness_document(extra: Value) -> Value {
+    let mut document = extra;
+    document["mcp"] = mcp_member();
+    document
+}
+
 /// The effective document that pins `path` as a state's erasure journal; the
 /// key is `clio_config`'s `CLIO_ERASURE_JOURNAL_FILE` override, supplied by the
 /// host that already resolved the document instead of by the environment.
 fn journal_document(path: &Path) -> Value {
-    json!({ "erasure_journal_file": path.to_string_lossy() })
+    harness_document(json!({ "erasure_journal_file": path.to_string_lossy() }))
 }
 
 /// One scratch erasure-journal path, removed when the guard drops. The filename
@@ -334,7 +352,7 @@ pub fn bound_server_without_journal(store: &CredentialStore, default_bank: &str)
             default_bank: default_bank.into(),
             ..McpOpenOptions::default()
         },
-        &json!({}),
+        &harness_document(json!({})),
     )
 }
 

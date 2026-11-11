@@ -12,7 +12,8 @@
 //! - The discovery switch, read through the runtime, that decides whether the
 //!   wrapper is reachable and the flag that overrides it
 //! - Checking the wrapper arguments, and the refusal a failure produces
-//! - Refusing a discovery tool or a name no catalog binds, before dispatch
+//! - Refusing a discovery tool, or a name the visible view does not advertise,
+//!   before dispatch
 //! - The recursion refusal a discovery name gets at the shared execute path
 //!
 //! ## Does not own
@@ -30,7 +31,7 @@
 //! Keep this module focused on the wrapper, and leave the target's response
 //! alone.
 
-use crate::protocol::{McpHandler, RpcError, invalid_params, tool_call_envelope};
+use crate::protocol::{McpHandler, RpcError, invalid_params, tool_call_envelope, unknown_tool};
 use crate::runtime::McpState;
 use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
@@ -67,23 +68,22 @@ fn is_discovery(name: &str) -> bool {
 /// The refusal for a name the wrapper will not hand to dispatch, or `None` when
 /// the name may run.
 ///
-/// A discovery target would re-enter the wrapper family, and a name no catalog
-/// binds has no handler to reach, so both are refused with the name in the
-/// message and nothing recorded.
-fn refused_target(target: &str) -> Option<AmError> {
+/// A discovery target would re-enter the wrapper family, so it is refused first,
+/// by name. A business target must be one the view `tools/list` advertises, which
+/// is the bound catalog narrowed to the active profile: the snapshot decides, so
+/// a name the profile hides and a name nothing binds get the same `unknown tool`
+/// answer and a caller cannot tell one from the other.
+fn refused_target(state: &McpState, target: &str) -> Result<Option<AmError>, RpcError> {
     if is_discovery(target) {
-        return Some(AmError::new(
+        return Ok(Some(AmError::new(
             ErrorCode::InvalidArgument,
             format!("`{target}` is a discovery tool, so `{TOOL_INVOKE}` will not call it"),
-        ));
+        )));
     }
-    if !crate::bound_tools().contains(&target) {
-        return Some(AmError::new(
-            ErrorCode::InvalidArgument,
-            format!("`{target}` is not a tool this build binds"),
-        ));
+    if !crate::tools_page::visible_view(state)?.advertises(target) {
+        return Err(unknown_tool(target));
     }
-    None
+    Ok(None)
 }
 
 /// The recursion refusal for `name`, or `None` when it is a business tool.
@@ -113,12 +113,16 @@ fn refusal(name: &str, err: AmError) -> Value {
 ///
 /// The wrapper is validated by the same argument contract a direct call uses,
 /// and its failure names the wrapper and the failing field. A target that
-/// cannot be invoked is refused before anything is recorded. A target that can
-/// is answered by the shared execute path, so the response is the one a direct
-/// call to that target produces, byte for byte, and only the target is counted.
+/// cannot be invoked is refused before anything is recorded, and a target the
+/// visible view does not advertise is refused as an `unknown tool`, exactly as a
+/// direct call to it is. A target that can is answered by the shared execute
+/// path, so the response is the one a direct call to that target produces, byte
+/// for byte, and only the target is counted.
 ///
 /// # Errors
-/// The target's result reports a failed co-activation durability handoff.
+/// The target's result reports a failed co-activation durability handoff, or the
+/// effective configuration names a tool profile this build does not know and no
+/// installed selection governs the view.
 pub(crate) fn invoke(state: &McpState, params: &Value) -> Result<Value, RpcError> {
     let empty = json!({});
     let wrapper_args = params.get("arguments").unwrap_or(&empty);
@@ -135,7 +139,7 @@ pub(crate) fn invoke(state: &McpState, params: &Value) -> Result<Value, RpcError
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    if let Some(err) = refused_target(target) {
+    if let Some(err) = refused_target(state, target)? {
         return Ok(refusal(TOOL_INVOKE, err));
     }
     if let Err(err) = crate::arg_contract::check(target, &target_args) {
@@ -166,3 +170,7 @@ mod confirmation_tests;
 #[cfg(test)]
 #[path = "catalog_invoke_gate_fixture_tests.rs"]
 mod gate_fixture_tests;
+
+#[cfg(test)]
+#[path = "catalog_invoke_hidden_target_tests.rs"]
+mod hidden_target_tests;

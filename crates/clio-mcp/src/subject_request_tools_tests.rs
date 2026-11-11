@@ -51,7 +51,7 @@ fn state() -> std::sync::Arc<McpState> {
             default_actor: Actor::Harness,
             ..McpOpenOptions::default()
         },
-        &json!({}),
+        &json!({ "mcp": { "tool_profile": "all" } }),
     )
     .expect("open state")
 }

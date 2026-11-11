@@ -9,14 +9,12 @@
 //! where it is.
 //!
 //! ## Owns
-//! - Every assertion about `dispatch`, `required_capability`, and the revision
-//!   constants
+//! - Every assertion about `dispatch`, `required_capability`, and the revision constants
 //!
 //! ## Does not own
 //! - The dispatcher itself (`stateless`)
 //! - The request shapes these fixtures send (see `stateless_fixtures`)
-//! - Transport conformance or the pinned-revision contract (see the crate's
-//!   integration suites)
+//! - Transport conformance or the pinned-revision contract (see the integration suites)
 //!
 //! ## Boundary
 //!
@@ -29,8 +27,8 @@ use crate::MCP_PROTOCOL_REVISION as REVISION;
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
 use crate::stateless_fixtures::{
-    code, elicitation_answer, eliciting_meta, full_meta, message, request, required_meta,
-    sampling_answer, server_info, state, tool_call,
+    all_tools_state, code, elicitation_answer, eliciting_meta, full_meta, message, request,
+    required_meta, sampling_answer, server_info, state, tool_call,
 };
 use serde_json::{Value, json};
 
@@ -277,7 +275,8 @@ fn a_tool_call_carrying_request_state_is_refused_as_invalid_params() {
 
 #[test]
 fn ordinary_tool_calls_need_no_client_capability() {
-    let res = answer(&state(), &tool_call(&required_meta(REVISION), json!({})));
+    let state = all_tools_state();
+    let res = answer(&state, &tool_call(&required_meta(REVISION), json!({})));
     assert!(res.get("error").is_none(), "no invented requirement: {res}");
     assert_eq!(res["result"]["isError"], json!(false), "{res}");
 }
@@ -427,7 +426,7 @@ fn answer_envelopes_carry_no_session_key() {
 
 #[test]
 fn repeated_calls_in_two_states_answer_identically() {
-    let (first, second) = (state(), state());
+    let (first, second) = (all_tools_state(), all_tools_state());
     let args = required_meta(REVISION);
     let list = request("tools/list", &args);
     assert_states_agree(&first, &second, &request("server/discover", &args));

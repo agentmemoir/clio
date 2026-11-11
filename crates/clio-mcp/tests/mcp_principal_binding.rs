@@ -258,7 +258,7 @@ fn stdio_and_the_in_process_dispatcher_keep_the_unbound_contract() {
             default_bank: "demo".into(),
             ..McpOpenOptions::default()
         },
-        &serde_json::json!({}),
+        &serde_json::json!({"mcp": {"tool_profile": "all"}}),
     )
     .expect("state");
     let frame = store_item_declaring("anywhere-at-all", "stdio-1", "harness");

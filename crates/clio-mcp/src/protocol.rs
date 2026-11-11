@@ -9,7 +9,8 @@
 //! ## Owns
 //! - JSON-RPC 2.0 envelope parsing and response shaping
 //! - MCP error-code mapping (tool failures keep machine-readable codes)
-//! - The bound write+read tool set that dispatch and the argument contract read
+//! - The profile-narrowed tool view that `tools/list` and dispatch share, and
+//!   the bound write+read set the argument contract reads
 //!
 //! ## Does not own
 //! - Tool semantics (see `write_tools`/`mutator_tools`)
@@ -125,8 +126,8 @@ impl McpHandler {
         }
     }
 
-    /// The full bound write + read set, which dispatch and the argument
-    /// contract read; `tools/list` advertises the profile-narrowed subset.
+    /// The full bound write + read set, which the argument contract reads;
+    /// `tools/list` and dispatch both read the profile-narrowed view.
     #[must_use]
     pub fn tools_list() -> Value {
         let bound = bound_set();
@@ -141,11 +142,11 @@ impl McpHandler {
     /// `tools/list` over the bound catalogue narrowed to the groups the effective
     /// selection names.
     ///
-    /// Only what this build advertises shrinks: dispatch eligibility and the
-    /// argument contract keep reading [`Self::tools_list`], so a tool outside
-    /// the selected groups stays reachable and stays validated. The stateless
-    /// transport answers through [`Self::tools_list_page`] too, so one path
-    /// decides what every transport advertises.
+    /// Only what this build dispatches shrinks with the listing: a tool
+    /// outside the selected groups is neither advertised nor dispatched, so
+    /// the argument contract sees a name only when the view carries it. The
+    /// stateless transport answers through [`Self::tools_list_page`] too, so
+    /// one path decides what every transport advertises.
     ///
     /// # Errors
     /// The effective configuration names a tool profile this build does not
@@ -187,14 +188,18 @@ impl McpHandler {
         let empty = json!({});
         let args = params.get("arguments").unwrap_or(&empty);
         // Each discovery tool owns its dispatch arm and the gate that guards
-        // it; a name neither owns falls through to the bound write + read set.
+        // it; a name neither owns falls through to the profile-narrowed view.
         if let Some(result) = crate::discovery_tools::route(state, name, args) {
             return result;
         }
         if name == crate::catalog_search::NAME {
             return crate::catalog_search::route(state, args);
         }
-        if !bound_set().contains(&name) {
+        // The view `tools/list` advertises is the one dispatch accepts, so a
+        // tool a restricted profile hides is refused here, before the argument
+        // contract or any tool body sees the name.
+        let view = crate::tools_page::visible_view(state)?;
+        if !view.advertises(name) {
             return Err(unknown_tool(name));
         }
         Self::execute_tool_call(state, name, args)
@@ -380,6 +385,10 @@ mod protocol_nfr7_tests;
 #[cfg(test)]
 #[path = "protocol_output_schema_tests.rs"]
 mod protocol_output_schema_tests;
+
+#[cfg(test)]
+#[path = "protocol_dispatch_gate_tests.rs"]
+mod protocol_dispatch_gate_tests;
 
 #[cfg(test)]
 #[path = "protocol_tests.rs"]

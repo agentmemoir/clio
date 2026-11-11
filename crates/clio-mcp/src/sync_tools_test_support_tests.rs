@@ -32,7 +32,7 @@ pub(crate) fn state() -> Arc<McpState> {
             shared_bank_enabled: false,
             kms_path: None,
         },
-        &serde_json::json!({}),
+        &serde_json::json!({ "mcp": { "tool_profile": "all" } }),
     )
     .expect("mcp state")
 }

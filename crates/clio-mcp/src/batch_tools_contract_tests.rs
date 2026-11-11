@@ -26,8 +26,13 @@ use serde_json::json;
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
-    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-        .expect("state")
+    // The `all` profile, so the op tools this module names are ones the view
+    // advertises and the failure under test is the argument contract's.
+    McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({"mcp": {"tool_profile": "all"}}),
+    )
+    .expect("state")
 }
 
 #[test]

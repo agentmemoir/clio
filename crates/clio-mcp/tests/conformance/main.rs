@@ -52,7 +52,7 @@ fn state() -> Arc<McpState> {
             default_bank: "conf-bank".into(),
             ..McpOpenOptions::default()
         },
-        &serde_json::json!({}),
+        &serde_json::json!({ "mcp": { "tool_profile": "all" } }),
     )
     .expect("state")
 }
@@ -77,13 +77,12 @@ fn tool_call(id: u64, name: &str, arguments: &Value) -> String {
     )
 }
 
-/// The whole catalogue in one page.
+/// The whole catalogue in one page: the page size travels inside the metadata
+/// block, which is where the request reads it.
 fn tools_list(id: u64) -> String {
-    rpc(
-        id,
-        "tools/list",
-        json!({"_meta": required_meta(), "com.agentmemoir/pageSize": 100}),
-    )
+    let mut meta = required_meta();
+    meta["com.agentmemoir/pageSize"] = json!(100);
+    rpc(id, "tools/list", json!({"_meta": meta}))
 }
 
 /// The write-set fixture: happy paths plus gated-reject samples.

@@ -25,8 +25,14 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
-    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-        .expect("state")
+    // The `all` profile: the module drives `batch` directly, so the op tools
+    // must be ones the view advertises for the assertions to reach their
+    // subject.
+    McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({"mcp": {"tool_profile": "all"}}),
+    )
+    .expect("state")
 }
 
 fn shared_state() -> Arc<McpState> {
@@ -35,7 +41,7 @@ fn shared_state() -> Arc<McpState> {
             shared_bank_enabled: true,
             ..McpOpenOptions::default()
         },
-        &serde_json::json!({}),
+        &serde_json::json!({"mcp": {"tool_profile": "all"}}),
     )
     .expect("shared state")
 }

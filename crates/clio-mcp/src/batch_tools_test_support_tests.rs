@@ -22,9 +22,17 @@ use crate::runtime::{McpOpenOptions, McpState};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+/// A state whose selection is the `all` profile.
+///
+/// Every group is advertised, so each op tool a test names is one the view
+/// carries and the op tool gate stays out of these tests' subject. A narrower
+/// profile would refuse most of them by name.
 pub(crate) fn state() -> Arc<McpState> {
-    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-        .expect("state")
+    McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({"mcp": {"tool_profile": "all"}}),
+    )
+    .expect("state")
 }
 
 #[allow(clippy::needless_pass_by_value)]

@@ -15,6 +15,7 @@
 //! - Catalog membership or catalog order (see `schema`)
 //! - Tool group membership (see `clio_types::group_of`)
 //! - The discovery gate, which `protocol` reads under the config lock
+//! - The visible tool view a page is drawn from (see `tools_page`)
 //!
 //! ## Boundary
 //!
@@ -45,11 +46,15 @@ const KEYS: [&str; 3] = ["query", "limit", "family"];
 
 /// Validate one argument object and return its result page.
 ///
+/// Only the tools the active view advertises are candidates, so a name the
+/// active profile hides is dropped exactly as a name this build never defines
+/// is: it never scores, never appears, and is never marked as withheld.
+///
 /// # Errors
 /// The arguments are not an object, carry an unknown key, omit `query`, hold a
-/// blank or non-string `query`, name a non-integer or sub-one `limit`, or name a
-/// family this build does not know.
-pub(crate) fn call(args: &Value) -> Result<Value, RpcError> {
+/// blank or non-string `query`, name a non-integer or sub-one `limit`, name a
+/// family this build does not know, or the active view cannot be built.
+pub(crate) fn call(state: &McpState, args: &Value) -> Result<Value, RpcError> {
     let object = args
         .as_object()
         .ok_or_else(|| invalid_params("tool_search arguments must be an object"))?;
@@ -73,8 +78,12 @@ pub(crate) fn call(args: &Value) -> Result<Value, RpcError> {
     let limit = limit_of(object.get("limit"))?;
     let family = family_of(object.get("family"))?;
     let query_tokens = tokens(query);
+    let view = crate::tools_page::visible_view(state)?;
     let mut scored: Vec<(usize, ToolDef, ToolGroup)> = Vec::new();
     for def in catalog_defs() {
+        if !view.advertises(def.name) {
+            continue;
+        }
         let Some(group) = group_of(def.name) else {
             continue;
         };
@@ -130,8 +139,9 @@ pub(crate) fn envelope(result: Value) -> Value {
 
 /// Route one `tools/call` for this tool.
 ///
-/// `tool_search` dispatches over the whole catalog, so it serves a name outside
-/// the bound set while the discovery setting keeps it on.
+/// `tool_search` serves a name outside the bound set while the discovery setting
+/// keeps it on, and every page it builds comes from the tools the active view
+/// advertises.
 ///
 /// # Errors
 /// Discovery is off, or the arguments fail the `tool_search` contract.
@@ -139,7 +149,7 @@ pub(crate) fn route(state: &McpState, args: &Value) -> Result<Value, RpcError> {
     if !enabled(state) {
         return Err(unknown_tool(NAME));
     }
-    Ok(envelope(call(args)?))
+    Ok(envelope(call(state, args)?))
 }
 
 /// The requested page size, clamped to the maximum, or the default when absent.

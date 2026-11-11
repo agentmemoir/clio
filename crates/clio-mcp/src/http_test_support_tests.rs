@@ -40,8 +40,24 @@ use std::sync::Arc;
 /// credential-free loopback server. Per-request auth still applies when the
 /// caller's config carries a credential store.
 pub(crate) fn spawn_server(cfg: HttpConfig) -> (u16, Arc<McpHandler>) {
-    let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-        .expect("state");
+    spawn_server_with_document(cfg, &serde_json::json!({}))
+}
+
+/// The same server over a state whose document advertises the whole catalog,
+/// for a scenario that drives a tool the shipped default profile hides.
+pub(crate) fn spawn_all_tools_server(cfg: HttpConfig) -> (u16, Arc<McpHandler>) {
+    spawn_server_with_document(
+        cfg,
+        &serde_json::json!({ "mcp": { "tool_profile": "all" } }),
+    )
+}
+
+/// Serve the state opened with `document` and hand back its handler too.
+pub(crate) fn spawn_server_with_document(
+    cfg: HttpConfig,
+    document: &serde_json::Value,
+) -> (u16, Arc<McpHandler>) {
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), document).expect("state");
     let handler = Arc::new(McpHandler::new(Arc::clone(&state)));
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();

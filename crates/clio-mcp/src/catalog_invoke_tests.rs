@@ -90,9 +90,10 @@ fn handler_with(config: &Value) -> (McpHandler, Arc<McpState>) {
     (handler, state)
 }
 
-/// A state whose configuration turns discovery on, so the wrapper is reachable.
+/// A state whose configuration turns discovery on, so the wrapper is reachable,
+/// and whose profile lists the whole catalog, so a target is reachable too.
 pub(super) fn handler() -> (McpHandler, Arc<McpState>) {
-    handler_with(&json!({ "mcp": { "discovery": true } }))
+    handler_with(&json!({ "mcp": { "discovery": true, "tool_profile": "all" } }))
 }
 
 /// Send one `tools/call` with the given params and return the whole response, so
@@ -251,12 +252,18 @@ fn a_discovery_target_is_refused_and_records_nothing() {
 fn an_unbound_target_is_refused_and_named() {
     let (handler, state) = handler();
     let response = call(&handler, TOOL_INVOKE, &json!({ "name": "no_such_tool" }));
-    let (code, message) = refusal_of(&response);
 
-    assert_eq!(code, "invalid_argument", "{response}");
-    assert!(
-        message.contains("no_such_tool"),
-        "the refusal names the target: {message}"
+    // A name no view advertises gets the refusal a direct call gets, so the
+    // wrapper cannot be used to tell an unbound name from a hidden one.
+    assert_eq!(
+        response["error"]["code"],
+        json!(ERR_INVALID_PARAMS),
+        "{response}"
+    );
+    assert_eq!(
+        response["error"]["message"],
+        json!("unknown tool `no_such_tool`"),
+        "the refusal names the target"
     );
     assert!(
         state.calls.snapshot().is_empty(),

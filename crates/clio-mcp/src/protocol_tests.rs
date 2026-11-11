@@ -11,8 +11,9 @@ use serde_json::json;
 use std::sync::Arc;
 
 fn handler() -> (McpHandler, Arc<McpState>) {
-    let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-        .expect("state");
+    // The protocol mapping, not the profile, is under test: every bound tool.
+    let all = serde_json::json!({"mcp": {"tool_profile": "all"}});
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), &all).expect("state");
     let handler = McpHandler::new(Arc::clone(&state));
     (handler, state)
 }
@@ -73,17 +74,13 @@ fn t03_tools_list_returns_the_selected_profile() {
         .expect("response");
     let tools = res["result"]["tools"].as_array().expect("tools");
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-    let bound = bound_tools();
-    let expected: Vec<&str> = clio_types::DEFAULT_PRESET
-        .tools()
-        .into_iter()
-        .filter(|name| bound.contains(name))
-        .collect();
+    // The `all` profile this handler opens lists exactly the bound set.
+    let expected = bound_tools();
     assert_eq!(names.len(), expected.len());
     for name in expected {
         assert!(names.contains(&name), "`{name}` missing from tools/list");
     }
-    // Read tools are MCP-bound and inside the default profile.
+    // Read tools are MCP-bound and inside the profile.
     assert!(names.contains(&"retrieve"));
     // Every listed tool has an object inputSchema.
     for tool in tools {

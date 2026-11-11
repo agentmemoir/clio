@@ -5,12 +5,13 @@
 //!
 //! This module is responsible for the tests that pin the advertised `tools/list`
 //! result to the tool profile the configuration selects, while the bound
-//! catalog keeps answering dispatch and the argument contract.
+//! catalog keeps answering the argument contract.
 //!
 //! ## Owns
 //! - The minimal profile's listing as a literal, written-out tool set
 //! - The `all` profile's listing as the full bound set
-//! - A tool outside the selected profile being absent from the listing and still bound
+//! - A tool outside the selected profile being absent from the listing, still
+//!   bound, and no longer dispatched
 //! - A configuration with no profile key, and two states with different profiles in one process
 //! - An unknown profile name failing closed instead of listing a guessed preset
 //! - An installed tool selection winning over the configured profile
@@ -29,10 +30,10 @@
 //! Keep this module focused on the visible listing and the profile behind it.
 
 use crate::bound_tools;
-use crate::protocol::{ERR_INTERNAL, McpHandler};
+use crate::protocol::{ERR_INTERNAL, ERR_INVALID_PARAMS, McpHandler};
 use crate::runtime::{McpOpenOptions, McpState};
 use clio_types::{DEFAULT_PRESET, ToolGroup, ToolPreset};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// A server state whose configuration layer is exactly `config`.
@@ -58,6 +59,16 @@ fn listed(state: &McpState) -> Vec<String> {
         .collect();
     names.sort_unstable();
     names
+}
+
+/// One `tools/call` response for `name`, which takes no arguments.
+fn call(state: &Arc<McpState>, name: &str) -> Value {
+    McpHandler::new(Arc::clone(state))
+        .handle_message(&json!({
+            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+            "params": {"name": name, "arguments": {}}
+        }))
+        .expect("a request with an id has a response")
 }
 
 /// The advertised tool names of a state carrying `groups` as the installed
@@ -149,7 +160,7 @@ fn expected_minimal() -> Vec<String> {
     expected_of(&[&RETRIEVAL_TOOLS, &GRAPH_TOOLS])
 }
 
-/// The full catalogue the dispatcher and the argument contract read, sorted.
+/// The full bound catalogue the argument contract reads, sorted.
 fn full_catalog() -> Vec<String> {
     let mut names: Vec<String> = McpHandler::tools_list()["tools"]
         .as_array()
@@ -183,7 +194,19 @@ fn a_tool_outside_the_minimal_profile_is_not_advertised_but_stays_bound() {
     );
     assert!(
         full_catalog().contains(&"store".to_owned()),
-        "the full catalogue still answers dispatch and argument validation"
+        "the full catalogue still carries the tool's definition and contract"
+    );
+    // Bound is not dispatched: the gate answers the name the listing omits.
+    let refused = call(&state, "store");
+    assert_eq!(
+        refused["error"]["code"],
+        json!(ERR_INVALID_PARAMS),
+        "{refused}"
+    );
+    assert_eq!(
+        refused["error"]["message"],
+        json!("unknown tool `store`"),
+        "{refused}"
     );
 }
 
