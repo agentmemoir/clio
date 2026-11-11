@@ -249,7 +249,10 @@ fn an_invalid_call_is_refused_by_its_contract_only_when_listed() {
             "the listed tool still inspects its arguments: {listed}"
         );
         let (code, message) = gate_refusal(&hidden_state, "config_get", &args);
-        assert_eq!((code, message.as_str()), (-32602, "unknown tool `config_get`"));
+        assert_eq!(
+            (code, message.as_str()),
+            (-32602, "unknown tool `config_get`")
+        );
     }
     let mistyped = tool_refusal(&listed_state, "config_get", &json!({"path": 1}));
     assert_eq!(mistyped.0, "invalid_type", "{mistyped:?}");

@@ -117,7 +117,10 @@ fn a_hidden_target_and_an_unbound_one_are_refused_the_same_way() {
     assert_eq!(hidden["error"]["message"], unknown(HIDDEN));
     assert_eq!(unbound["error"]["message"], unknown("no_such_tool"));
     assert_eq!(
-        hidden["error"]["message"].as_str().unwrap_or_default().replace(HIDDEN, "<name>"),
+        hidden["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .replace(HIDDEN, "<name>"),
         unbound["error"]["message"]
             .as_str()
             .unwrap_or_default()

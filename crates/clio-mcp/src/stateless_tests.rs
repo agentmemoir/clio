@@ -275,7 +275,8 @@ fn a_tool_call_carrying_request_state_is_refused_as_invalid_params() {
 
 #[test]
 fn ordinary_tool_calls_need_no_client_capability() {
-    let res = answer(&all_tools_state(), &tool_call(&required_meta(REVISION), json!({})));
+    let state = all_tools_state();
+    let res = answer(&state, &tool_call(&required_meta(REVISION), json!({})));
     assert!(res.get("error").is_none(), "no invented requirement: {res}");
     assert_eq!(res["result"]["isError"], json!(false), "{res}");
 }

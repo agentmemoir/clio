@@ -46,7 +46,10 @@ pub(crate) fn spawn_server(cfg: HttpConfig) -> (u16, Arc<McpHandler>) {
 /// The same server over a state whose document advertises the whole catalog,
 /// for a scenario that drives a tool the shipped default profile hides.
 pub(crate) fn spawn_all_tools_server(cfg: HttpConfig) -> (u16, Arc<McpHandler>) {
-    spawn_server_with_document(cfg, &serde_json::json!({ "mcp": { "tool_profile": "all" } }))
+    spawn_server_with_document(
+        cfg,
+        &serde_json::json!({ "mcp": { "tool_profile": "all" } }),
+    )
 }
 
 /// Serve the state opened with `document` and hand back its handler too.

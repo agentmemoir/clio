@@ -110,7 +110,10 @@ fn assert_dispatched(state: &Arc<McpState>, name: &str, args: &Value) {
 fn a_read_only_selection_refuses_a_write_tool_by_name() {
     // The read-only selection: the minimal set plus `item-read`, which reaches
     // no group that writes. `store` belongs to `item-write`.
-    let state = state_selected("{}", clio_types::custom(&["item-read"]).expect("a known group"));
+    let state = state_selected(
+        "{}",
+        clio_types::custom(&["item-read"]).expect("a known group"),
+    );
     assert!(
         crate::bound_tools().contains(&"store"),
         "premise: this build binds the write tool the selection leaves out"
