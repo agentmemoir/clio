@@ -1,0 +1,1 @@
+The `jsonschema` dev-dependency in `crates/clio-mcp` moved from 0.60.2 to 0.61.1 with `default-features = false` unchanged, and the schema-validation test suite is its only consumer, so no schema, emitted output, or runtime behaviour changes. [Issue #620](https://github.com/agentmemoir/clio/issues/620)
