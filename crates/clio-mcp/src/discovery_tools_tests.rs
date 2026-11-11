@@ -4,12 +4,14 @@
 //! # Responsibility
 //!
 //! This module is responsible for the tests that pin `tool_describe` to the
-//! full catalog: the exact definition it returns, the profile it ignores, the
-//! shared refusal for an unknown name, and the arguments it accepts.
+//! visible tool view: the exact definition it returns, the profile it obeys, the
+//! shared refusal for a name that view does not advertise, and the arguments it
+//! accepts.
 //!
 //! ## Owns
 //! - The returned definition equalling the catalog definition
-//! - A tool the selected profile hides answering like the all-profile call
+//! - A tool the selected profile hides being absent from `tool_search` and
+//!   refused exactly as a name this build does not define is
 //! - The shared unknown-tool refusal, including self-describe
 //! - The response keys and the published argument rules
 //! - Every described schema building in the offline validator
@@ -35,9 +37,6 @@ use crate::schema::{catalog_def, catalog_defs, schema_pack};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-/// The `mcp.discovery` layer that turns the discovery tools on.
-const DISCOVERY_ON: &str = r#"{"mcp": {"discovery": true}}"#;
-
 /// A server state whose configuration layer is exactly `config`.
 fn state_with(config: &str) -> Arc<McpState> {
     let mut runtime = clio_config::Runtime::with_env(&|_: &str| None);
@@ -47,9 +46,10 @@ fn state_with(config: &str) -> Arc<McpState> {
     McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state")
 }
 
-/// A gate-on state, which is the only state that answers `tool_describe`.
+/// A gate-on state whose view advertises the whole catalog, which is the only
+/// state that answers `tool_describe` for every tool.
 fn discoverable() -> Arc<McpState> {
-    state_with(DISCOVERY_ON)
+    state_with(r#"{"mcp": {"tool_profile": "all", "discovery": true}}"#)
 }
 
 /// The advertised tool names for one state.
@@ -131,25 +131,67 @@ fn the_description_is_the_catalog_definition() {
 }
 
 #[test]
-fn a_tool_the_profile_hides_is_answered_the_same_way() {
+fn a_tool_the_profile_hides_is_absent_from_search_and_refused_like_an_unknown_name() {
     let hidden = state_with(r#"{"mcp": {"tool_profile": "minimal", "discovery": true}}"#);
-    let all = state_with(r#"{"mcp": {"tool_profile": "all", "discovery": true}}"#);
     assert!(
         !listed(&hidden).contains(&"store".to_owned()),
         "the minimal profile hides store"
     );
+
+    // The search page drops the hidden tool rather than marking it, while the
+    // advertised tools still match the same query.
+    let page = call(
+        &hidden,
+        "tool_search",
+        &json!({ "query": "store retrieve" }),
+    );
+    let tools = page["result"]["structuredContent"]["tools"]
+        .as_array()
+        .expect("a search page");
     assert!(
-        listed(&all).contains(&"store".to_owned()),
-        "the all profile lists store"
+        !tools.iter().any(|tool| tool["name"] == json!("store")),
+        "a hidden tool never appears in a page: {page}"
+    );
+    assert!(
+        tools.iter().any(|tool| tool["name"] == json!("retrieve")),
+        "an advertised tool still matches: {page}"
+    );
+
+    let described_hidden = call(&hidden, TOOL_DESCRIBE, &json!({ "name": "store" }));
+    let described_absent = call(&hidden, TOOL_DESCRIBE, &json!({ "name": "no_such_tool" }));
+    // One code, one envelope, no `data`: apart from the name the caller
+    // supplied, a hidden tool is refused the way an undefined name is.
+    for response in [&described_hidden, &described_absent] {
+        assert_eq!(
+            response["error"]["code"],
+            json!(ERR_INVALID_PARAMS),
+            "{response}"
+        );
+        assert_eq!(
+            response.as_object().map(serde_json::Map::len),
+            Some(3),
+            "the refusal is the plain JSON-RPC envelope: {response}"
+        );
+        assert!(
+            response["error"].get("data").is_none(),
+            "the refusal carries nothing that tells the two apart: {response}"
+        );
+        assert!(response.get("result").is_none(), "{response}");
+    }
+    assert_eq!(
+        described_hidden["error"]["message"],
+        json!("unknown tool `store`")
     );
     assert_eq!(
-        described(&hidden, "store"),
-        described(&all, "store"),
-        "the profile must not change the definition"
-    );
-    assert_eq!(
-        described(&hidden, "store"),
-        catalog_def("store").expect("store").to_tool()
+        described_hidden["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .replace("store", "<name>"),
+        described_absent["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .replace("no_such_tool", "<name>"),
+        "the two refusals read alike apart from the name"
     );
 }
 

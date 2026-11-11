@@ -42,9 +42,10 @@ fn state_with(config: &str) -> Arc<McpState> {
     McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state")
 }
 
-/// A gate-on state, which is the only state that answers `tool_search`.
+/// A gate-on state whose view advertises the whole catalog, so every catalog
+/// tool is a search candidate and the ranking is observable over all of them.
 fn searchable() -> Arc<McpState> {
-    state_with(r#"{"mcp": {"discovery": true}}"#)
+    state_with(r#"{"mcp": {"tool_profile": "all", "discovery": true}}"#)
 }
 
 /// The whole response to one `tool_search` call through the dispatcher.
