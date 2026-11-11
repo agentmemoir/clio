@@ -10,6 +10,7 @@ name: scoped coverage
 on:
   push:
     branches: [master, main]
+    # This list is identical in all three workflow files and must stay that way.
     paths:
       - 'crates/**'
       - 'Cargo.toml'
@@ -24,8 +25,11 @@ on:
       - 'changelog.d/**'
       - 'CHANGELOG.md'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/scoped-coverage.yml'
+      - '.github/workflows/secret-service.yml'
   pull_request:
     branches: [master, main]
+    # This list is identical in all three workflow files and must stay that way.
     paths:
       - 'crates/**'
       - 'Cargo.toml'
@@ -40,6 +44,8 @@ on:
       - 'changelog.d/**'
       - 'CHANGELOG.md'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/scoped-coverage.yml'
+      - '.github/workflows/secret-service.yml'
 
 env:
   CARGO_TERM_COLOR: always
