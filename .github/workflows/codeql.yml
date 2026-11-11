@@ -8,13 +8,13 @@
 #
 #
 # Default setup is not configured in this repository (state=not-configured),
-# so analyses run from this workflow on the weekly schedule below and on
+# so analyses run from this workflow on the daily schedule below and on
 # manual dispatch only.
 name: CodeQL
 
 on:
   schedule:
-    - cron: '17 3 * * 1'
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
