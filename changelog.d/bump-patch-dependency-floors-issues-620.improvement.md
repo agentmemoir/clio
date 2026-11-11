@@ -1,0 +1,1 @@
+The HTTP transport, the backup compressor, and the password prompt now build on the current patch releases of `webpki-roots` (1.0.12), `flate2` (1.1.11), and `rpassword` (7.5.5), and the manifest's version floors for `serde_json`, `cliclack`, and `flate2` now match the versions already resolved in the lockfile. [Issue #620](https://github.com/agentmemoir/clio/issues/620)

@@ -29,7 +29,7 @@ publish = false
 
 [workspace.dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = "1.0.154"
 clio-types = { path = "crates/clio-types" }
 clio-config = { path = "crates/clio-config" }
 clio-store = { path = "crates/clio-store" }
@@ -97,7 +97,7 @@ anstyle = "1.0"
 # draws to stderr, so every prompt it owns needs a real TTY; the wizard's
 # in-memory reader and the plain-text renderer are what tests and any
 # terminal-less run use instead.
-cliclack = "0.5.6"
+cliclack = "0.5.7"
 # Masks a typed password so it does not land in the terminal scrollback, in a
 # screen recording, or in a pasted transcript. This is the only raw-terminal
 # code in the tree, and it sits behind the `setup_test_seam` masked-reader seam
@@ -132,7 +132,7 @@ webpki-roots = "1"
 ureq = "3.5.1"
 # Gzip wrapper for the backup archive container; pinned to the version already
 # resolved as a transitive dependency of the HTTP transport (no new package).
-flate2 = "1.1.10"
+flate2 = "1.1.11"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
