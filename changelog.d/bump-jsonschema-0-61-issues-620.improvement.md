@@ -1,0 +1,1 @@
+Updated the `jsonschema` dev-dependency used by the `clio-mcp` schema-pack tests from 0.60.2 to 0.61.1, which speeds up validator builds and fixes `pattern` handling of `.` against line terminators; no schema or emitted output changes. [Issue #620](https://github.com/agentmemoir/clio/issues/620)
