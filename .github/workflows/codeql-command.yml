@@ -1,0 +1,103 @@
+name: codeql-command
+
+# A comment is the only way to ask for a CodeQL run, so `issue_comment` is
+# required. Nothing from the comment reaches a shell: the gate job below reads
+# the author association, and then asks the API for the commenter's permission.
+# It refuses every commenter without repository write access, and it refuses
+# when the permission lookup itself fails.
+#
+# The command only works once this file exists on the default branch: GitHub
+# reads the `issue_comment` workflow from the default branch, not from the pull
+# request the comment is on.
+on:
+  issue_comment: # zizmor: ignore[dangerous-triggers] the gate job admits trusted commenters only
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Check the comment may run CodeQL
+    # Exactly the command. A comment that only starts with it starts nothing.
+    if: github.event.comment.body == '/run-codeql'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      allowed: ${{ steps.trust.outputs.allowed }}
+      number: ${{ steps.trust.outputs.number }}
+      is_pr: ${{ steps.trust.outputs.is_pr }}
+      ref: ${{ steps.trust.outputs.ref }}
+    steps:
+      - name: Check the commenter may run CodeQL
+        id: trust
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+          NUMBER: ${{ github.event.issue.number }}
+          IS_PR: ${{ github.event.issue.pull_request != null }}
+        run: |
+          set -euo pipefail
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+          echo "is_pr=$IS_PR" >> "$GITHUB_OUTPUT"
+          echo "ref=" >> "$GITHUB_OUTPUT"
+
+          deny() {
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Denied: $ACTOR commented with association $ASSOCIATION and $1."
+            echo "Denied: $ACTOR commented with association $ASSOCIATION and $1." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+
+          case "$ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR) ;;
+            *) deny "no repository permission was looked up" ;;
+          esac
+
+          # A failed lookup denies. An unknown permission is never treated as
+          # write access.
+          if ! permission=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission); then
+            deny "the repository permission lookup failed"
+          fi
+
+          case "$permission" in
+            admin|maintain|write) ;;
+            *) deny "repository permission is $permission" ;;
+          esac
+
+          if [ "$IS_PR" = "true" ]; then
+            if ! ref=$(gh api "repos/$GH_REPO/pulls/$NUMBER" --jq .head.sha) || [ -z "$ref" ]; then
+              deny "the pull request head could not be resolved"
+            fi
+            echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "allowed=true" >> "$GITHUB_OUTPUT"
+          echo "$ACTOR commented with association $ASSOCIATION and repository permission $permission: allowed." >> "$GITHUB_STEP_SUMMARY"
+
+  codeql:
+    name: CodeQL
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
+    # The called workflow creates a check on a pull request and writes a comment
+    # or an issue, and a called workflow may only use permissions that the
+    # calling job grants it: its analyze job uses contents:read and
+    # security-events:write, its announce and report jobs use checks:write and
+    # issues:write. Anything wider here is granted to nothing.
+    permissions:
+      contents: read
+      security-events: write
+      checks: write
+      issues: write
+    # `$/` is the self-repository form, the same one coverage-command.yml uses:
+    # zizmor's self-repository audit fails the workflow on `./`.
+    uses: $/.github/workflows/codeql.yml
+    with:
+      ref: ${{ needs.gate.outputs.ref }}
+      request_number: ${{ needs.gate.outputs.number }}
+      request_is_pr: ${{ needs.gate.outputs.is_pr }}
