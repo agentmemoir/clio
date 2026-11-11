@@ -75,7 +75,7 @@ impl Fixture {
                 default_bank: BANK.into(),
                 ..McpOpenOptions::default()
             },
-            &json!({}),
+            &json!({ "mcp": { "tool_profile": "all" } }),
         )
         .expect("state");
         let store_path = temp_store_path();

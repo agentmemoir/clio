@@ -36,7 +36,7 @@ fn handler(shared: bool) -> Arc<McpHandler> {
             shared_bank_enabled: shared,
             kms_path: None,
         },
-        &serde_json::json!({}),
+        &serde_json::json!({ "mcp": { "tool_profile": "all" } }),
     )
     .expect("state");
     Arc::new(McpHandler::new(state))
@@ -55,7 +55,7 @@ fn rejecting_handler() -> Arc<McpHandler> {
             shared_bank_enabled: false,
             kms_path: None,
         },
-        &serde_json::json!({}),
+        &serde_json::json!({ "mcp": { "tool_profile": "all" } }),
     )
     .expect("state");
     Arc::get_mut(&mut state).expect("single owner").env = clio_config::ranking::RankingEnv {

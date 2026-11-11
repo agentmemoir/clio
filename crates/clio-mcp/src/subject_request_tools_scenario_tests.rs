@@ -129,7 +129,7 @@ fn state() -> Arc<McpState> {
             default_actor: Actor::Harness,
             ..McpOpenOptions::default()
         },
-        &json!({}),
+        &json!({ "mcp": { "tool_profile": "all" } }),
     )
     .expect("open state")
 }
@@ -145,7 +145,7 @@ fn open_file_state(db: &Path, kms: &Path) -> Arc<McpState> {
             kms_path: Some(kms.to_path_buf()),
             ..McpOpenOptions::default()
         },
-        &json!({}),
+        &json!({ "mcp": { "tool_profile": "all" } }),
     )
     .expect("open file state")
 }

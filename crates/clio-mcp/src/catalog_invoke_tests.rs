@@ -90,9 +90,10 @@ fn handler_with(config: &Value) -> (McpHandler, Arc<McpState>) {
     (handler, state)
 }
 
-/// A state whose configuration turns discovery on, so the wrapper is reachable.
+/// A state whose configuration turns discovery on, so the wrapper is reachable,
+/// and whose profile lists the whole catalog, so a target is reachable too.
 pub(super) fn handler() -> (McpHandler, Arc<McpState>) {
-    handler_with(&json!({ "mcp": { "discovery": true } }))
+    handler_with(&json!({ "mcp": { "discovery": true, "tool_profile": "all" } }))
 }
 
 /// Send one `tools/call` with the given params and return the whole response, so

@@ -5,7 +5,8 @@
 //! admission, and discovery/tools/call end to end.
 
 use super::http_test_support_tests::{
-    admission, post_admitted, post_call, post_served, request, served_body, spawn_server,
+    admission, post_admitted, post_call, post_served, request, served_body, spawn_all_tools_server,
+    spawn_server,
 };
 use super::*;
 use crate::conn_pool::MAX_CONNECTIONS;
@@ -174,7 +175,7 @@ fn get_sse_and_wrong_paths() {
 
 #[test]
 fn tools_call_end_to_end_over_http() {
-    let (port, _) = spawn_server(HttpConfig::default());
+    let (port, _) = spawn_all_tools_server(HttpConfig::default());
     let res = post_call(
         port,
         "triple_add",

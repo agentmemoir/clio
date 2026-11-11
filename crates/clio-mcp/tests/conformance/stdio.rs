@@ -73,7 +73,7 @@ fn stdio_write_set_matrix_with_parity() {
         .expect("tools/list response");
     let tools = tools_list["result"]["tools"].as_array().expect("tools");
     let bound = bound_tools();
-    let expected: Vec<&str> = clio_types::DEFAULT_PRESET
+    let expected: Vec<&str> = clio_types::ToolPreset::All
         .tools()
         .into_iter()
         .filter(|name| bound.contains(name))

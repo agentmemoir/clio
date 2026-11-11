@@ -23,7 +23,9 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::http_test_support_tests::{post_admitted, post_tool_frame, spawn_server};
+use super::http_test_support_tests::{
+    post_admitted, post_tool_frame, spawn_all_tools_server, spawn_server,
+};
 use super::*;
 use crate::runtime::{McpOpenOptions, McpState};
 use serde_json::{Value, json};
@@ -71,9 +73,11 @@ fn retention_tools_parity_stdio_vs_http() {
     let profile = call_frame("retention_profile_get", &json!({"bank": "bank-a"}));
 
     // stdio transport over the shared handler.
-    let stdio_state =
-        McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-            .expect("state");
+    let stdio_state = McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({ "mcp": { "tool_profile": "all" } }),
+    )
+    .expect("state");
     let frames = format!("{batch}\n{profile}\n");
     let mut out: Vec<u8> = Vec::new();
     crate::stdio::serve(
@@ -89,8 +93,9 @@ fn retention_tools_parity_stdio_vs_http() {
         .collect();
     assert_eq!(stdio.len(), 2);
 
-    // Streamable HTTP transport.
-    let (port, _) = spawn_server(HttpConfig::default());
+    // Streamable HTTP transport, over a state whose profile lists the retention
+    // tools these calls drive.
+    let (port, _) = spawn_all_tools_server(HttpConfig::default());
     let http_batch: Value =
         serde_json::from_str(&post_tool_frame(port, "admit_preview_batch", &batch, "").body)
             .expect("json");
@@ -112,10 +117,13 @@ fn retention_tools_parity_stdio_vs_http() {
             .is_some()
     );
 
-    // Both transports advertise the selected profile's tools in `tools/list`.
+    // A stock HTTP server advertises the shipped default profile's tools, so
+    // the listing parity runs against the unprefixed document.
+    let (default_port, _) = spawn_server(HttpConfig::default());
     let list = list_frame();
     let http_list: Value =
-        serde_json::from_str(&post_admitted(port, "tools/list", &list, "").body).expect("json");
+        serde_json::from_str(&post_admitted(default_port, "tools/list", &list, "").body)
+            .expect("json");
     let mut names: Vec<&str> = http_list["result"]["tools"]
         .as_array()
         .expect("tools")

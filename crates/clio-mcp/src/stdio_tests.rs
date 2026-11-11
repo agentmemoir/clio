@@ -25,6 +25,18 @@ use serde_json::{Value, json};
 use std::io::{self, BufRead, Cursor, Read};
 use std::sync::Arc;
 
+/// A state whose document advertises the whole catalog.
+///
+/// These scenarios drive `store`, `retrieve`, and the read tools, which the
+/// shipped default profile hides, so the framing under test is reached.
+fn all_tools_state() -> Arc<McpState> {
+    McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &json!({ "mcp": { "tool_profile": "all" } }),
+    )
+    .expect("state")
+}
+
 struct DrainBeforeRetrieve {
     input: Vec<u8>,
     state: Arc<McpState>,
@@ -141,11 +153,7 @@ fn frames() -> String {
 
 #[test]
 fn t04_stdio_discovery_listing_and_call_end_to_end() {
-    let state = crate::runtime::McpState::open_with_effective(
-        &McpOpenOptions::default(),
-        &serde_json::json!({}),
-    )
-    .expect("state");
+    let state = all_tools_state();
     let input = Cursor::new(frames().into_bytes());
     let mut out: Vec<u8> = Vec::new();
     serve(&state, input, &mut out).expect("serve");
@@ -210,8 +218,7 @@ fn eof_terminates_cleanly() {
 
 #[test]
 fn stdio_store_retrieve_end_to_end() {
-    let state =
-        McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
+    let state = all_tools_state();
     let item_id = "itm-stdio-e2e";
     let store = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -293,8 +300,7 @@ fn stdio_store_retrieve_end_to_end() {
 
 #[test]
 fn stdio_retrieve_rejects_wrongly_typed_optional_arguments() {
-    let state =
-        McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
+    let state = all_tools_state();
     let store = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"_meta": meta(), "name": "store", "arguments": {

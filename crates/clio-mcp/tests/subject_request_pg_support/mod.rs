@@ -96,7 +96,7 @@ pub fn open_pg_state(url: &str, kms: &Path) -> Arc<McpState> {
             kms_path: Some(kms.to_path_buf()),
             ..McpOpenOptions::default()
         },
-        &json!({}),
+        &json!({ "mcp": { "tool_profile": "all" } }),
     )
     .expect("open postgres state")
 }

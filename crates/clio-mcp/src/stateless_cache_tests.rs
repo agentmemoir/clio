@@ -32,7 +32,8 @@ use super::{CACHE_HINTS, Transport, dispatch};
 use crate::protocol::{ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
 use crate::runtime::McpState;
 use crate::stateless_fixtures::{
-    code, failing_tool_call, message, paged_list, request, required_meta, state, tool_call,
+    all_tools_state, code, failing_tool_call, message, paged_list, request, required_meta, state,
+    tool_call,
 };
 use serde_json::{Value, json};
 
@@ -93,7 +94,7 @@ fn the_hint_pair_reaches_the_wire_with_the_declared_types() {
 #[test]
 fn a_failing_tool_call_carries_a_complete_result_type() {
     let res = answer(
-        &state(),
+        &all_tools_state(),
         &failing_tool_call(&required_meta(crate::MCP_PROTOCOL_REVISION)),
     );
     assert!(
@@ -146,7 +147,7 @@ fn every_page_of_a_listing_carries_the_one_hint_pair() {
 #[test]
 fn a_complete_tool_call_result_carries_no_cache_hints() {
     let res = answer(
-        &state(),
+        &all_tools_state(),
         &tool_call(&required_meta(crate::MCP_PROTOCOL_REVISION), json!({})),
     );
     assert!(
@@ -176,7 +177,7 @@ fn a_complete_tool_call_result_carries_no_cache_hints() {
 #[test]
 fn a_failing_tool_call_result_carries_no_cache_hints() {
     let res = answer(
-        &state(),
+        &all_tools_state(),
         &failing_tool_call(&required_meta(crate::MCP_PROTOCOL_REVISION)),
     );
     let result = res["result"]

@@ -40,7 +40,7 @@ fn handler_with_default_bank(shared: bool, default_bank: &str) -> Arc<McpHandler
             shared_bank_enabled: shared,
             kms_path: None,
         },
-        &serde_json::json!({}),
+        &serde_json::json!({ "mcp": { "tool_profile": "all" } }),
     )
     .expect("state");
     Arc::new(McpHandler::new(state))

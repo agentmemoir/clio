@@ -88,8 +88,11 @@ fn session_input(frames: &[Value]) -> String {
 
 /// Serve one transport session and return its response lines.
 fn responses(input: &str) -> Vec<String> {
-    let state = McpState::open_with_effective(&McpOpenOptions::default(), &json!({}))
-        .expect("open the in-memory state");
+    let state = McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &json!({ "mcp": { "tool_profile": "all" } }),
+    )
+    .expect("open the in-memory state");
     let mut out = Vec::new();
     serve(&state, Cursor::new(input.as_bytes().to_vec()), &mut out).expect("serve the session");
     String::from_utf8(out)

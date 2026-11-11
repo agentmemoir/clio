@@ -54,22 +54,30 @@ pub(super) const DOMAIN_CATEGORY: &str = "task_spec";
 pub(super) const DOMAIN_EPISTEMIC_KIND: &str = "fact";
 const DOMAIN_TS: &str = "2024-01-01T00:00:00Z";
 
+/// The fixture state, under the shipped default profile.
 pub(super) fn state() -> Arc<McpState> {
-    let state =
-        McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
+    open(&json!({}))
+}
+
+/// The same state with the whole catalog advertised, for the scenarios that
+/// drive a tool the default profile hides.
+pub(super) fn all_tools_state() -> Arc<McpState> {
+    open(&json!({ "mcp": { "tool_profile": "all" } }))
+}
+
+fn open(document: &Value) -> Arc<McpState> {
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), document).expect("state");
     state
         .ops_store
-        .register_bank(BANK, "2024-01-01T00:00:00Z")
+        .register_bank(BANK, DOMAIN_TS)
         .expect("bank fixture");
     state
 }
 
-/// The fixture state with the one stored item a domain read needs.
-///
-/// The item is written through the production store tool, so the row a read
-/// serves is the row a caller would have stored, not a hand-built value.
+/// The fixture state with the one stored item a domain read needs, written
+/// through the production store tool so the row is what a caller would store.
 pub(super) fn domain_state() -> Arc<McpState> {
-    let state = state();
+    let state = all_tools_state();
     let stored = crate::write_tools::dispatch(
         &state,
         "store",
