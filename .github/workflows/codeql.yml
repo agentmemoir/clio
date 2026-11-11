@@ -6,34 +6,16 @@
 # 2026-10-20 its Rust job alone took 282 to 481 s (mean 412 s over ten runs),
 # beside the 232 to 392 s CI job it duplicated on non-Rust changes.
 #
-# The `pull_request` paths filter decides whether this workflow starts at all,
-# not what the analysis covers: GitHub only evaluates it on push, pull_request
-# and pull_request_target events, so the weekly schedule below runs
-# unfiltered. The workflow file itself is on the list so a change to this
-# file is judged by itself.
 #
-# Switching setups is a settings change, not a commit: while default setup is
-# still enabled a run of this workflow fails with "CodeQL default setup is
-# enabled". Disable default setup first, or at the same time this merges:
-#
-#   gh api -X PATCH repos/agentmemoir/clio/code-scanning/default-setup \
-#     -f state=not-configured
+# Default setup is not configured in this repository (state=not-configured),
+# so analyses run from this workflow on the weekly schedule below and on
+# manual dispatch only.
 name: CodeQL
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
-    paths:
-      - 'crates/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - '.cargo/config.toml'
-      - '.github/workflows/codeql.yml'
   schedule:
     - cron: '17 3 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
