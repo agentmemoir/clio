@@ -12,6 +12,8 @@
 //! - A restricted selection refusing a hidden op tool by index, in band
 //! - The hidden name and an unbound name answering one indistinguishable result
 //! - An advertised op tool still committing under the same selection
+//! - One op tool the default profile hides: refused when advertised, admitted
+//!   when bound
 //!
 //! ## Does not own
 //! - The dispatch gate on a direct `tools/call` (see
@@ -176,4 +178,52 @@ fn a_read_only_selection_refuses_an_item_write_op_tool() {
             .is_none(),
         "a refused batch must leave no committed item"
     );
+}
+
+#[test]
+fn the_default_profile_refuses_an_op_tool_the_bound_scope_admits() {
+    let s = McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &json!({"mcp": {"tool_profile": "minimal"}}),
+    )
+    .expect("state");
+    assert!(
+        super::BATCH_TOOLS.contains(&"store"),
+        "premise: `store` is a batch op tool, so its refusal cannot come from the batch set"
+    );
+    assert!(
+        !advertises(&s, "store"),
+        "premise: the default profile hides the `store` op tool"
+    );
+
+    // The same operation, the same state, two scopes. Only the scope differs,
+    // so a scope that stops hiding a name, or stops serving the bound
+    // catalogue, fails one half.
+    let operations = json!([store_op("itm-scope-1", "alpha")]);
+    let refused = crate::batch_tools::batch_tool_in_scope(
+        &s,
+        &json!({"operations": operations}),
+        crate::tools_page::ToolScope::Advertised,
+    );
+    assert_eq!(refused["ok"], json!(false), "{refused}");
+    assert_eq!(refused["code"], json!("invalid_argument"), "{refused}");
+    assert_eq!(
+        refused["message"],
+        json!("operation 0: unrecognized batch op tool `store`"),
+        "{refused}"
+    );
+    assert_eq!(count_bank(&s, "bank-a"), 0);
+
+    let admitted = crate::batch_tools::batch_tool_in_scope(
+        &s,
+        &json!({"operations": operations}),
+        crate::tools_page::ToolScope::Bound,
+    );
+    assert_eq!(admitted["ok"], json!(true), "{admitted}");
+    assert_eq!(
+        admitted["operations"][0]["status"],
+        json!("COMMITTED"),
+        "{admitted}"
+    );
+    assert_eq!(count_bank(&s, "bank-a"), 1);
 }

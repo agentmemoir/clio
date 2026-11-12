@@ -61,10 +61,24 @@ fn dry_run_unsupported(name: &str, args: &Value) -> bool {
         && !DRY_RUN_TOOLS.contains(&name)
 }
 
-/// Route one bound write tool to its in-process handler.
+/// Route one bound write tool through the advertised view for in-crate tests,
+/// which drive a tool body without naming the caller context they serve.
+#[cfg(test)]
 #[must_use]
 #[inline(never)]
 pub fn dispatch(state: &McpState, name: &str, args: &Value) -> Value {
+    dispatch_in_scope(state, name, args, crate::tools_page::ToolScope::Advertised)
+}
+
+/// Route one bound write tool under `scope`, which every inner check reads.
+#[must_use]
+#[inline(never)]
+pub fn dispatch_in_scope(
+    state: &McpState,
+    name: &str,
+    args: &Value,
+    scope: crate::tools_page::ToolScope,
+) -> Value {
     if crate::ops_tools::is_ops_tool(name) {
         return crate::ops_tools::dispatch_ops(state, name, args);
     }
@@ -78,7 +92,10 @@ pub fn dispatch(state: &McpState, name: &str, args: &Value) -> Value {
         )));
     }
     if name == "batch" {
-        return nudge_if_ok(state, crate::batch_tools::batch_tool(state, args));
+        return nudge_if_ok(
+            state,
+            crate::batch_tools::batch_tool_in_scope(state, args, scope),
+        );
     }
     let result = match name {
         "admit_preview" => crate::store_write::admit_preview(state, args),
@@ -90,7 +107,7 @@ pub fn dispatch(state: &McpState, name: &str, args: &Value) -> Value {
         "config_set" | "config_profile_apply" | "ranking_env_set" => {
             crate::config_tools::dispatch_write(state, name, args)
         }
-        other => crate::additive_tools::dispatch_inner(state, other, args),
+        other => crate::additive_tools::dispatch_inner(state, other, args, scope),
     };
     nudge_if_ok(state, tool_result(result))
 }

@@ -109,7 +109,14 @@ fn http_write_set_matrix_with_parity_and_security() {
     let direct_state = state();
     let direct: Vec<Value> = fixtures
         .iter()
-        .map(|(name, args)| clio_mcp::write_tools::dispatch(&direct_state, name, args))
+        .map(|(name, args)| {
+            clio_mcp::write_tools::dispatch_in_scope(
+                &direct_state,
+                name,
+                args,
+                clio_mcp::ToolScope::Advertised,
+            )
+        })
         .collect();
     // Invalid Origin is rejected before any protocol work.
     let (status, _) = post_admitted(

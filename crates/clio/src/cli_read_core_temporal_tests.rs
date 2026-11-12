@@ -31,7 +31,7 @@ use crate::cli_read_core::CoreGroup;
 use crate::cli_read_group::ReadGroup;
 use crate::cli_read_workspace::WorkspaceGroup;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
 use serde_json::{Value, json};
 use std::process::ExitCode;
@@ -274,10 +274,11 @@ fn strip_volatile(mut value: Value) -> Value {
 #[test]
 fn anchored_recall_matches_the_mcp_dispatch_payload() {
     let state = temporal_state();
-    let mcp = dispatch(
+    let mcp = dispatch_in_scope(
         &state,
         "retrieve",
         &json!({"bank": BANK, "query": WINDOW_QUERY, "query_anchor": ANCHOR, "limit": 5}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(mcp["ok"], json!(true), "MCP surface: {mcp}");
     let (code, out, err) = run_state(
@@ -316,10 +317,11 @@ fn anchored_recall_matches_the_mcp_dispatch_payload() {
 #[test]
 fn anchored_compose_context_matches_the_mcp_dispatch_payload() {
     let state = temporal_state();
-    let mcp = dispatch(
+    let mcp = dispatch_in_scope(
         &state,
         "compose_context",
         &json!({"bank": BANK, "query": WINDOW_QUERY, "query_anchor": ANCHOR, "budget_tokens": 512}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(mcp["ok"], json!(true), "MCP surface: {mcp}");
     let (code, out, err) = run_state(

@@ -34,16 +34,23 @@ use serde_json::{Map, Value};
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Route a mutating additive tool (or fall through to the mutator surface).
+/// Route a mutating additive tool (or fall through to the mutator surface),
+/// bounded by the `scope` the outer dispatch was given, so a nested tool call
+/// reads the same catalogue as its entry point.
 #[inline(never)]
-pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Result<Value, AmError> {
+pub(crate) fn dispatch_inner(
+    state: &McpState,
+    name: &str,
+    args: &Value,
+    scope: crate::tools_page::ToolScope,
+) -> Result<Value, AmError> {
     match name {
         "scratchpad_write" => scratchpad_write(state, args),
         "scratchpad_read" => scratchpad_read(state, args),
         "scratchpad_clear" => scratchpad_clear(state, args),
         "canonical_put" => canonical_put(state, args),
-        "shared_store" => shared_store(state, args),
-        "shared_discard" => shared_discard(state, args),
+        "shared_store" => shared_store(state, args, scope),
+        "shared_discard" => shared_discard(state, args, scope),
         "validate" => validate_tool(state, args),
         "retention_profile_set" => crate::retention_tools::profile_set(state, args),
         "hygiene_clean" => crate::hygiene_tools::dispatch_inner(state, "hygiene_clean", args),
@@ -279,10 +286,17 @@ fn shared_args(state: &McpState, name: &str, args: &Value) -> Result<Value, AmEr
     Ok(shared)
 }
 
-/// `shared_store(...)`: gated write into the dedicated shared bank.
-fn shared_store(state: &McpState, args: &Value) -> Result<Value, AmError> {
+/// `shared_store(...)`: gated write into the dedicated shared bank, dispatched
+/// under the same scope as the call that named `shared_store`.
+fn shared_store(
+    state: &McpState,
+    args: &Value,
+    scope: crate::tools_page::ToolScope,
+) -> Result<Value, AmError> {
     let shared = shared_args(state, "shared_store", args)?;
-    Ok(crate::write_tools::dispatch(state, "store", &shared))
+    Ok(crate::write_tools::dispatch_in_scope(
+        state, "store", &shared, scope,
+    ))
 }
 
 /// `shared_retrieve(query, ...)`: hybrid search scoped to the shared bank.
@@ -293,10 +307,17 @@ fn shared_retrieve(state: &McpState, args: &Value) -> Result<Value, AmError> {
 }
 
 /// `shared_discard(item_id, reason, confirm)`: confirmed ops removal from the
-/// shared bank (telemetry written by the discard path).
-fn shared_discard(state: &McpState, args: &Value) -> Result<Value, AmError> {
+/// shared bank (telemetry written by the discard path), dispatched under the
+/// same scope as the call that named `shared_discard`.
+fn shared_discard(
+    state: &McpState,
+    args: &Value,
+    scope: crate::tools_page::ToolScope,
+) -> Result<Value, AmError> {
     let shared = shared_args(state, "shared_discard", args)?;
-    Ok(crate::write_tools::dispatch(state, "discard", &shared))
+    Ok(crate::write_tools::dispatch_in_scope(
+        state, "discard", &shared, scope,
+    ))
 }
 
 /// `validate(item_id, action, note?, new_content?)`: reviewer loop routing.

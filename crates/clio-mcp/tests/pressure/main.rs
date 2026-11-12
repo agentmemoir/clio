@@ -57,7 +57,7 @@ use crate::store_double::CountingStore;
 use clio_compliance::BeliefContextCorrector;
 use clio_mcp::index_drain::{INDEX_MAX_BATCH, IndexDrain};
 use clio_mcp::runtime::McpState;
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use clio_retrieve::{AssociationEngine, HybridRetriever};
 use clio_store::{
     AssocEdgeRecord, AssocKind, AssocPolicy, BatchStore, BatchWrite, BeliefStore, ComplianceStore,
@@ -197,10 +197,11 @@ pub fn with_double(state: &Arc<McpState>, double: &Arc<CountingStore>) -> Arc<Mc
 /// Dispatch `maintenance_status` with the fixed bank and timestamp.
 #[must_use]
 pub fn status_call(state: &McpState) -> Value {
-    dispatch(
+    dispatch_in_scope(
         state,
         "maintenance_status",
         &json!({"bank": support::BANK, "timestamp": support::TS}),
+        clio_mcp::ToolScope::Advertised,
     )
 }
 

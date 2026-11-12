@@ -65,7 +65,14 @@ type ServerParts = (
 /// Launch `clio mcp stdio` over a volatile in-memory database.
 fn spawn_server() -> ServerParts {
     let mut child = Command::new(env!("CARGO_BIN_EXE_clio"))
-        .args(["mcp", "stdio", "--db", "sqlite::memory:"])
+        .args([
+            "mcp",
+            "stdio",
+            "--db",
+            "sqlite::memory:",
+            "--tools",
+            "custom:item-write",
+        ])
         // Force an empty deployment overlay so the scenario never reads a host
         // sidecar config; an empty value is not used because that disables
         // deployment loading entirely.

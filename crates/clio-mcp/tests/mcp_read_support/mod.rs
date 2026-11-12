@@ -61,7 +61,7 @@ pub fn seed(state: &McpState) {
         ("cf-2", "persona", "terse answers cf-2"),
         ("cf-3", "task_spec", "verbose replies cf-3"),
     ] {
-        let out = clio_mcp::write_tools::dispatch(
+        let out = clio_mcp::write_tools::dispatch_in_scope(
             state,
             "store",
             &json!({
@@ -71,6 +71,7 @@ pub fn seed(state: &McpState) {
                 "source_text": format!("The user prefers {gist} (1 note since 2024-01-01)."),
                 "bank": BANK, "actor": "agent", "timestamp": TS
             }),
+            clio_mcp::ToolScope::Advertised,
         );
         assert_eq!(out["ok"], json!(true), "seed store {id}: {out}");
         state
@@ -107,7 +108,12 @@ pub fn seed(state: &McpState) {
     for (name, mut args) in writes {
         args["bank"] = json!(BANK);
         args["actor"] = json!("agent");
-        let out = clio_mcp::write_tools::dispatch(state, name, &args);
+        let out = clio_mcp::write_tools::dispatch_in_scope(
+            state,
+            name,
+            &args,
+            clio_mcp::ToolScope::Advertised,
+        );
         assert_eq!(out["ok"], json!(true), "seed {name}: {out}");
     }
 }

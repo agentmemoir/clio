@@ -36,7 +36,7 @@ const ENTITY: &str = "CliEntityProbe42";
 
 /// Store one admitted item whose verified snapshot entity differs from its gist.
 fn seed_named(state: &McpState, id: &str) {
-    let stored = clio_mcp::write_tools::dispatch(
+    let stored = clio_mcp::write_tools::dispatch_in_scope(
         state,
         "store",
         &json!({
@@ -53,6 +53,7 @@ fn seed_named(state: &McpState, id: &str) {
             "actor": "agent",
             "timestamp": "2024-01-01T00:00:00Z"
         }),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(stored["ok"], json!(true), "seed {id}: {stored}");
     state
@@ -145,10 +146,11 @@ fn recall_json(state: &Arc<McpState>) -> Value {
 fn recall_json_entities_match_the_mcp_retrieve_payload() {
     let state = state_with_items();
     let cli = recall_json(&state);
-    let mcp = clio_mcp::write_tools::dispatch(
+    let mcp = clio_mcp::write_tools::dispatch_in_scope(
         &state,
         "retrieve",
         &json!({"bank": BANK, "query": "mentions", "limit": 5}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(mcp["ok"], json!(true), "{mcp}");
 
