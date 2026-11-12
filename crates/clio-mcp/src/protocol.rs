@@ -111,6 +111,29 @@ impl McpHandler {
         }
     }
 
+    /// Dispatch one verb on behalf of the command-line interface.
+    ///
+    /// The CLI advertises no listing: every verb it runs is named by its own
+    /// command tree, so the advertised-view check that guards a client's
+    /// `tools/call` has nothing to compare against and does not run. A name
+    /// this build does not bind is still refused, so the exemption admits the
+    /// catalog, not any string. The argument contract and the tool body are the
+    /// same as a `tools/call`, and the return value is the same JSON-RPC
+    /// response shape.
+    #[must_use]
+    pub fn handle_cli_verb(&self, name: &str, args: &Value) -> Value {
+        let id = json!(1);
+        let result = if bound_set().contains(&name) {
+            Self::execute_tool_call(&self.state, name, args)
+        } else {
+            Err(unknown_tool(name))
+        };
+        match result {
+            Ok(result) => Self::ok_response(Some(&id), &result),
+            Err(err) => error_response(Some(&id), &err),
+        }
+    }
+
     fn route(state: &McpState, msg: &Value) -> Result<Value, RpcError> {
         let method = msg
             .get("method")

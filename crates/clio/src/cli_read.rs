@@ -33,7 +33,7 @@ use crate::cli_help;
 use crate::cli_output::{self, OutputMode};
 use crate::cli_read_group::ReadGroup;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -335,18 +335,7 @@ pub(crate) fn call_tool(
     arguments: &Value,
 ) -> Result<Value, CliError> {
     let handler = clio_mcp::protocol::McpHandler::new(Arc::clone(state));
-    let request = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": { "name": tool, "arguments": arguments }
-    });
-    let Some(response) = handler.handle_message(&request) else {
-        return Err(CliError::operational(
-            "internal",
-            "no response from in-process dispatcher",
-        ));
-    };
+    let response = handler.handle_cli_verb(tool, arguments);
     if let Some(error) = response.get("error") {
         let code = match error.get("code") {
             Some(code) => code.to_string(),
@@ -407,3 +396,7 @@ mod cli_read_output_tests;
 #[cfg(test)]
 #[path = "cli_read_discarded_tests.rs"]
 mod cli_read_discarded_tests;
+
+#[cfg(test)]
+#[path = "cli_read_verb_dispatch_tests.rs"]
+mod verb_dispatch_tests;
