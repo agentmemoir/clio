@@ -30,7 +30,8 @@
 
 use super::{
     HANDLE_BYTES, ROLE_DIGEST, ROLE_HANDLE, ROLE_MUTATION_ID, ROLE_SEAL, content_digest,
-    identifier_handle, kind_uses_handle, mutation_id, role_subkey,
+    content_digest_matches, identifier_handle, kind_uses_handle, mutation_id, mutation_id_matches,
+    role_subkey,
 };
 use crate::crypto::SyncCipherKey;
 use crate::protocol::{
@@ -269,4 +270,69 @@ fn only_caller_chosen_identifier_kinds_use_a_handle() {
     ] {
         assert!(!kind_uses_handle(kind), "{kind} is machine-generated");
     }
+}
+
+/// A digest written by an older build hashes the legacy tag from the data
+/// file. The check path must still accept it, or an existing apply guard stops
+/// matching after the upgrade.
+#[test]
+fn legacy_plaintext_content_digest_is_still_recognised() {
+    let content = r#"{"text":"remember this"}"#;
+    let legacy =
+        crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::PLAINTEXT_DIGEST, content)
+            .expect("legacy tag data");
+    assert!(content_digest_matches(None, content, &legacy));
+    assert!(!content_digest_matches(None, content, "00"));
+}
+
+/// The write path produces a v2 digest, and for the same value it differs from
+/// the v1 digest. Two forms, one value, so a stored v1 is never confused with
+/// a freshly written v2.
+#[test]
+fn plaintext_content_digest_writes_v2_and_differs_from_v1() {
+    let content = r#"{"text":"remember this"}"#;
+    let written = content_digest(None, content);
+    assert_eq!(
+        written,
+        clio_store::domain_sha256_hex(clio_store::Domain::PlaintextDigest, content)
+    );
+    let legacy =
+        crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::PLAINTEXT_DIGEST, content)
+            .expect("legacy tag data");
+    assert_ne!(written, legacy);
+    assert!(content_digest_matches(None, content, &written));
+}
+
+/// The idempotency key follows the same rule: a journal row id written by an
+/// older build is a v1 value, and a redelivery carries it again.
+#[test]
+fn legacy_plaintext_mutation_id_is_still_recognised() {
+    let legacy = crate::legacy_tags::legacy_sha256_hex(
+        crate::legacy_tags::PLAINTEXT_MUTATION_ID,
+        "item-1|2026-01-01T00:00:00Z|upsert",
+    )
+    .expect("legacy tag data");
+    let written = mutation_id(None, "item-1", "2026-01-01T00:00:00Z", "upsert");
+    assert_ne!(written, legacy);
+    assert!(mutation_id_matches(
+        None,
+        "item-1",
+        "2026-01-01T00:00:00Z",
+        "upsert",
+        &legacy
+    ));
+    assert!(mutation_id_matches(
+        None,
+        "item-1",
+        "2026-01-01T00:00:00Z",
+        "upsert",
+        &written
+    ));
+    assert!(!mutation_id_matches(
+        None,
+        "item-1",
+        "2026-01-01T00:00:00Z",
+        "upsert",
+        "00"
+    ));
 }

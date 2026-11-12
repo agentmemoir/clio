@@ -70,18 +70,6 @@ const IDENTIFIER_HANDLE_LABEL: &[u8] = b"identifier-handle";
 /// from any other value that role might derive later.
 const MUTATION_ID_LABEL: &[u8] = b"mutation-id";
 
-/// Plaintext-mode content digest, unchanged from the pre-keyed build: an
-/// unkeyed hash over a published domain string. A relay holding the journal can
-/// confirm a guessed plaintext against it, which is exactly what the keyed form
-/// below removes and exactly why a deployment with no cipher keeps it.
-const PLAINTEXT_DIGEST_SALT: &[u8] = b"am-sync-hash";
-
-/// Plaintext-mode idempotency key, unchanged from the pre-keyed build, over the
-/// same published domain string and the same preimage. With no cipher there is
-/// no key to derive it under, and nothing to hide: the row already carries the
-/// real identifier in the clear.
-const PLAINTEXT_MUTATION_ID_SALT: &[u8] = b"am-sync-mut";
-
 /// Bytes of handle kept per record. Half of the hash output, which is the
 /// floor the construction's own specification recommends, and the width this
 /// codebase already chose for its other keyed blind index.
@@ -104,11 +92,13 @@ pub(crate) fn kind_uses_handle(kind: &str) -> bool {
 
 /// The sealed-content digest on the wire.
 ///
-/// With no cipher this is byte-for-byte what a plaintext deployment has always
-/// stored, so every existing apply-guard comparison against a stored row still
-/// matches. With a cipher it is a keyed digest over the same serialized
-/// plaintext bytes, under the digest role's own subkey, so a relay holding the
-/// journal cannot hash a candidate plaintext and learn whether it is present.
+/// With no cipher this is a v2 digest over the typed plaintext domain, so a
+/// value written by a newer build is distinguishable from the legacy v1 one.
+/// Verification accepts both, which is what keeps an apply guard written by an
+/// older build working. With a cipher it is a keyed digest over the same
+/// serialized plaintext bytes, under the digest role's own subkey, so a relay
+/// holding the journal cannot hash a candidate plaintext and learn whether it
+/// is present.
 ///
 /// The value is derived from the content and never from the identifier, and
 /// never recomputed on the receiving side: both peers derive the same answer
@@ -116,7 +106,7 @@ pub(crate) fn kind_uses_handle(kind: &str) -> bool {
 #[must_use]
 pub fn content_digest(cfg_key: Option<&SyncCipherKey>, content: &str) -> String {
     let Some(key) = cfg_key else {
-        return clio_store::sha256_hex(PLAINTEXT_DIGEST_SALT, content);
+        return clio_store::domain_sha256_hex(clio_store::Domain::PlaintextDigest, content);
     };
     keyed_digest_hex(
         &role_subkey(key, ROLE_DIGEST),
@@ -124,6 +114,30 @@ pub fn content_digest(cfg_key: Option<&SyncCipherKey>, content: &str) -> String 
         content.as_bytes(),
         32,
     )
+}
+
+/// Whether `provided` is the digest of `content` under the current v2 tag or
+/// the legacy v1 tag.
+///
+/// A journal written by an older build stores a v1 digest. A newer build
+/// writes v2, so an apply guard must recognise the stored value in either
+/// form. A malformed tag data file fails closed: no legacy value matches.
+// The journal apply guard calls this when it moves store-side; until then the
+// tests are its only caller.
+#[allow(dead_code)]
+#[must_use]
+pub fn content_digest_matches(
+    cfg_key: Option<&SyncCipherKey>,
+    content: &str,
+    provided: &str,
+) -> bool {
+    if provided == content_digest(cfg_key, content) {
+        return true;
+    }
+    // Keyed mode never changed, so only the plaintext form has a legacy shape.
+    cfg_key.is_none()
+        && crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::PLAINTEXT_DIGEST, content)
+            .is_ok_and(|legacy| legacy == provided)
 }
 
 /// The opaque handle for one record's real identifier, or the identifier itself
@@ -180,7 +194,7 @@ pub fn mutation_id(
     let stamp = canonical_writer_stamp(stamp).unwrap_or_else(|_| stamp.to_owned());
     let preimage = format!("{real_id}|{stamp}|{op}");
     let Some(key) = cfg_key else {
-        return clio_store::sha256_hex(PLAINTEXT_MUTATION_ID_SALT, &preimage);
+        return clio_store::domain_sha256_hex(clio_store::Domain::PlaintextMutationId, &preimage);
     };
     keyed_digest_hex(
         &role_subkey(key, ROLE_MUTATION_ID),
@@ -188,6 +202,35 @@ pub fn mutation_id(
         preimage.as_bytes(),
         32,
     )
+}
+
+/// Whether `provided` is the idempotency key of these inputs under the current
+/// v2 tag or the legacy v1 tag.
+///
+/// A journal row id written by an older build is a v1 value, and a redelivery
+/// carries it again, so both forms must be recognised. A malformed tag data
+/// file fails closed: no legacy value matches.
+// The journal redelivery guard calls this when it moves store-side; until then
+// the tests are its only caller.
+#[allow(dead_code)]
+#[must_use]
+pub fn mutation_id_matches(
+    cfg_key: Option<&SyncCipherKey>,
+    real_id: &str,
+    stamp: &str,
+    op: &str,
+    provided: &str,
+) -> bool {
+    if provided == mutation_id(cfg_key, real_id, stamp, op) {
+        return true;
+    }
+    if cfg_key.is_some() {
+        return false;
+    }
+    let stamp = canonical_writer_stamp(stamp).unwrap_or_else(|_| stamp.to_owned());
+    let preimage = format!("{real_id}|{stamp}|{op}");
+    crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::PLAINTEXT_MUTATION_ID, &preimage)
+        .is_ok_and(|legacy| legacy == provided)
 }
 
 /// One role's subkey, derived from the sync key under that role's own label.
@@ -201,17 +244,27 @@ pub fn role_subkey(key: &SyncCipherKey, role: &[u8]) -> Vec<u8> {
     clio_store::keyed_digest(key.key_bytes(), role, &[], 32)
 }
 
-/// The published plaintext-mode domain label, exposed for the tests across the
-/// crate that pin the wire format. The label itself stays private.
+/// The legacy plaintext-mode domain label, exposed for the tests across the
+/// crate that pin the wire format. It comes from the checked-in data file, so
+/// the value is not a Rust literal. A malformed file yields an empty slice,
+/// which fails closed: the pinned digests no longer match.
 #[cfg(test)]
 pub(crate) fn published_digest_salt() -> &'static [u8] {
-    PLAINTEXT_DIGEST_SALT
+    legacy_salt(crate::legacy_tags::PLAINTEXT_DIGEST)
 }
 
-/// The published plaintext-mode idempotency label, exposed for the same tests.
+/// The legacy plaintext-mode idempotency label, exposed for the same tests.
 #[cfg(test)]
 pub(crate) fn published_mutation_id_salt() -> &'static [u8] {
-    PLAINTEXT_MUTATION_ID_SALT
+    legacy_salt(crate::legacy_tags::PLAINTEXT_MUTATION_ID)
+}
+
+#[cfg(test)]
+fn legacy_salt(name: &str) -> &'static [u8] {
+    match crate::legacy_tags::legacy_tag(name) {
+        Ok(tag) => tag.as_bytes(),
+        Err(_) => &[],
+    }
 }
 
 #[cfg(test)]

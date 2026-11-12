@@ -80,7 +80,9 @@ mod handle_resolution;
 pub(crate) mod http;
 mod journal_row;
 pub(crate) mod keyed_roles;
+mod legacy_tags;
 pub mod protocol;
+mod protocol_tokens;
 pub mod server;
 mod server_conn;
 

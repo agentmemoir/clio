@@ -1,0 +1,9 @@
+# Legacy v1 domain tags for values already written into saved data.
+#
+# One row per tag: name<TAB>value. The values are published domain strings that
+# older builds hashed, so verification must keep accepting them. They live here
+# rather than in Rust source so no tag is a code literal.
+plaintext_digest	am-sync-hash
+plaintext_mutation_id	am-sync-mut
+sync_cursor	am-sync-cursor
+sync_watermark	am-sync-wm

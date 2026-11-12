@@ -375,3 +375,58 @@ fn a_push_ack_without_a_denial_ack_parses_and_roundtrips_with_one() {
         .expect("deserialize");
     assert_eq!(roundtrip, ack);
 }
+
+/// A cursor issued by an older build carries the legacy checksum. It must still
+/// decode, or every saved cursor stops working after the upgrade.
+#[test]
+fn legacy_cursor_token_is_still_accepted() {
+    use base64::Engine as _;
+    let legacy =
+        crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::SYNC_CURSOR, "bank-a|42")
+            .expect("legacy tag data");
+    let token = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(format!("42:{}", &legacy[..12]).as_bytes());
+    assert_eq!(decode_cursor(&token, "bank-a").expect("legacy cursor"), 42);
+    assert!(decode_cursor(&token, "other-bank").is_err());
+}
+
+/// The same rule for a saved watermark token.
+#[test]
+fn legacy_watermark_token_is_still_accepted() {
+    use base64::Engine as _;
+    let stamp = "2026-01-01T00:00:00Z";
+    let legacy = crate::legacy_tags::legacy_sha256_hex(
+        crate::legacy_tags::SYNC_WATERMARK,
+        &format!("bank-a|{stamp}"),
+    )
+    .expect("legacy tag data");
+    let token = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(format!("wm:{stamp}:{}", &legacy[..12]).as_bytes());
+    assert_eq!(
+        decode_watermark("bank-a", &token).expect("legacy watermark"),
+        stamp
+    );
+}
+
+/// The current encoder writes the v2 checksum, not the legacy one.
+#[test]
+fn cursor_and_watermark_write_v2_checksums() {
+    use base64::Engine as _;
+    let stamp = "2026-01-01T00:00:00Z";
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encode_cursor("bank-a", 7))
+        .expect("cursor body");
+    let text = String::from_utf8(decoded).expect("utf8");
+    let expected = clio_store::domain_sha256_hex(clio_store::Domain::SyncCursor, "bank-a|7");
+    assert_eq!(text, format!("7:{}", &expected[..12]));
+
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encode_watermark("bank-a", stamp))
+        .expect("watermark body");
+    let text = String::from_utf8(decoded).expect("utf8");
+    let expected = clio_store::domain_sha256_hex(
+        clio_store::Domain::SyncWatermark,
+        &format!("bank-a|{stamp}"),
+    );
+    assert_eq!(text, format!("wm:{stamp}:{}", &expected[..12]));
+}
