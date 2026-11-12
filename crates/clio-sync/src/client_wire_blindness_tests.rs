@@ -264,7 +264,9 @@ fn a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key() {
 /// idempotency key a plaintext deployment has always stored, so every existing
 /// redelivery check against a stored row still matches. The relay refuses
 /// plaintext content, so each such row reaches the relay's dead-letter journal
-/// instead of its sync journal, and the id recorded there is that unkeyed key.
+/// instead of its sync journal, and the id recorded there is that unkeyed key,
+/// checked against the fixture identifier its own shape names, as is the wire
+/// entity id in the same envelope.
 #[test]
 fn plaintext_mode_stores_the_plain_idempotency_key() {
     let (server, srv, _kms) = serve(&["bp"]);
@@ -279,24 +281,41 @@ fn plaintext_mode_stores_the_plain_idempotency_key() {
         .dead_letter_list("bp", clio_store::DeadLetterStatus::Open, 50)
         .expect("relay dead letters");
     let mut persona = 0;
+    let (mut stable, mut preference) = (0, 0);
     for row in &refused {
         let wire: SyncMutation = serde_json::from_str(&row.envelope_json).expect("envelope");
         if wire.entity_kind != "persona" {
             continue;
         }
         persona += 1;
-        let key_is_attr = wire.sync_mutation_id
-            == clio_store::sha256_hex(
-                crate::keyed_roles::published_mutation_id_salt(),
-                &format!("{}|{}|upsert", wire.entity_id, wire.transaction_time),
+        let SyncContent::Plain(ref document) = wire.content else {
+            panic!(
+                "plaintext mode carries plaintext content: {:?}",
+                wire.content
             );
-        let key_is_pref = wire.sync_mutation_id
-            == clio_store::sha256_hex(
+        };
+        let expected = match document["record"].as_str() {
+            Some("stable") => {
+                stable += 1;
+                ATTR_NAME
+            }
+            Some("preference") => {
+                preference += 1;
+                PREF_NAME
+            }
+            other => panic!("unexpected persona record {other:?} in {document}"),
+        };
+        assert_eq!(
+            wire.entity_id, expected,
+            "the plaintext entity id is the identifier its own shape names: {}",
+            wire.entity_id
+        );
+        assert_eq!(
+            wire.sync_mutation_id,
+            clio_store::sha256_hex(
                 crate::keyed_roles::published_mutation_id_salt(),
-                &format!("{}|{}|upsert", PREF_NAME, wire.transaction_time),
-            );
-        assert!(
-            key_is_attr || key_is_pref,
+                &format!("{expected}|{}|upsert", wire.transaction_time),
+            ),
             "plaintext mode records the unkeyed hash of the real identifier: {}",
             wire.sync_mutation_id
         );
@@ -304,6 +323,11 @@ fn plaintext_mode_stores_the_plain_idempotency_key() {
     assert_eq!(
         persona, 2,
         "both persona shapes reach the relay and are refused there"
+    );
+    assert_eq!(
+        (stable, preference),
+        (1, 1),
+        "one stable and one preference shape reach the relay"
     );
     server.stop();
 }
