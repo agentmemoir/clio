@@ -82,6 +82,18 @@ fn journal_apply_guard_reads_a_journaled_mutation() {
             .journal_apply_guard_hit("b1", "item", "i-guard", "upsert", "h-other")
             .expect("guard")
     );
+    assert_eq!(
+        store
+            .journal_content_hashes("b1", "item", "i-guard", "upsert")
+            .expect("hashes"),
+        ["h-guard"]
+    );
+    assert!(
+        store
+            .journal_content_hashes("b1", "item", "i-guard", "invalidate")
+            .expect("hashes")
+            .is_empty()
+    );
 }
 
 #[test]

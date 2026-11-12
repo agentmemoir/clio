@@ -286,3 +286,89 @@ fn item_upsert_carries_context_and_pre_field_payloads_still_apply() {
         .expect("legacy applied item");
     assert!(got2.context.is_none());
 }
+
+/// The content text the writer hashed, serialized the same way.
+fn content_text(m: &crate::protocol::SyncMutation) -> String {
+    serde_json::to_string(m.content_value()).expect("serialize content")
+}
+
+/// The v2 content digest the current write path produces.
+fn v2_content_hash(m: &crate::protocol::SyncMutation) -> String {
+    crate::keyed_roles::content_digest(None, &content_text(m))
+}
+
+/// The v1 mutation id an older build derived for the same event.
+fn v1_mutation_id(m: &crate::protocol::SyncMutation) -> String {
+    let preimage = format!("{}|{}|{}", m.entity_id, m.transaction_time, m.op);
+    crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::PLAINTEXT_MUTATION_ID, &preimage)
+        .expect("legacy tag data")
+}
+
+/// The v2 mutation id the current write path produces.
+fn v2_mutation_id(m: &crate::protocol::SyncMutation) -> String {
+    crate::keyed_roles::mutation_id(None, &m.entity_id, &m.transaction_time, &m.op)
+}
+
+/// A journal row written by an older build holds a v1 digest. The apply guard
+/// must still match when a newer build sends the same content under v2.
+#[test]
+fn stored_v1_content_digest_still_satisfies_the_apply_guard() {
+    let (store, _kms) = fixture();
+    let bank = "b-guard-legacy";
+    let stamp = "2026-01-01T00:00:01Z";
+    let mut original = upsert("m-v1-hash", bank, stamp, "dev-a", "g1");
+    original.content_hash = crate::legacy_tags::legacy_sha256_hex(
+        crate::legacy_tags::PLAINTEXT_DIGEST,
+        &content_text(&original),
+    )
+    .expect("legacy tag data");
+    assert_eq!(apply(&store, None, &original), ApplyOutcome::Applied);
+
+    let mut replay = original.clone();
+    replay.sync_mutation_id = "m-v2-hash".into();
+    replay.content_hash = v2_content_hash(&replay);
+
+    assert_eq!(apply(&store, None, &replay), ApplyOutcome::Duplicate);
+    assert_eq!(store.journal_max_seq(bank).expect("max seq"), 1);
+    assert_eq!(
+        store
+            .journal_content_hashes(bank, ENTITY_KIND_ITEM, "i-1", OP_UPSERT)
+            .expect("hashes")
+            .len(),
+        1
+    );
+}
+
+/// A redelivery can carry the v2 id while the journal holds the v1 id written
+/// by an older build. The redelivery is still seen and applies no second time.
+#[test]
+fn redelivered_v1_mutation_id_is_seen_and_does_not_double_apply() {
+    let (store, _kms) = fixture();
+    let bank = "b-redeliver-legacy";
+    let stamp = "2026-01-01T00:00:01Z";
+    let mut older = upsert("placeholder", bank, stamp, "dev-a", "g1");
+    older.sync_mutation_id = v1_mutation_id(&older);
+    assert_eq!(apply(&store, None, &older), ApplyOutcome::Applied);
+
+    let mut redelivery = older.clone();
+    redelivery.sync_mutation_id = v2_mutation_id(&redelivery);
+    assert_ne!(redelivery.sync_mutation_id, older.sync_mutation_id);
+
+    assert_eq!(apply(&store, None, &redelivery), ApplyOutcome::Duplicate);
+    assert_eq!(store.journal_max_seq(bank).expect("max seq"), 1);
+}
+
+/// The v2 values the write path produces still pass both checks.
+#[test]
+fn current_v2_digest_and_mutation_id_pass_every_guard() {
+    let (store, _kms) = fixture();
+    let bank = "b-guard-v2";
+    let stamp = "2026-01-01T00:00:01Z";
+    let mut m = upsert("placeholder", bank, stamp, "dev-a", "g1");
+    m.sync_mutation_id = v2_mutation_id(&m);
+    m.content_hash = v2_content_hash(&m);
+
+    assert_eq!(apply(&store, None, &m), ApplyOutcome::Applied);
+    assert_eq!(apply(&store, None, &m), ApplyOutcome::Duplicate);
+    assert_eq!(store.journal_max_seq(bank).expect("max seq"), 1);
+}

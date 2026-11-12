@@ -45,7 +45,7 @@ use crate::journal_row::journal_row as build_journal_row;
 use crate::protocol::{
     ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM, ENTITY_KIND_PERSONA,
     ENTITY_KIND_TASK, ENTITY_KIND_TRIPLE, OP_DISCARD, OP_INVALIDATE, OP_PRUNE, OP_REINFORCE,
-    OP_UPSERT, SyncMutation,
+    OP_UPSERT, SyncContent, SyncMutation,
 };
 use clio_store::{DeadLetterStatus, DekProvider, ErasureDenial, Store, SyncConflictRow, SyncStore};
 use clio_types::AmError;
@@ -224,11 +224,7 @@ fn guarded(
     if let Err(err) = m.validate() {
         return dead_letter(engine, m, envelope_json, &err).map(ApplyResult::plain);
     }
-    if engine
-        .sync
-        .journal_get(&m.bank, &m.sync_mutation_id)?
-        .is_some()
-    {
+    if mutation_seen(engine, m)? {
         // A journaled denial operation still owes its proof: the durable
         // record is already in place, so the redelivery re-proves it — which
         // repeats no effect — instead of reporting a bare duplicate. A
@@ -244,7 +240,7 @@ fn guarded(
     }
     // Operator-acked skips stay skipped: re-delivery of an acked poison id is
     // a documented no-op and may never re-open the row.
-    if engine.sync.dead_letter_status(&m.sync_mutation_id)? == Some(DeadLetterStatus::AckedSkip) {
+    if dead_letter_acked(engine, m)? {
         return Ok(ApplyResult::plain(ApplyOutcome::Duplicate));
     }
     // Freshness sits after the id pre-checks and before the content-hash guard:
@@ -254,13 +250,14 @@ fn guarded(
     if apply_freshness::is_stale(engine, &m.transaction_time) {
         return Ok(ApplyResult::plain(ApplyOutcome::Stale));
     }
-    if engine.sync.journal_apply_guard_hit(
+    let guard_hit = engine.sync.journal_apply_guard_hit(
         &m.bank,
         &m.entity_kind,
         &m.entity_id,
         &m.op,
         &m.content_hash,
-    )? {
+    )?;
+    if guard_hit || content_hash_seen(engine, m)? {
         return Ok(ApplyResult::plain(ApplyOutcome::Duplicate));
     }
     // The subject a payload carries, consulted before any upsert or mint path
@@ -324,6 +321,69 @@ fn guarded(
         }
     }
     Ok(ApplyResult::plain(outcome))
+}
+
+/// The ids a plaintext redelivery may carry, both forms accepted.
+fn accepted_ids(m: &SyncMutation) -> impl Iterator<Item = String> {
+    let (id, stamp, op) = (&m.entity_id, &m.transaction_time, &m.op);
+    crate::keyed_roles::accepted_mutation_ids(None, id, stamp, op)
+        .into_iter()
+        .filter(move |candidate| {
+            crate::keyed_roles::mutation_id_matches(None, id, stamp, op, candidate)
+        })
+}
+
+/// Whether this id, or the legacy id of the same event, is already journaled.
+/// The exact lookup covers one version; the probe covers a mixed fleet.
+fn mutation_seen(engine: &ApplyEngine<'_>, m: &SyncMutation) -> Result<bool, AmError> {
+    let seen = engine.sync.journal_get(&m.bank, &m.sync_mutation_id)?;
+    if seen.is_some() {
+        return Ok(true);
+    }
+    if !matches!(m.content, SyncContent::Plain(_)) {
+        return Ok(false);
+    }
+    for id in accepted_ids(m).filter(|id| *id != m.sync_mutation_id) {
+        if engine.sync.journal_get(&m.bank, &id)?.is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether an operator-acked skip covers this mutation id or its legacy form.
+fn dead_letter_acked(engine: &ApplyEngine<'_>, m: &SyncMutation) -> Result<bool, AmError> {
+    if engine.sync.dead_letter_status(&m.sync_mutation_id)? == Some(DeadLetterStatus::AckedSkip) {
+        return Ok(true);
+    }
+    if !matches!(m.content, SyncContent::Plain(_)) {
+        return Ok(false);
+    }
+    for id in accepted_ids(m).filter(|id| *id != m.sync_mutation_id) {
+        if engine.sync.dead_letter_status(&id)? == Some(DeadLetterStatus::AckedSkip) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether a stored row with the same identity and op already carries this
+/// content's digest under either form.
+fn content_hash_seen(engine: &ApplyEngine<'_>, m: &SyncMutation) -> Result<bool, AmError> {
+    if !matches!(m.content, SyncContent::Plain(_)) {
+        return Ok(false);
+    }
+    let text = serde_json::to_string(m.content_value()).unwrap_or_default();
+    // The incoming hash must be a valid form of this content. A caller that
+    // deliberately sends a different hash still takes the ordinary path.
+    if !crate::keyed_roles::content_digest_matches(None, &text, &m.content_hash) {
+        return Ok(false);
+    }
+    let sync = engine.sync;
+    let stored = sync.journal_content_hashes(&m.bank, &m.entity_kind, &m.entity_id, &m.op)?;
+    Ok(stored
+        .iter()
+        .any(|hash| crate::keyed_roles::content_digest_matches(None, &text, hash)))
 }
 
 /// The admission score one origin receipt carries, read tolerantly: a missing

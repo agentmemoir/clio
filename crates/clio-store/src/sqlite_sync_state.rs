@@ -120,6 +120,31 @@ pub(crate) fn journal_apply_guard_hit_sqlite(
     })
 }
 
+/// SQLite body of `SyncStore::journal_content_hashes`: stored hashes for the
+/// same identity and op.
+pub(crate) fn journal_content_hashes_sqlite(
+    store: &SqliteStore,
+    bank_id: &str,
+    entity_kind: &str,
+    entity_id: &str,
+    op: &str,
+) -> Result<Vec<String>, AmError> {
+    store.with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT content_hash FROM sync_mutations WHERE bank_id = ?1 \
+                 AND entity_kind = ?2 AND entity_id = ?3 AND op = ?4",
+            )
+            .am("sync journal content hashes prepare")?;
+        let hashes = stmt
+            .query_map(params![bank_id, entity_kind, entity_id, op], |r| r.get(0))
+            .am("sync journal content hashes query")?
+            .collect::<Result<Vec<String>, _>>()
+            .am("sync journal content hashes map")?;
+        Ok(hashes)
+    })
+}
+
 /// SQLite body of `SyncStore::cursor_get`: the peer's opaque cursor token.
 pub(crate) fn cursor_get_sqlite(
     store: &SqliteStore,

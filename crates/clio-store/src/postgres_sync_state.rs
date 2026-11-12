@@ -111,6 +111,27 @@ pub(crate) fn journal_apply_guard_hit_pg(
     })
 }
 
+/// Postgres body of `SyncStore::journal_content_hashes`: stored hashes for the
+/// same identity and op.
+pub(crate) fn journal_content_hashes_pg(
+    store: &PostgresStore,
+    bank_id: &str,
+    entity_kind: &str,
+    entity_id: &str,
+    op: &str,
+) -> Result<Vec<String>, AmError> {
+    store.with_client(|client| {
+        let rows = client
+            .query(
+                "SELECT content_hash FROM sync_mutations WHERE bank_id = $1 \
+                 AND entity_kind = $2 AND entity_id = $3 AND op = $4",
+                &[&bank_id, &entity_kind, &entity_id, &op],
+            )
+            .am("sync journal content hashes")?;
+        Ok(rows.iter().map(|row| row.get(0)).collect())
+    })
+}
+
 /// Postgres body of `SyncStore::cursor_get`: the peer's opaque cursor token.
 pub(crate) fn cursor_get_pg(
     store: &PostgresStore,

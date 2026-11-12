@@ -122,9 +122,6 @@ pub fn content_digest(cfg_key: Option<&SyncCipherKey>, content: &str) -> String 
 /// A journal written by an older build stores a v1 digest. A newer build
 /// writes v2, so an apply guard must recognise the stored value in either
 /// form. A malformed tag data file fails closed: no legacy value matches.
-// The journal apply guard calls this when it moves store-side; until then the
-// tests are its only caller.
-#[allow(dead_code)]
 #[must_use]
 pub fn content_digest_matches(
     cfg_key: Option<&SyncCipherKey>,
@@ -204,15 +201,39 @@ pub fn mutation_id(
     )
 }
 
+/// Every id a redelivery of this logical event may carry: the current v2 value
+/// and, in plaintext mode, the legacy v1 one.
+///
+/// A journal row written by an older build holds the v1 id, so a redelivery
+/// that computes the v2 id must still find it. Keyed mode never changed, so it
+/// has one accepted value.
+#[must_use]
+pub(crate) fn accepted_mutation_ids(
+    cfg_key: Option<&SyncCipherKey>,
+    real_id: &str,
+    stamp: &str,
+    op: &str,
+) -> Vec<String> {
+    let current = mutation_id(cfg_key, real_id, stamp, op);
+    if cfg_key.is_some() {
+        return vec![current];
+    }
+    let stamp = canonical_writer_stamp(stamp).unwrap_or_else(|_| stamp.to_owned());
+    let preimage = format!("{real_id}|{stamp}|{op}");
+    let legacy =
+        crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::PLAINTEXT_MUTATION_ID, &preimage);
+    match legacy {
+        Ok(legacy) if legacy != current => vec![current, legacy],
+        _ => vec![current],
+    }
+}
+
 /// Whether `provided` is the idempotency key of these inputs under the current
 /// v2 tag or the legacy v1 tag.
 ///
 /// A journal row id written by an older build is a v1 value, and a redelivery
 /// carries it again, so both forms must be recognised. A malformed tag data
 /// file fails closed: no legacy value matches.
-// The journal redelivery guard calls this when it moves store-side; until then
-// the tests are its only caller.
-#[allow(dead_code)]
 #[must_use]
 pub fn mutation_id_matches(
     cfg_key: Option<&SyncCipherKey>,
@@ -221,16 +242,9 @@ pub fn mutation_id_matches(
     op: &str,
     provided: &str,
 ) -> bool {
-    if provided == mutation_id(cfg_key, real_id, stamp, op) {
-        return true;
-    }
-    if cfg_key.is_some() {
-        return false;
-    }
-    let stamp = canonical_writer_stamp(stamp).unwrap_or_else(|_| stamp.to_owned());
-    let preimage = format!("{real_id}|{stamp}|{op}");
-    crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::PLAINTEXT_MUTATION_ID, &preimage)
-        .is_ok_and(|legacy| legacy == provided)
+    accepted_mutation_ids(cfg_key, real_id, stamp, op)
+        .iter()
+        .any(|id| id == provided)
 }
 
 /// One role's subkey, derived from the sync key under that role's own label.
