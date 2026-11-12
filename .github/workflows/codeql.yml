@@ -142,6 +142,11 @@ jobs:
           category: '/language:rust'
           output: ${{ runner.temp }}/results
           upload-database: false
+          # The event is a comment, so its ref is the default branch, while the
+          # checkout above is the pull request head. The analysis must be recorded
+          # under the pull request ref, or GitHub closes default-branch alerts as fixed.
+          ref: ${{ inputs.request_is_pr == 'true' && format('refs/pull/{0}/head', inputs.request_number) || '' }}
+          sha: ${{ inputs.request_is_pr == 'true' && inputs.ref || '' }}
 
       # Turns the SARIF into the small files the report job reads: one tab-separated
       # line per result, a count, and the commit that was scanned. Always runs, so a
