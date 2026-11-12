@@ -1,1 +1,1 @@
-Tests in `clio-sync` now take the plaintext idempotency-key domain label from the shared test-only accessor instead of repeating its bytes, which removes a duplicated hard-coded salt value from the tests; no production behavior, wire format, or stored data changes.
+No user-facing change.
