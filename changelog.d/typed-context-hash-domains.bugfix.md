@@ -1,0 +1,1 @@
+Derive the belief, item, and persona context change-detection hashes from a typed domain tag instead of a literal byte salt, so the shared hash sink never receives a hard-coded salt and two uses of one value cannot produce the same digest.

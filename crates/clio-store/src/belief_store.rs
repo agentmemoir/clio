@@ -208,9 +208,6 @@ pub(crate) fn open_belief_context(
     String::from_utf8(bytes).ok()
 }
 
-/// Fixed domain-separation salt for the belief context change-detection hash.
-pub(crate) const BELIEF_CONTEXT_HASH_DOMAIN: &[u8] = b"clio-belief-context-telemetry";
-
 /// PII-safe belief context telemetry for `audit_events.detail_json`: presence,
 /// UTF-8 byte length, and a hash for change detection only. The raw context
 /// value never enters telemetry.
@@ -219,7 +216,10 @@ pub(crate) fn belief_context_stats(context: Option<&str>) -> serde_json::Value {
         Some(context) => serde_json::json!({
             "context_present": true,
             "context_len": context.len(),
-            "context_hash": crate::erase_hash::sha256_hex(BELIEF_CONTEXT_HASH_DOMAIN, context),
+            "context_hash": crate::erase_hash::domain_sha256_hex(
+                crate::erase_hash::Domain::BeliefContext,
+                context,
+            ),
         }),
         None => serde_json::json!({"context_present": false, "context_len": 0}),
     }

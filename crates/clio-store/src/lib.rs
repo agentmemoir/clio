@@ -249,7 +249,7 @@ pub use embedding_space::{
     ANN_HALFVEC_MAX_DIMS, ANN_VECTOR_MAX_DIMS, DEFAULT_EMBEDDING_MODEL, EmbeddingSpace, IndexMode,
     MAX_VECTOR_DIMS, SETTING_EMBEDDING_DIM, SETTING_EMBEDDING_MODEL,
 };
-pub use erase_hash::sha256_hex;
+pub use erase_hash::{Domain, domain_sha256_hex, sha256_hex};
 pub use erasure_denial::{DenialVerdict, ErasureDenial};
 pub use history_store::HistoryStore;
 pub use hygiene_store::{HygieneLogEntry, HygieneStore};

@@ -58,9 +58,6 @@ pub(crate) fn seal_dual_content(
     Ok(envelope.to_storage_string())
 }
 
-/// Fixed domain-separation salt for the context change-detection hash.
-const CONTEXT_HASH_DOMAIN: &[u8] = b"clio-context-telemetry";
-
 /// PII-safe context telemetry for `audit_events.detail_json`:
 /// presence, UTF-8 byte length, and a hash for change detection only. The raw
 /// context value never enters telemetry.
@@ -69,7 +66,10 @@ pub(crate) fn context_stats(item: &MemoryItem) -> serde_json::Value {
         Some(context) => serde_json::json!({
             "context_present": true,
             "context_len": context.len(),
-            "context_hash": crate::erase_hash::sha256_hex(CONTEXT_HASH_DOMAIN, context),
+            "context_hash": crate::erase_hash::domain_sha256_hex(
+                crate::erase_hash::Domain::ItemContext,
+                context,
+            ),
         }),
         None => serde_json::json!({"context_present": false, "context_len": 0}),
     }
@@ -397,7 +397,10 @@ mod tests {
         assert_eq!(detail["context_len"], "team chat".len());
         assert_eq!(
             detail["context_hash"],
-            crate::erase_hash::sha256_hex(CONTEXT_HASH_DOMAIN, "team chat")
+            crate::erase_hash::domain_sha256_hex(
+                crate::erase_hash::Domain::ItemContext,
+                "team chat",
+            )
         );
     }
 }
