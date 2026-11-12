@@ -207,10 +207,15 @@ jobs:
       issues: write
       checks: write
     steps:
+      # The name and the path are both set. With one artifact and no name, this
+      # action extracts the artifact's own files straight into the path, so
+      # count.txt landed in artifacts/ instead of artifacts/codeql-findings-rust/
+      # and the report below read a scan that had finished as a broken one.
       - name: Download the findings
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: artifacts
+          name: codeql-findings-rust
+          path: artifacts/codeql-findings-rust
         # An empty download fails this step by default. Carrying on reports the
         # run as broken instead of reporting nothing at all.
         continue-on-error: true
