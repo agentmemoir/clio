@@ -107,7 +107,7 @@ pub fn dispatch_in_scope(
         "config_set" | "config_profile_apply" | "ranking_env_set" => {
             crate::config_tools::dispatch_write(state, name, args)
         }
-        other => crate::additive_tools::dispatch_inner(state, other, args),
+        other => crate::additive_tools::dispatch_inner(state, other, args, scope),
     };
     nudge_if_ok(state, tool_result(result))
 }
