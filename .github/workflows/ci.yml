@@ -86,10 +86,123 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: fmt · clippy · script suites
+  # Three jobs, not one: the owned lookup builds every test binary (134-199s)
+  # while clippy and the static suites wait behind it. Each job keeps its own
+  # setup, and all three share one cache key so none starts cold.
+  lint:
+    name: lint
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
+    steps:
+      # Full history: the scoped runner needs the merge base with the base
+      # branch, and a depth-1 clone has no base branch to find.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # The exact version, taken from the pin rather than from the `stable`
+      # channel. Naming it here as well is deliberate: the action's own
+      # documentation says an explicit input can override the toolchain file,
+      # and a second project found the opposite. Setting both removes the
+      # question. The step after this one fails the job if the two ever drift.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.99.1
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Fail if the runner and the pin disagree
+        run: |
+          pinned=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          actual=$(rustc --version | cut -d' ' -f2)
+          if [ "$pinned" != "$actual" ]; then
+            echo "::error::runner has rustc $actual but rust-toolchain.toml pins $pinned"
+            exit 1
+          fi
+          echo "rustc $actual matches the pin"
+
+      # `shared-key: check` reproduces the old job's cache key, so the three
+      # jobs restore one dependency cache instead of building three cold ones.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: check
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      # Clippy stays workspace-wide. It compiles but does not run the tests, so it
+      # is not the cost this workflow gave up, and scoping it would mean a crate
+      # is only linted on the pull request that changed it. A crate unchanged
+      # since master's last green run cannot produce a new finding, which is the
+      # argument for scoping it, but that argument depends on master staying green
+      # and it was not worth trading a lint regression for.
+      #
+      # --workspace is named here rather than left to the root manifest. This step once read as workspace-wide and was not: with `default-members` set to a single crate and no selector on the command, it linted that crate alone and returned success. A lint denied by `.cargo/config.toml` in any of the other sixteen crates, including their test targets, could not fail this job.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -D unsafe_code
+
+  acceptance:
+    name: acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      # Same shared setup as the lint job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.99.1
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Fail if the runner and the pin disagree
+        run: |
+          pinned=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          actual=$(rustc --version | cut -d' ' -f2)
+          if [ "$pinned" != "$actual" ]; then
+            echo "::error::runner has rustc $actual but rust-toolchain.toml pins $pinned"
+            exit 1
+          fi
+          echo "rustc $actual matches the pin"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: check
+
+      - name: Install nextest
+        id: install_nextest
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2
+        with:
+          tool: nextest
+
+      # The test lookup against the runner's real list, and the bulk of this
+      # job's wall clock. It runs on every outcome and asks for nextest itself,
+      # so a missing tool shows as a skip rather than a silent gap.
+      - name: Owned lookup acceptance
+        if: always()
+        run: |
+          if ! cargo nextest --version >/dev/null 2>&1; then
+            echo "owned lookup acceptance skipped: cargo nextest is not usable, so the runner's test list cannot be read"
+            exit 0
+          fi
+          python3 scripts/owned_tests.py --accept
+
+      # Last, so it can report on whichever step failed: a test binary killed
+      # from outside prints nothing, which is the case this was added for.
+      - name: Out-of-memory check
+        if: failure()
+        run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
+
+  scripts:
+    name: scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: pgvector/pgvector:0.8.6-pg16
@@ -112,12 +225,6 @@ jobs:
           sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
-      # Full history, not the default shallow clone. The scoped runner works out
-      # what a change touched by asking git for the merge base with the base
-      # branch, and a depth-1 clone has no base branch to find: the query fails,
-      # the runner treats the missing base as "measure everything", and the job
-      # silently turns back into the full-workspace gate this file exists to
-      # avoid. This is the one checkout setting the scoped gate depends on.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -148,11 +255,6 @@ jobs:
       - name: Line limit (450)
         run: make llc
 
-      # The exact version, taken from the pin rather than from the `stable`
-      # channel. Naming it here as well is deliberate: the action's own
-      # documentation says an explicit input can override the toolchain file,
-      # and a second project found the opposite. Setting both removes the
-      # question. The step after this one fails the job if the two ever drift.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
@@ -171,33 +273,11 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-
-      - name: Format
-        run: cargo fmt --all -- --check
-
-      # Clippy stays workspace-wide. It compiles but does not run the tests, so it
-      # is not the cost this workflow gave up, and scoping it would mean a crate
-      # is only linted on the pull request that changed it. A crate unchanged
-      # since master's last green run cannot produce a new finding, which is the
-      # argument for scoping it, but that argument depends on master staying green
-      # and it was not worth trading a lint regression for.
-      #
-      # --workspace is named here rather than left to the root manifest. This step once read as workspace-wide and was not: with `default-members` set to a single crate and no selector on the command, it linted that crate alone and returned success. A lint denied by `.cargo/config.toml` in any of the other sixteen crates, including their test targets, could not fail this job.
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -D unsafe_code
-
-      - name: Install nextest
-        id: install_nextest
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2
         with:
-          tool: nextest
+          shared-key: check
 
-      # The runner cleans profile buffers through `cargo llvm-cov`, and the gate's
-      # self-test carries a check group that reads the installed tool and skips
-      # itself when the tool is absent. This job needs it even though it judges no
-      # coverage: without it a cleaning path failed with `error: no such command:
-      # llvm-cov`, which reads as a defect in the change rather than a missing
-      # tool, and one check group skipped under a green run.
+      # The gate's self-test carries a check group that reads `cargo llvm-cov`
+      # and skips itself when the tool is absent, so install it here.
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2
         with:
@@ -365,26 +445,3 @@ jobs:
       - name: Prompt surface diff summary
         if: always()
         run: make scripts-check-prompt-surface
-
-      # The test lookup against the runner's real list. It builds the test
-      # binaries itself, so it runs here directly, outside the suite targets.
-      # It needs the `nextest` tool, which is a cargo subcommand, and the step
-      # that installs it can be skipped when an earlier step fails. This step
-      # runs on every outcome and asks for the tool itself, so the job log
-      # shows why the acceptance did not run instead of the step disappearing.
-      # A tool that is missing is not a failure; a lookup that could run still
-      # fails the job when it finds a real mismatch.
-      - name: Owned lookup acceptance
-        if: always()
-        run: |
-          if ! cargo nextest --version >/dev/null 2>&1; then
-            echo "owned lookup acceptance skipped: cargo nextest is not usable, so the runner's test list cannot be read"
-            exit 0
-          fi
-          python3 scripts/owned_tests.py --accept
-
-      # Last, so it can report on whichever step failed: a test binary killed
-      # from outside prints nothing, which is the case this was added for.
-      - name: Out-of-memory check
-        if: failure()
-        run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
