@@ -61,7 +61,9 @@ fn dry_run_unsupported(name: &str, args: &Value) -> bool {
         && !DRY_RUN_TOOLS.contains(&name)
 }
 
-/// Route one bound write tool to its in-process handler.
+/// Route one bound write tool through the advertised view for in-crate tests,
+/// which drive a tool body without naming the caller context they serve.
+#[cfg(test)]
 #[must_use]
 #[inline(never)]
 pub fn dispatch(state: &McpState, name: &str, args: &Value) -> Value {
@@ -71,7 +73,7 @@ pub fn dispatch(state: &McpState, name: &str, args: &Value) -> Value {
 /// Route one bound write tool under `scope`, which every inner check reads.
 #[must_use]
 #[inline(never)]
-pub(crate) fn dispatch_in_scope(
+pub fn dispatch_in_scope(
     state: &McpState,
     name: &str,
     args: &Value,

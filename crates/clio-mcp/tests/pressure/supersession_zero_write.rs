@@ -29,7 +29,7 @@ use crate::store_double::{CountingStore, WRITER_NAMES};
 use crate::support;
 use crate::{seeded_state, with_double};
 use clio_mcp::runtime::McpState;
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use clio_store::CorrectionSpec;
 use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
 use serde_json::{Value, json};
@@ -106,10 +106,11 @@ fn seed_pair(state: &McpState) {
 
 /// The supersession section for one query, through the inspect binding.
 fn inspect_supersession(state: &McpState, item_id: &str, query: &str) -> Value {
-    let out = dispatch(
+    let out = dispatch_in_scope(
         state,
         "inspect",
         &json!({"bank": support::BANK, "item_id": item_id, "query": query}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(out["ok"], json!(true), "{out}");
     out["supersession"].clone()
@@ -221,10 +222,11 @@ fn a_two_hit_supersession_page_is_zero_write_through_the_twin() {
     // Evidence of the pre-existing retrieve behavior the twin replaces on the
     // report's path only: the shared retriever, called directly through the
     // `retrieve` tool on the same page size, still writes.
-    let evidence = dispatch(
+    let evidence = dispatch_in_scope(
         &state,
         "retrieve",
         &json!({"bank": support::BANK, "query": "deploy cadence"}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(evidence["ok"], json!(true), "{evidence}");
     assert_eq!(evidence["pairs_reinforced"], json!(1), "{evidence}");

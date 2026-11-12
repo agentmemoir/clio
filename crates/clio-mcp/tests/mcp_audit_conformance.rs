@@ -38,7 +38,7 @@ fn fresh_state() -> Arc<McpState> {
 }
 
 fn seed(state: &McpState) {
-    let out = write_tools::dispatch(
+    let out = write_tools::dispatch_in_scope(
         state,
         "store",
         &json!({
@@ -48,6 +48,7 @@ fn seed(state: &McpState) {
             "source_text": "The meeting is at 2pm (1 note since 2024-01-01).",
             "bank": BANK, "actor": "agent", "timestamp": TS
         }),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(out["ok"], json!(true), "seed: {out}");
 }

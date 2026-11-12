@@ -39,7 +39,7 @@ fn json_of(text: &str) -> Value {
 fn state_with_one_item() -> Arc<McpState> {
     let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
         .expect("state");
-    let stored = clio_mcp::write_tools::dispatch(
+    let stored = clio_mcp::write_tools::dispatch_in_scope(
         &state,
         "store",
         &json!({
@@ -56,6 +56,7 @@ fn state_with_one_item() -> Arc<McpState> {
             "actor": "agent",
             "timestamp": "2024-01-01T00:00:00Z"
         }),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(stored["ok"], json!(true), "{stored}");
     state
@@ -87,7 +88,7 @@ fn a_discarded_item_reports_discarded_on_get_and_show() {
     assert_eq!(code, ExitCode::from(0));
     assert_eq!(json_of(&out)["discarded"], json!(false), "{out}");
 
-    let discarded = clio_mcp::write_tools::dispatch(
+    let discarded = clio_mcp::write_tools::dispatch_in_scope(
         &state,
         "discard",
         &json!({
@@ -97,6 +98,7 @@ fn a_discarded_item_reports_discarded_on_get_and_show() {
             "confirm": true,
             "timestamp": "2024-02-01T00:00:00Z"
         }),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(discarded["ok"], json!(true), "{discarded}");
 

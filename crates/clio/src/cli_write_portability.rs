@@ -358,7 +358,12 @@ fn review_export_write(io: &CliIo, parsed: &ParsedArgs) -> Result<(), CliError> 
     if let Some(cursor) = parsed.value("cursor") {
         args.insert("cursor".into(), Value::from(cursor));
     }
-    let payload = clio_mcp::write_tools::dispatch(&state, "review_export", &Value::Object(args));
+    let payload = clio_mcp::write_tools::dispatch_in_scope(
+        &state,
+        "review_export",
+        &Value::Object(args),
+        clio_mcp::ToolScope::Bound,
+    );
     if payload.get("ok").and_then(Value::as_bool) == Some(true) {
         return Ok(());
     }

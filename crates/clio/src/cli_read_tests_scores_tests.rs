@@ -89,10 +89,11 @@ fn recall_json_scores_match_mcp_retrieve() {
 
     // The CLI recall path and this call share the dispatcher, so comparing the
     // two payloads proves the CLI passes the score values through unchanged.
-    let mcp = clio_mcp::write_tools::dispatch(
+    let mcp = clio_mcp::write_tools::dispatch_in_scope(
         &state,
         "retrieve",
         &json!({"bank": "bank-a", "query": "terse"}),
+        clio_mcp::ToolScope::Advertised,
     );
     let mcp_hits = mcp["hits"].as_array().expect("mcp hits");
     assert_eq!(cli_hits.len(), mcp_hits.len(), "same hits on both bindings");
@@ -195,10 +196,11 @@ fn recall_json_semantic_is_populated_with_live_embedder() {
 
     // Binding parity on the populated case: the MCP `retrieve` dispatch shares
     // the store, so the same item reports the same raw `semantic`.
-    let mcp = clio_mcp::write_tools::dispatch(
+    let mcp = clio_mcp::write_tools::dispatch_in_scope(
         &state,
         "retrieve",
         &json!({"bank": "bank-a", "query": "terse answers"}),
+        clio_mcp::ToolScope::Advertised,
     );
     let twin = mcp["hits"]
         .as_array()

@@ -55,7 +55,9 @@ pub(crate) struct Staged {
     pub(crate) admission_score: Option<f64>,
 }
 
-/// `batch(operations, dry_run?)`: atomic multi-mutation of Core write tools.
+/// `batch(operations, dry_run?)`: atomic multi-mutation of Core write tools,
+/// through the advertised view for in-crate tests that name no scope.
+#[cfg(test)]
 #[must_use]
 pub fn batch_tool(state: &McpState, args: &Value) -> Value {
     batch_tool_in_scope(state, args, crate::tools_page::ToolScope::Advertised)

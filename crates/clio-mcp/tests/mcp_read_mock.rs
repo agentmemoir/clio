@@ -48,7 +48,7 @@ fn seed_state() -> Arc<McpState> {
         ("m-1", "task_spec", "terse answers m-1"),
         ("m-2", "persona", "terse answers m-2"),
     ] {
-        let out = clio_mcp::write_tools::dispatch(
+        let out = clio_mcp::write_tools::dispatch_in_scope(
             &state,
             "store",
             &json!({
@@ -58,6 +58,7 @@ fn seed_state() -> Arc<McpState> {
                 "source_text": format!("The user prefers {gist} (1 note since 2024-01-01)."),
                 "bank": BANK, "actor": "agent", "timestamp": TS
             }),
+            clio_mcp::ToolScope::Advertised,
         );
         assert_eq!(out["ok"], json!(true), "seed {id}: {out}");
         state

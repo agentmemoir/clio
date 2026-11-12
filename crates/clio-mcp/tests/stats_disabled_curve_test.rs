@@ -30,7 +30,7 @@
 
 use clio_mcp::protocol::McpHandler;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -134,10 +134,11 @@ fn item(id: &str, created: &str) -> MemoryItem {
 /// false, so the stats call below runs against a truly disabled curve.
 fn curve_off_state_with_rows() -> Fixture {
     let fx = Fixture::new();
-    let held = dispatch(
+    let held = dispatch_in_scope(
         &fx,
         "retention_profile_set",
         &json!({"bank": BANK, "profile": {"retention_curve": false}, "confirm": true}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(held["ok"], json!(true), "{held}");
     let raw = std::fs::read_to_string(&fx.store_path).expect("the fixture-owned store file");

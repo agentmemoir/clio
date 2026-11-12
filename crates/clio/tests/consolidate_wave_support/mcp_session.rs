@@ -1,6 +1,8 @@
 // Copyright 2026 Agent Memoir (https://agentmemoir.com/)
 // SPDX-License-Identifier: Apache-2.0
-
+//
+//! # Responsibility
+//!
 //! This module is responsible for one long-lived `clio mcp stdio` child and the
 //! JSON-RPC conversation a harness holds with it.
 //!

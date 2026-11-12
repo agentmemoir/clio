@@ -83,10 +83,9 @@ struct Cursor {
 /// A client sees the view `tools/list` advertises. The command line names its
 /// own verbs and serves the whole bound catalogue, so its dispatch is bounded
 /// by that catalogue and not by a listing it never asks for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum ToolScope {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolScope {
     /// The view `tools/list` advertises, which bounds a client's `tools/call`.
-    #[default]
     Advertised,
     /// The whole bound catalogue, which the command line dispatches against.
     Bound,

@@ -8,7 +8,7 @@ use clio::retention::{RETENTION_PROFILE_VERSION, RetentionProfile, Verbosity};
 use clio::{Runtime, ToolResult};
 use clio_mcp::retention_tools::MAX_PREVIEW_BATCH;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use serde_json::{Value, json};
 use std::process::Command;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ fn clio_bin() -> Command {
 
 #[allow(clippy::needless_pass_by_value)]
 fn call(state: &McpState, name: &str, args: Value) -> Value {
-    dispatch(state, name, &args)
+    dispatch_in_scope(state, name, &args, clio_mcp::ToolScope::Advertised)
 }
 
 /// Routine status candidate with no snapshot: only the text drives the score.

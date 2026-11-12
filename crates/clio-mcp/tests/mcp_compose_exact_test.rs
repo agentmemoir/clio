@@ -30,7 +30,7 @@
 //! Keep this module focused on the composed pack under a fidelity channel.
 
 use clio_mcp::runtime::{McpOpenOptions, McpState};
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use clio_retrieve::{EXACT_RENDER_MAX_BYTES, PACK_OVERHEAD_TOKENS, REFERENCE_MARKER};
 use clio_types::{EpisodicType, EpistemicKind, ItemKind, MemoryItem};
 use serde_json::{Value, json};
@@ -94,17 +94,18 @@ impl Fixture {
     /// Switch the retention curve off in the fixture-owned profile, so the
     /// packed page never depends on the host clock.
     fn curve_off(&self) {
-        let held = dispatch(
+        let held = dispatch_in_scope(
             &self.state,
             "retention_profile_set",
             &json!({"bank": BANK, "profile": {"retention_curve": false}, "confirm": true}),
+            clio_mcp::ToolScope::Advertised,
         );
         assert_eq!(held["ok"], json!(true), "{held}");
     }
 
     /// Set the bank's stored pack channel in the fixture-owned profile.
     fn bank_channel(&self, channel: &str) {
-        let held = dispatch(
+        let held = dispatch_in_scope(
             &self.state,
             "retention_profile_set",
             &json!({
@@ -112,6 +113,7 @@ impl Fixture {
                 "profile": {"retention_curve": false, "pack_fidelity_default": channel},
                 "confirm": true
             }),
+            clio_mcp::ToolScope::Advertised,
         );
         assert_eq!(held["ok"], json!(true), "{held}");
     }
@@ -201,7 +203,12 @@ fn compose(state: &McpState, channel: Option<&str>, budget: usize) -> Value {
     if let Some(channel) = channel {
         args["fidelity"] = json!(channel);
     }
-    let pack = dispatch(state, "compose_context", &args);
+    let pack = dispatch_in_scope(
+        state,
+        "compose_context",
+        &args,
+        clio_mcp::ToolScope::Advertised,
+    );
     assert_eq!(pack["ok"], json!(true), "{pack}");
     pack
 }

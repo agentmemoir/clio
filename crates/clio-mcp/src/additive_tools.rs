@@ -282,7 +282,12 @@ fn shared_args(state: &McpState, name: &str, args: &Value) -> Result<Value, AmEr
 /// `shared_store(...)`: gated write into the dedicated shared bank.
 fn shared_store(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let shared = shared_args(state, "shared_store", args)?;
-    Ok(crate::write_tools::dispatch(state, "store", &shared))
+    Ok(crate::write_tools::dispatch_in_scope(
+        state,
+        "store",
+        &shared,
+        crate::tools_page::ToolScope::Advertised,
+    ))
 }
 
 /// `shared_retrieve(query, ...)`: hybrid search scoped to the shared bank.
@@ -296,7 +301,12 @@ fn shared_retrieve(state: &McpState, args: &Value) -> Result<Value, AmError> {
 /// shared bank (telemetry written by the discard path).
 fn shared_discard(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let shared = shared_args(state, "shared_discard", args)?;
-    Ok(crate::write_tools::dispatch(state, "discard", &shared))
+    Ok(crate::write_tools::dispatch_in_scope(
+        state,
+        "discard",
+        &shared,
+        crate::tools_page::ToolScope::Advertised,
+    ))
 }
 
 /// `validate(item_id, action, note?, new_content?)`: reviewer loop routing.

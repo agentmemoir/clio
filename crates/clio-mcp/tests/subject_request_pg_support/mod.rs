@@ -39,7 +39,7 @@
 use clio_compliance::subject_request_store_wiring::{record_to_row, row_to_record};
 use clio_compliance::{PeerState, ProtectedAction};
 use clio_mcp::runtime::{McpOpenOptions, McpState};
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use clio_store::{
     LocalEventIntent, LocalEventStore, LocalEventView, PeerActionBinding, PeerActionKind,
 };
@@ -195,7 +195,7 @@ impl LocalEventStore for FailingOutcomeEvents {
 /// Route one subject-request tool call through the in-process dispatcher.
 #[allow(clippy::needless_pass_by_value)]
 pub fn call(state: &McpState, name: &str, args: Value) -> Value {
-    dispatch(state, name, &args)
+    dispatch_in_scope(state, name, &args, clio_mcp::ToolScope::Advertised)
 }
 
 /// Store one item for `subject` in `bank`, so an erasure has work to do.

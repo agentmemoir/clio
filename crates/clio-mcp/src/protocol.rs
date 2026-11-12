@@ -152,7 +152,8 @@ impl McpHandler {
     }
 
     /// The full bound write + read set, which the argument contract reads;
-    /// `tools/list` and dispatch both read the profile-narrowed view.
+    /// `tools/list` and a client's `tools/call` read the profile-narrowed view,
+    /// while the command line's verb dispatch reads the bound catalogue.
     #[must_use]
     pub fn tools_list() -> Value {
         let bound = bound_set();
