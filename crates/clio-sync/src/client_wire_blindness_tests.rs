@@ -264,7 +264,9 @@ fn a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key() {
 /// idempotency key a plaintext deployment has always stored, so every existing
 /// redelivery check against a stored row still matches. The relay refuses
 /// plaintext content, so each such row reaches the relay's dead-letter journal
-/// instead of its sync journal, and the id recorded there is that unkeyed key.
+/// instead of its sync journal, and the id recorded there is that unkeyed key,
+/// checked against the fixture identifier its own shape names, as is the wire
+/// entity id in the same envelope.
 #[test]
 fn plaintext_mode_stores_the_plain_idempotency_key() {
     let (server, srv, _kms) = serve(&["bp"]);
