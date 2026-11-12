@@ -42,6 +42,7 @@ use crate::apply_records;
 use crate::clock::now_utc;
 use crate::denial::DenialProof;
 use crate::journal_row::journal_row as build_journal_row;
+use crate::legacy_tags::content_hash_seen;
 use crate::protocol::{
     ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM, ENTITY_KIND_PERSONA,
     ENTITY_KIND_TASK, ENTITY_KIND_TRIPLE, OP_DISCARD, OP_INVALIDATE, OP_PRUNE, OP_REINFORCE,
@@ -365,37 +366,6 @@ fn dead_letter_acked(engine: &ApplyEngine<'_>, m: &SyncMutation) -> Result<bool,
         }
     }
     Ok(false)
-}
-
-/// Whether a stored row with the same identity and op already carries this
-/// content's digest in the other accepted form.
-///
-/// The caller already probed the stored rows for the incoming digest. A journal
-/// written by an older build holds the v1 digest while a newer one holds v2, so
-/// only the remaining form is probed here. The probe is the same guarded lookup
-/// the caller used, which keeps the read on the existing `SyncStore` surface.
-fn content_hash_seen(engine: &ApplyEngine<'_>, m: &SyncMutation) -> Result<bool, AmError> {
-    if !matches!(m.content, SyncContent::Plain(_)) {
-        return Ok(false);
-    }
-    let text = serde_json::to_string(m.content_value()).unwrap_or_default();
-    // The incoming hash must be a valid form of this content. A caller that
-    // deliberately sends a different hash still takes the ordinary path.
-    if !crate::keyed_roles::content_digest_matches(None, &text, &m.content_hash) {
-        return Ok(false);
-    }
-    let current = crate::keyed_roles::content_digest(None, &text);
-    let other = if m.content_hash == current {
-        crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::PLAINTEXT_DIGEST, &text).ok()
-    } else {
-        Some(current)
-    };
-    let Some(other) = other else {
-        return Ok(false);
-    };
-    engine
-        .sync
-        .journal_apply_guard_hit(&m.bank, &m.entity_kind, &m.entity_id, &m.op, &other)
 }
 
 /// The admission score one origin receipt carries, read tolerantly: a missing

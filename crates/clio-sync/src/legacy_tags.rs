@@ -10,6 +10,7 @@
 //! ## Owns
 //! - Parsing the checked-in tag data file
 //! - Looking one tag up by name
+//! - The legacy-aware digest probe the apply guard consults
 //!
 //! ## Does not own
 //! - The v2 domain tags (see `clio_store::erase_hash`)
@@ -21,6 +22,10 @@
 //! the data file. Changes to how a v2 digest is built should not.
 
 use std::sync::OnceLock;
+
+use crate::apply::ApplyEngine;
+use crate::protocol::{SyncContent, SyncMutation};
+use clio_types::AmError;
 
 /// The checked-in legacy tag data: one `name<TAB>value` row per tag.
 const LEGACY_TAGS_TSV: &str = include_str!("../assets/legacy_domain_tags.tsv");
@@ -96,6 +101,40 @@ pub(crate) fn legacy_tag(name: &str) -> Result<&'static str, String> {
 /// The data file is malformed, or it has no row with that name.
 pub(crate) fn legacy_sha256_hex(name: &str, value: &str) -> Result<String, String> {
     Ok(clio_store::sha256_hex(legacy_tag(name)?.as_bytes(), value))
+}
+
+/// Whether a stored row with the same identity and op already carries this
+/// content's digest in the other accepted form.
+///
+/// The caller already probed the stored rows for the incoming digest. A journal
+/// written by an older build holds the v1 digest while a newer one holds v2, so
+/// only the remaining form is probed here. The probe is the same guarded lookup
+/// the caller used, which keeps the read on the existing `SyncStore` surface.
+pub(crate) fn content_hash_seen(
+    engine: &ApplyEngine<'_>,
+    m: &SyncMutation,
+) -> Result<bool, AmError> {
+    if !matches!(m.content, SyncContent::Plain(_)) {
+        return Ok(false);
+    }
+    let text = serde_json::to_string(m.content_value()).unwrap_or_default();
+    // The incoming hash must be a valid form of this content. A caller that
+    // deliberately sends a different hash still takes the ordinary path.
+    if !crate::keyed_roles::content_digest_matches(None, &text, &m.content_hash) {
+        return Ok(false);
+    }
+    let current = crate::keyed_roles::content_digest(None, &text);
+    let other = if m.content_hash == current {
+        legacy_sha256_hex(PLAINTEXT_DIGEST, &text).ok()
+    } else {
+        Some(current)
+    };
+    let Some(other) = other else {
+        return Ok(false);
+    };
+    engine
+        .sync
+        .journal_apply_guard_hit(&m.bank, &m.entity_kind, &m.entity_id, &m.op, &other)
 }
 
 #[cfg(test)]
