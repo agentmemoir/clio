@@ -89,7 +89,7 @@ fn the_content_digest_without_a_cipher_is_the_plain_hash() {
     let plain = content_digest(None, content);
     assert_eq!(
         plain,
-        clio_store::sha256_hex(b"am-sync-hash", content),
+        clio_store::sha256_hex(crate::keyed_roles::published_digest_salt(), content),
         "plaintext mode keeps the pre-keyed value byte for byte"
     );
     assert_eq!(plain.len(), 64, "an unkeyed SHA-256 is 64 hex characters");
