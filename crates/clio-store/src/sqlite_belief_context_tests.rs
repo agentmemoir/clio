@@ -225,11 +225,11 @@ fn correction_detail_records_reason_prior_and_new_stats_only() {
     assert_eq!(value["context_len"], 3);
     assert_eq!(
         value["prior_context_hash"],
-        crate::erase_hash::sha256_hex(crate::belief_store::BELIEF_CONTEXT_HASH_DOMAIN, "oat milk")
+        crate::erase_hash::domain_sha256_hex(crate::erase_hash::Domain::BeliefContext, "oat milk")
     );
     assert_eq!(
         value["context_hash"],
-        crate::erase_hash::sha256_hex(crate::belief_store::BELIEF_CONTEXT_HASH_DOMAIN, "soy")
+        crate::erase_hash::domain_sha256_hex(crate::erase_hash::Domain::BeliefContext, "soy")
     );
     // Hash-only stats — no sealed cipher, no raw plaintext.
     assert!(
@@ -294,8 +294,8 @@ fn sqlite_belief_context_correction_changes_only_context() {
     assert_eq!(value["prior_context_len"], "original context".len());
     assert_eq!(
         value["prior_context_hash"],
-        crate::erase_hash::sha256_hex(
-            crate::belief_store::BELIEF_CONTEXT_HASH_DOMAIN,
+        crate::erase_hash::domain_sha256_hex(
+            crate::erase_hash::Domain::BeliefContext,
             "original context"
         )
     );

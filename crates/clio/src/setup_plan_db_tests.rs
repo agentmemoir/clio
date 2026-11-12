@@ -221,19 +221,23 @@ fn a_managed_address_that_the_driver_refuses_is_not_returned() {
 
 #[test]
 fn a_typed_password_is_percent_encoded() {
+    let suffix = format!("{:016x}", rand::random::<u64>());
+    let password = format!("a b&c={suffix}");
     let address = typed_address(
         "h",
         "5432",
         "clio",
         "clio",
-        "a b&c=d",
+        &password,
         SslChoice::Prefer,
         None,
         &[],
     )
     .expect("assembles");
     assert!(
-        address.starts_with("postgres://clio:a%20b%26c%3Dd@h:5432/clio?"),
+        address.starts_with(&format!(
+            "postgres://clio:a%20b%26c%3D{suffix}@h:5432/clio?"
+        )),
         "{address}"
     );
 }

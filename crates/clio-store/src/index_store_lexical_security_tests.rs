@@ -291,10 +291,12 @@ fn bare_hash_dictionary_recovers_no_stored_digest() {
     let mut dictionary: Vec<String> = COMMON_WORDS.iter().map(|w| (*w).to_owned()).collect();
     dictionary.extend(DOC.split_whitespace().map(|w| w.to_lowercase()));
 
+    // The same fixed salt for every word, generated for this run. A fixed-salt
+    // unkeyed hash is still reversible by a dictionary.
+    let fixed_salt: [u8; 16] = rand::random();
     for word in &dictionary {
         let bare = bare_sha256_hex(word.as_bytes());
-        // A fixed-salt unkeyed hash is still reversible by a dictionary.
-        let fixed_salt = crate::erase_hash::sha256_hex(b"", word);
+        let fixed_salt_hash = crate::erase_hash::sha256_hex(&fixed_salt, word);
         for digest in &digests {
             // Compare the digest body, with the letter prefix removed: a
             // 33-char term never equals a 32- or 64-char hash, so comparing
@@ -318,12 +320,13 @@ fn bare_hash_dictionary_recovers_no_stored_digest() {
                 "stored digest is a prefix of the bare SHA-256 of `{word}`"
             );
             assert_ne!(
-                body, fixed_salt,
+                body,
+                fixed_salt_hash.as_str(),
                 "fixed-salt SHA-256 of `{word}` matched the stored digest"
             );
             assert_ne!(
                 body,
-                &fixed_salt[..crate::lexical_digest::DIGEST_HEX_LEN],
+                &fixed_salt_hash[..crate::lexical_digest::DIGEST_HEX_LEN],
                 "stored digest is a prefix of the fixed-salt SHA-256 of `{word}`"
             );
         }

@@ -189,8 +189,8 @@ fn a_real_binary_encrypted_push_leaves_the_relay_nothing_to_read() {
     // The stored idempotency key is not the published unkeyed hash of a guess.
     // The relay already holds the stamp that preimage needs, so one comparison
     // would confirm the attribute name if the key were that hash.
-    let oracle = clio_store::sha256_hex(
-        b"am-sync-mut",
+    let oracle = clio_store::domain_sha256_hex(
+        clio_store::Domain::PlaintextMutationId,
         &format!("{ATTR_NAME}|{}|{}", sealed.transaction_time, sealed.op),
     );
     assert_ne!(
@@ -199,7 +199,7 @@ fn a_real_binary_encrypted_push_leaves_the_relay_nothing_to_read() {
     );
     assert_ne!(
         sealed.content_hash,
-        clio_store::sha256_hex(b"am-sync-hash", ATTR_NAME),
+        clio_store::domain_sha256_hex(clio_store::Domain::PlaintextDigest, ATTR_NAME),
         "and the stored digest is not the hash of the guessed value either"
     );
 

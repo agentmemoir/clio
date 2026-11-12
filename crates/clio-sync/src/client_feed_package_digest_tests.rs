@@ -63,10 +63,7 @@ fn plaintext_mode_keeps_the_plain_digest() {
     };
     assert_eq!(
         digest,
-        clio_store::sha256_hex(
-            b"am-sync-hash",
-            &serde_json::to_string(value).expect("text")
-        ),
+        crate::keyed_roles::content_digest(None, &serde_json::to_string(value).expect("text")),
         "the digest is the unkeyed hash of the same serialized plaintext"
     );
     assert_eq!(digest.len(), 64, "a full SHA-256 hex digest");

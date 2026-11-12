@@ -22,9 +22,10 @@
 //!
 //! Keep this module focused on shared-Postgres belief context coverage.
 
+use crate::belief_store::BeliefStore;
 use crate::belief_store::belief_store_belief_tests::mk_belief;
-use crate::belief_store::{BELIEF_CONTEXT_HASH_DOMAIN, BeliefStore};
 use crate::dek::{DekProvider, LocalDevKms};
+use crate::erase_hash::{Domain, domain_sha256_hex};
 use crate::migrate::IntoAmError;
 use crate::postgres::PostgresStore;
 use crate::test_unique::unique;
@@ -145,7 +146,7 @@ fn postgres_belief_context_create_append_and_audit_parity() {
     );
     assert_eq!(
         create["context_hash"],
-        crate::sha256_hex(BELIEF_CONTEXT_HASH_DOMAIN, belief.context.as_ref().unwrap(),)
+        domain_sha256_hex(Domain::BeliefContext, belief.context.as_ref().unwrap())
     );
     // Plain append preserved the context: no context telemetry was added.
     let plain: serde_json::Value = serde_json::from_str(&rows[1]).unwrap();
@@ -156,7 +157,7 @@ fn postgres_belief_context_create_append_and_audit_parity() {
     assert_eq!(observed["context_len"], "prefer oat milk at home".len());
     assert_eq!(
         observed["context_hash"],
-        crate::sha256_hex(BELIEF_CONTEXT_HASH_DOMAIN, "prefer oat milk at home")
+        domain_sha256_hex(Domain::BeliefContext, "prefer oat milk at home")
     );
     let all = rows.join("\n");
     assert!(!all.contains("prefer oat milk"), "{all}");
@@ -293,7 +294,7 @@ fn postgres_belief_context_correction_parity() {
     assert_eq!(value["prior_context_len"], "original context".len());
     assert_eq!(
         value["prior_context_hash"],
-        crate::sha256_hex(BELIEF_CONTEXT_HASH_DOMAIN, "original context")
+        domain_sha256_hex(Domain::BeliefContext, "original context")
     );
     assert_eq!(value["context_len"], "corrected context".len());
     assert!(!row.2.contains("original context"));

@@ -286,15 +286,14 @@ fn plaintext_mode_stores_the_plain_idempotency_key() {
         }
         persona += 1;
         let key_is_attr = wire.sync_mutation_id
-            == clio_store::sha256_hex(
-                b"am-sync-mut",
-                &format!("{}|{}|upsert", wire.entity_id, wire.transaction_time),
+            == crate::keyed_roles::mutation_id(
+                None,
+                &wire.entity_id,
+                &wire.transaction_time,
+                "upsert",
             );
         let key_is_pref = wire.sync_mutation_id
-            == clio_store::sha256_hex(
-                b"am-sync-mut",
-                &format!("{}|{}|upsert", PREF_NAME, wire.transaction_time),
-            );
+            == crate::keyed_roles::mutation_id(None, PREF_NAME, &wire.transaction_time, "upsert");
         assert!(
             key_is_attr || key_is_pref,
             "plaintext mode records the unkeyed hash of the real identifier: {}",
