@@ -313,7 +313,7 @@ fn plaintext_mode_stores_the_plain_idempotency_key() {
         assert_eq!(
             wire.sync_mutation_id,
             clio_store::sha256_hex(
-                b"am-sync-mut",
+                crate::keyed_roles::published_mutation_id_salt(),
                 &format!("{expected}|{}|upsert", wire.transaction_time),
             ),
             "plaintext mode records the unkeyed hash of the real identifier: {}",
