@@ -172,6 +172,8 @@ fn a_live_server_answers_under_each_credential_class() {
         "127.0.0.1:0",
         "--token-file",
         store.path(),
+        "--tools",
+        "custom:item-write,portability",
     ]);
     assert_ne!(server.port, 0, "the server must announce a port");
     let port = server.port;
@@ -263,6 +265,8 @@ fn a_credential_removed_from_the_store_is_401_at_the_next_start() {
         "127.0.0.1:0",
         "--token-file",
         store.path(),
+        "--tools",
+        "custom:item-write,portability",
     ]);
     assert_ne!(first.port, 0, "the server must announce a port");
     let (status, body) = post(first.port, &probe, &bearer(&removed));
@@ -287,6 +291,8 @@ fn a_credential_removed_from_the_store_is_401_at_the_next_start() {
         "127.0.0.1:0",
         "--token-file",
         store.path(),
+        "--tools",
+        "custom:item-write,portability",
     ]);
     assert_ne!(second.port, 0, "the server must announce a port");
 
@@ -339,6 +345,8 @@ fn insecure_no_auth_keeps_the_credential_free_loopback_server() {
         "--bind",
         "127.0.0.1:0",
         "--insecure-no-auth",
+        "--tools",
+        "custom:item-write,portability",
     ]);
     assert_ne!(server.port, 0, "the server must announce a port");
     let body = call(

@@ -61,7 +61,14 @@ impl McpSession {
     pub fn open(f: &Fixture) -> Self {
         let mut child = f
             .command_for(&["mcp", "stdio", "--bank", BANK])
-            .args(["mcp", "stdio", "--bank", BANK])
+            .args([
+                "mcp",
+                "stdio",
+                "--bank",
+                BANK,
+                "--tools",
+                "custom:item-read,ranking",
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

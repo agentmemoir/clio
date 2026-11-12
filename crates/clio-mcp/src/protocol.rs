@@ -115,7 +115,9 @@ impl McpHandler {
     ///
     /// The CLI advertises no listing: every verb it runs is named by its own
     /// command tree, so the advertised-view check that guards a client's
-    /// `tools/call` has nothing to compare against and does not run. A name
+    /// `tools/call` has nothing to compare against and does not run. The
+    /// dispatch carries the bound catalogue instead, so a tool body that gates
+    /// on the view reads the same catalogue this entry point serves. A name
     /// this build does not bind is still refused, so the exemption admits the
     /// catalog, not any string. The argument contract and the tool body are the
     /// same as a `tools/call`, and the return value is the same JSON-RPC
@@ -124,7 +126,7 @@ impl McpHandler {
     pub fn handle_cli_verb(&self, name: &str, args: &Value) -> Value {
         let id = json!(1);
         let result = if bound_set().contains(&name) {
-            Self::execute_tool_call(&self.state, name, args)
+            Self::execute_tool_call(&self.state, name, args, crate::tools_page::ToolScope::Bound)
         } else {
             Err(unknown_tool(name))
         };
@@ -225,10 +227,14 @@ impl McpHandler {
         if !view.advertises(name) {
             return Err(unknown_tool(name));
         }
-        Self::execute_tool_call(state, name, args)
+        Self::execute_tool_call(state, name, args, crate::tools_page::ToolScope::Advertised)
     }
 
     /// Run one tool call and shape the result into a `tools/call` response.
+    ///
+    /// `scope` is the catalogue this dispatch is bounded by, and every inner
+    /// check reads it, so a nested tool cannot see a different view from the
+    /// entry point that admitted it.
     ///
     /// # Errors
     /// A recursion refusal, a contract refusal, or a durable handoff error.
@@ -236,6 +242,7 @@ impl McpHandler {
         state: &McpState,
         name: &str,
         args: &Value,
+        scope: crate::tools_page::ToolScope,
     ) -> Result<Value, RpcError> {
         // Refused here too, so an indirect chain cannot bypass the check.
         if let Some(err) = crate::catalog_invoke::recursion_refusal(name) {
@@ -245,7 +252,7 @@ impl McpHandler {
         // refused here. Before this check it was dropped, and the write went on.
         let result = match crate::arg_contract::check(name, args) {
             Ok(()) => {
-                let result = crate::write_tools::dispatch(state, name, args);
+                let result = crate::write_tools::dispatch_in_scope(state, name, args, scope);
                 // Only a call the handler answered is counted: a call the
                 // contract refused never reached a tool.
                 state.calls.record(name);
