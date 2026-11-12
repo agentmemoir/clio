@@ -324,18 +324,25 @@ fn stored_v1_content_digest_still_satisfies_the_apply_guard() {
     .expect("legacy tag data");
     assert_eq!(apply(&store, None, &original), ApplyOutcome::Applied);
 
-    let mut replay = original.clone();
+    let mut replay = original;
     replay.sync_mutation_id = "m-v2-hash".into();
     replay.content_hash = v2_content_hash(&replay);
 
     assert_eq!(apply(&store, None, &replay), ApplyOutcome::Duplicate);
     assert_eq!(store.journal_max_seq(bank).expect("max seq"), 1);
-    assert_eq!(
+    assert!(
         store
-            .journal_content_hashes(bank, ENTITY_KIND_ITEM, "i-1", OP_UPSERT)
-            .expect("hashes")
-            .len(),
-        1
+            .journal_get(bank, "m-v1-hash")
+            .expect("journal read")
+            .is_some(),
+        "the journal keeps the v1 row",
+    );
+    assert!(
+        store
+            .journal_get(bank, "m-v2-hash")
+            .expect("journal read")
+            .is_none(),
+        "the duplicate writes no second row",
     );
 }
 

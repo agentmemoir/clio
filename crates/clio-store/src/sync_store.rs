@@ -90,22 +90,6 @@ pub trait SyncStore: Send + Sync {
         content_hash: &str,
     ) -> Result<bool, AmError>;
 
-    /// Every stored content hash for the same `(entity_kind, entity_id, op)`
-    /// in the bank.
-    ///
-    /// The apply guard compares a stored value, not the incoming one, so it can
-    /// accept a hash written under either domain form.
-    ///
-    /// # Errors
-    /// Storage failures.
-    fn journal_content_hashes(
-        &self,
-        bank_id: &str,
-        entity_kind: &str,
-        entity_id: &str,
-        op: &str,
-    ) -> Result<Vec<String>, AmError>;
-
     /// Read the stored opaque cursor token for `(bank, peer_label)`.
     ///
     /// # Errors

@@ -40,3 +40,29 @@ fn a_missing_row_is_a_clear_error() {
     let err = legacy_tag("no-such-tag").expect_err("unknown row is refused");
     assert!(err.contains("no-such-tag"), "{err}");
 }
+
+#[test]
+fn a_line_without_a_tab_separator_is_refused() {
+    let err = super::parse("plaintext_digest no-tab\n").expect_err("no separator is refused");
+    assert!(err.contains("line 1"), "{err}");
+}
+
+#[test]
+fn an_empty_field_is_refused() {
+    let no_value = super::parse("plaintext_digest\t\n").expect_err("empty value is refused");
+    assert!(no_value.contains("line 1"), "{no_value}");
+    let no_name = super::parse("\tvalue\n").expect_err("empty name is refused");
+    assert!(no_name.contains("line 1"), "{no_name}");
+}
+
+#[test]
+fn a_file_with_no_rows_is_refused() {
+    let err = super::parse("# only a comment\n\n").expect_err("no rows is refused");
+    assert!(err.contains("no rows"), "{err}");
+}
+
+#[test]
+fn blank_and_comment_lines_and_carriage_returns_are_skipped() {
+    let rows = super::parse("# comment\r\n\r\nplaintext_digest\tvalue\r\n").expect("rows");
+    assert_eq!(rows, vec![("plaintext_digest", "value")]);
+}

@@ -368,7 +368,12 @@ fn dead_letter_acked(engine: &ApplyEngine<'_>, m: &SyncMutation) -> Result<bool,
 }
 
 /// Whether a stored row with the same identity and op already carries this
-/// content's digest under either form.
+/// content's digest in the other accepted form.
+///
+/// The caller already probed the stored rows for the incoming digest. A journal
+/// written by an older build holds the v1 digest while a newer one holds v2, so
+/// only the remaining form is probed here. The probe is the same guarded lookup
+/// the caller used, which keeps the read on the existing `SyncStore` surface.
 fn content_hash_seen(engine: &ApplyEngine<'_>, m: &SyncMutation) -> Result<bool, AmError> {
     if !matches!(m.content, SyncContent::Plain(_)) {
         return Ok(false);
@@ -379,11 +384,18 @@ fn content_hash_seen(engine: &ApplyEngine<'_>, m: &SyncMutation) -> Result<bool,
     if !crate::keyed_roles::content_digest_matches(None, &text, &m.content_hash) {
         return Ok(false);
     }
-    let sync = engine.sync;
-    let stored = sync.journal_content_hashes(&m.bank, &m.entity_kind, &m.entity_id, &m.op)?;
-    Ok(stored
-        .iter()
-        .any(|hash| crate::keyed_roles::content_digest_matches(None, &text, hash)))
+    let current = crate::keyed_roles::content_digest(None, &text);
+    let other = if m.content_hash == current {
+        crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::PLAINTEXT_DIGEST, &text).ok()
+    } else {
+        Some(current)
+    };
+    let Some(other) = other else {
+        return Ok(false);
+    };
+    engine
+        .sync
+        .journal_apply_guard_hit(&m.bank, &m.entity_kind, &m.entity_id, &m.op, &other)
 }
 
 /// The admission score one origin receipt carries, read tolerantly: a missing

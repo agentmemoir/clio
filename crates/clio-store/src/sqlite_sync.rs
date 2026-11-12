@@ -86,16 +86,6 @@ impl SyncStore for SqliteStore {
         )
     }
 
-    fn journal_content_hashes(
-        &self,
-        bank_id: &str,
-        entity_kind: &str,
-        entity_id: &str,
-        op: &str,
-    ) -> Result<Vec<String>, AmError> {
-        state::journal_content_hashes_sqlite(self, bank_id, entity_kind, entity_id, op)
-    }
-
     fn cursor_get(&self, bank_id: &str, peer_label: &str) -> Result<Option<String>, AmError> {
         state::cursor_get_sqlite(self, bank_id, peer_label)
     }

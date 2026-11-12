@@ -127,3 +127,7 @@ fn checksum_str_check(bank: &str, stamp: &str, sum: &str) -> bool {
     crate::legacy_tags::legacy_sha256_hex(crate::legacy_tags::SYNC_WATERMARK, &preimage)
         .is_ok_and(|legacy| legacy[..12] == *sum)
 }
+
+#[cfg(test)]
+#[path = "protocol_tokens_tests.rs"]
+mod protocol_tokens_tests;

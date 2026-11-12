@@ -32,6 +32,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
 };
 use std::collections::HashSet;
+use std::fmt::Write as _;
 
 /// Sealing threads for the uniqueness test.
 /// A fixed associated data for the nonce tests: they exercise the AEAD's nonce
@@ -156,9 +157,10 @@ fn ciphertext_sealed_before_the_nonce_change_is_refused() {
         "pre-change-nonce-fixture",
     ));
     // The previous derivation emitted 24 hex-text characters as the nonce.
-    let hex_text_nonce: String = (0..12)
-        .map(|_| format!("{:02x}", rand::random::<u8>()))
-        .collect();
+    let hex_text_nonce = (0..12).fold(String::new(), |mut text, _| {
+        write!(text, "{:02x}", rand::random::<u8>()).expect("writing to a String cannot fail");
+        text
+    });
     assert_eq!(hex_text_nonce.len(), 24, "fixture nonce is 24 bytes");
     assert!(
         hex_text_nonce.as_bytes().iter().all(u8::is_ascii_hexdigit),
