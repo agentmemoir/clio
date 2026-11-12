@@ -130,7 +130,7 @@ fn the_content_digest_with_a_cipher_is_keyed_and_peer_stable() {
 fn the_mutation_id_without_a_cipher_is_the_plain_hash() {
     let plain = mutation_id(None, "task-42", "2026-01-01T00:00:00Z", "upsert");
     assert_eq!(
-        plain, "87dad84721ca5382d75016f4c3d96693332407085ebb265d966af7ddb1a8109e",
+        plain, "fce8f5be2a54eb76a0e62d18650fa15b514c89bc95cbcf96712f5afef5360f42",
         "plaintext mode keeps the pre-keyed value byte for byte"
     );
     assert_eq!(

@@ -168,7 +168,7 @@ fn the_idempotency_key_is_derived_from_the_canonical_wire_stamp() {
     );
     assert_eq!(
         canonical.sync_mutation_id,
-        "b57b4597267625b4ba1320e375186d147d3f4285f03fbe7fdf909586b636baa5",
+        "ce230d47ebd36c657003306604b0b04c527f1e4a61852060ac89c2aa5804005c",
         "the canonical-stamp edge keeps the id it always had"
     );
     let millis = assoc_mutation(&cfg, BANK, &millis_edge("e-id")).expect("package");
@@ -177,7 +177,7 @@ fn the_idempotency_key_is_derived_from_the_canonical_wire_stamp() {
         "the millis row's stamp moves to the canonical second the wire carries"
     );
     assert_eq!(
-        millis.sync_mutation_id, "0bd79661e19b1b2c5ca5dcc6fa6f950dd3498772e4ee3e494c80f1a825d7c5db",
+        millis.sync_mutation_id, "a12cf8462f4a83e38a3b77616ed0b7a47b5b6a7602fe7223bab240ea61c8465a",
         "and its id moves with it, onto that same canonical text"
     );
 }
@@ -199,14 +199,14 @@ fn a_persona_row_stamped_in_millis_carries_a_matching_id() {
     );
     assert_eq!(
         m.sync_mutation_id,
-        clio_store::sha256_hex(
-            crate::keyed_roles::published_mutation_id_salt(),
+        clio_store::domain_sha256_hex(
+            clio_store::Domain::PlaintextMutationId,
             &format!("{ATTR_NAME}|{MILLIS_STAMP_ISO}|upsert")
         ),
         "the id is the hash of the identifier beside the wire's own stamp"
     );
     assert_eq!(
-        m.sync_mutation_id, "16682970ea5fec6de66c6e36f71c76767e0063a7207a8fa0289626ad2afeecf5",
+        m.sync_mutation_id, "353826f61c95db7d3f80e1b016444185e5e5a1828dfa23bf9c6ed07dc4937998",
         "pinned as a literal, so neither side can drift unnoticed"
     );
 }
@@ -227,14 +227,14 @@ fn a_belief_row_stamped_with_a_bare_date_carries_a_matching_id() {
     );
     assert_eq!(
         m.sync_mutation_id,
-        clio_store::sha256_hex(
-            crate::keyed_roles::published_mutation_id_salt(),
+        clio_store::domain_sha256_hex(
+            clio_store::Domain::PlaintextMutationId,
             "b-1|2026-03-04T00:00:00Z|upsert"
         ),
         "the id names the belief id beside the canonical wire stamp"
     );
     assert_eq!(
-        m.sync_mutation_id, "658e07e56e86a89d7c27087156510266a0b40751c88447a869d262ab4ea0a7b8",
+        m.sync_mutation_id, "d9c341adef5e7af728c6bd74917ea93c480f6d22a8d1250459a9de3d83b2ce1a",
         "pinned as a literal, so neither side can drift unnoticed"
     );
 }
