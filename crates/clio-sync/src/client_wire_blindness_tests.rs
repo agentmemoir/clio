@@ -287,12 +287,12 @@ fn plaintext_mode_stores_the_plain_idempotency_key() {
         persona += 1;
         let key_is_attr = wire.sync_mutation_id
             == clio_store::sha256_hex(
-                b"am-sync-mut",
+                crate::keyed_roles::published_mutation_id_salt(),
                 &format!("{}|{}|upsert", wire.entity_id, wire.transaction_time),
             );
         let key_is_pref = wire.sync_mutation_id
             == clio_store::sha256_hex(
-                b"am-sync-mut",
+                crate::keyed_roles::published_mutation_id_salt(),
                 &format!("{}|{}|upsert", PREF_NAME, wire.transaction_time),
             );
         assert!(

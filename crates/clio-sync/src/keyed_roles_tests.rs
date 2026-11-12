@@ -140,6 +140,16 @@ fn the_mutation_id_without_a_cipher_is_the_plain_hash() {
     assert_eq!(plain.len(), 64, "an unkeyed SHA-256 is 64 hex characters");
 }
 
+/// The plaintext idempotency label is wire format: a deployment with no cipher
+/// derives every stored key under these exact bytes, so pin them directly.
+#[test]
+fn published_mutation_id_salt_pins_the_wire_label() {
+    assert_eq!(
+        crate::keyed_roles::published_mutation_id_salt(),
+        b"am-sync-mut"
+    );
+}
+
 /// With a cipher the idempotency key is keyed, peer-stable, and different for a
 /// different record — so a relay cannot hash a guessed identifier and confirm it
 /// against the stored key.
