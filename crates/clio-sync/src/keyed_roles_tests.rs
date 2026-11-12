@@ -150,6 +150,13 @@ fn published_mutation_id_salt_pins_the_wire_label() {
     );
 }
 
+/// The plaintext digest label is wire format: a deployment with no cipher
+/// derives every stored digest under these exact bytes, so pin them directly.
+#[test]
+fn published_digest_salt_pins_the_wire_label() {
+    assert_eq!(crate::keyed_roles::published_digest_salt(), b"am-sync-hash");
+}
+
 /// With a cipher the idempotency key is keyed, peer-stable, and different for a
 /// different record — so a relay cannot hash a guessed identifier and confirm it
 /// against the stored key.
