@@ -26,6 +26,7 @@ use super::HistoryStore;
 use crate::db_url::postgres_url_from_env;
 use crate::dek::{DekProvider, LocalDevKms};
 use crate::erase_hash::sha256_hex;
+use crate::item_persist::CONTEXT_HASH_DOMAIN;
 use crate::pg_lock::lock_pg_test;
 use crate::postgres::PostgresStore;
 use crate::sqlite::SqliteStore;
@@ -185,18 +186,12 @@ fn sqlite_task_audit_rows_carry_context_stats() {
     assert_eq!(v1["context_len"], json!("team chat".len()));
     assert_eq!(
         v1["context_hash"],
-        json!(sha256_hex(
-            crate::item_persist::CONTEXT_HASH_DOMAIN,
-            "team chat"
-        ))
+        json!(sha256_hex(CONTEXT_HASH_DOMAIN, "team chat"))
     );
     assert_eq!(v2["version"], json!(2));
     assert_eq!(
         v2["context_hash"],
-        json!(sha256_hex(
-            crate::item_persist::CONTEXT_HASH_DOMAIN,
-            "standup notes"
-        ))
+        json!(sha256_hex(CONTEXT_HASH_DOMAIN, "standup notes"))
     );
     assert_ne!(v1["context_hash"], v2["context_hash"], "context changed");
     // Ordinary telemetry must not emit raw context the event list is
@@ -249,10 +244,7 @@ fn sqlite_failure_audit_row_carries_context_stats() {
     assert_eq!(detail["context_len"], json!("attempt 1 of 3".len()));
     assert_eq!(
         detail["context_hash"],
-        json!(sha256_hex(
-            crate::item_persist::CONTEXT_HASH_DOMAIN,
-            "attempt 1 of 3"
-        ))
+        json!(sha256_hex(CONTEXT_HASH_DOMAIN, "attempt 1 of 3"))
     );
     assert!(
         !serde_json::to_string(&detail)
@@ -298,17 +290,11 @@ fn sqlite_triple_audit_rows_carry_context_stats() {
     assert_eq!(v1["context_present"], json!(true));
     assert_eq!(
         v1["context_hash"],
-        json!(sha256_hex(
-            crate::item_persist::CONTEXT_HASH_DOMAIN,
-            "Q1 review notes"
-        ))
+        json!(sha256_hex(CONTEXT_HASH_DOMAIN, "Q1 review notes"))
     );
     assert_eq!(
         v2["context_hash"],
-        json!(sha256_hex(
-            crate::item_persist::CONTEXT_HASH_DOMAIN,
-            "Q2 review notes"
-        ))
+        json!(sha256_hex(CONTEXT_HASH_DOMAIN, "Q2 review notes"))
     );
     assert_ne!(v1["context_hash"], v2["context_hash"], "context changed");
     assert!(
@@ -364,17 +350,11 @@ fn pg_history_audit_rows_carry_context_stats() {
     let v2 = detail_of(&store, &bank, &v2_item, "task_upsert");
     assert_eq!(
         v1["context_hash"],
-        json!(sha256_hex(
-            crate::item_persist::CONTEXT_HASH_DOMAIN,
-            "team chat"
-        ))
+        json!(sha256_hex(CONTEXT_HASH_DOMAIN, "team chat"))
     );
     assert_eq!(
         v2["context_hash"],
-        json!(sha256_hex(
-            crate::item_persist::CONTEXT_HASH_DOMAIN,
-            "standup notes"
-        ))
+        json!(sha256_hex(CONTEXT_HASH_DOMAIN, "standup notes"))
     );
     assert_ne!(v1["context_hash"], v2["context_hash"], "context changed");
     assert!(
@@ -426,17 +406,11 @@ fn pg_triple_audit_rows_carry_context_stats() {
     let v2 = detail_of(&store, &bank, &i2, "triple_add");
     assert_eq!(
         v1["context_hash"],
-        json!(sha256_hex(
-            crate::item_persist::CONTEXT_HASH_DOMAIN,
-            "Q1 review notes"
-        ))
+        json!(sha256_hex(CONTEXT_HASH_DOMAIN, "Q1 review notes"))
     );
     assert_eq!(
         v2["context_hash"],
-        json!(sha256_hex(
-            crate::item_persist::CONTEXT_HASH_DOMAIN,
-            "Q2 review notes"
-        ))
+        json!(sha256_hex(CONTEXT_HASH_DOMAIN, "Q2 review notes"))
     );
     assert_ne!(v1["context_hash"], v2["context_hash"], "context changed");
     assert!(
