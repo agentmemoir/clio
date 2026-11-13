@@ -202,15 +202,15 @@ pub fn role_subkey(key: &SyncCipherKey, role: &[u8]) -> Vec<u8> {
 }
 
 /// The published plaintext-mode wire label the content digest hashes under,
-/// which a caller outside the crate reads to recompute that digest. The label
-/// itself stays private.
+/// which a caller outside the crate reads to recompute that digest.
+/// The constant that holds it stays private.
 pub fn published_digest_salt() -> &'static [u8] {
     PLAINTEXT_DIGEST_SALT
 }
 
 /// The published plaintext-mode wire label the idempotency key hashes under,
-/// which a caller outside the crate reads to recompute that key. The label
-/// itself stays private.
+/// which a caller outside the crate reads to recompute that key.
+/// The constant that holds it stays private.
 pub fn published_mutation_id_salt() -> &'static [u8] {
     PLAINTEXT_MUTATION_ID_SALT
 }
