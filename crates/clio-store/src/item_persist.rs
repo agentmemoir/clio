@@ -59,7 +59,7 @@ pub(crate) fn seal_dual_content(
 }
 
 /// Fixed domain-separation salt for the context change-detection hash.
-const CONTEXT_HASH_DOMAIN: &[u8] = b"clio-context-telemetry";
+pub(crate) const CONTEXT_HASH_DOMAIN: &[u8] = b"clio-context-telemetry";
 
 /// PII-safe context telemetry for `audit_events.detail_json`:
 /// presence, UTF-8 byte length, and a hash for change detection only. The raw
