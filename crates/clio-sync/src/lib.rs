@@ -84,6 +84,10 @@ pub mod protocol;
 pub mod server;
 mod server_conn;
 
+/// The published plaintext-mode wire labels a caller outside the crate reads to
+/// recompute the unkeyed content digest and idempotency key.
+pub use crate::keyed_roles::{published_digest_salt, published_mutation_id_salt};
+
 #[cfg(test)]
 mod apply_fixtures;
 #[cfg(test)]
