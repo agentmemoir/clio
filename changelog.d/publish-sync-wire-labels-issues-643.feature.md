@@ -1,0 +1,1 @@
+`clio-sync` now exports `published_digest_salt` and `published_mutation_id_salt` at the crate root, so a caller that needs the sync wire hash labels reads them from the crate instead of repeating the literal bytes. Sync behaviour and the wire format are unchanged.
