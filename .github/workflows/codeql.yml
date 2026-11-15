@@ -222,7 +222,9 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: .github/codeql
-          ref: ${{ inputs.ref || github.sha }}
+          # The default branch, not the analysed ref. A request analyses a pull
+          # request head, and that head must not be able to allowlist itself.
+          ref: ${{ github.event.repository.default_branch }}
 
       # The name and the path are both set. With one artifact and no name, this
       # action extracts the artifact's own files straight into the path, so
@@ -255,6 +257,13 @@ jobs:
           : > "$combined"
           : > "$dropped"
           : > "$counts"
+          # An absent or empty allowlist must drop nothing and must not abort the
+          # report, so the filter reads an empty file instead.
+          allowlist="$ALLOWLIST"
+          if [ ! -s "$allowlist" ]; then
+            echo "::warning::the known false positive allowlist is missing or empty, so every result counts"
+            allowlist=/dev/null
+          fi
           broken=""
           total=0
           sha=""
@@ -281,28 +290,9 @@ jobs:
             # result is kept in $dropped and printed below, so nothing is hidden.
             reported=0
             if [ -s "$dir/findings.tsv" ]; then
-              reported=$(awk -F'\t' -v lang="$language" -v keep="$combined" -v drop="$dropped" '
-                BEGIN { OFS = "\t" }
-                FNR == NR {
-                  line = $0
-                  sub(/#.*/, "", line)
-                  sub(/^[[:space:]]+/, "", line)
-                  n = split(line, entry, /[[:space:]]+/)
-                  if (n >= 2) known[entry[1] SUBSEP entry[2]] = 1
-                  next
-                }
-                {
-                  path = $3
-                  sub(/:[0-9]+$/, "", path)
-                  if (($2 SUBSEP path) in known) {
-                    print lang, $2, $3 >> drop
-                    next
-                  }
-                  print lang, $1, $2, $3, $4 >> keep
-                  kept++
-                }
-                END { print kept + 0 }
-              ' "$ALLOWLIST" "$dir/findings.tsv")
+              reported=$(awk -F'\t' -v lang="$language" -v keep="$combined" -v drop="$dropped" \
+                -f .github/codeql/known-false-positives.awk \
+                "$allowlist" "$dir/findings.tsv")
             fi
             printf '| %s | %s |\n' "$language" "$reported" >> "$counts"
             total=$((total + reported))
@@ -347,6 +337,14 @@ jobs:
               if [ "$total" -gt 200 ]; then
                 printf '\n+%d more, in the codeql-findings artifacts of the run.\n' "$((total - 200))"
               fi
+            } >> "$body"
+          fi
+          # The posted body names every dropped result too, so a reader of the
+          # codeql issue does not have to open the run log to learn about them.
+          if [ -s "$dropped" ]; then
+            {
+              printf '\nKnown false positives, not counted:\n'
+              awk -F'\t' '{printf "- %s %s\n", $2, $3}' "$dropped"
             } >> "$body"
           fi
           echo "$state: $total result(s) at $sha, broken languages:$broken"

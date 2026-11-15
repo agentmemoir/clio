@@ -2,7 +2,9 @@
 #
 # One entry per line: <rule id> <path>. A result is dropped from the count only when both its rule id and its file path match an entry. Paths carry no line number, because line numbers move. A blank line and a line starting with # are ignored.
 #
-# Every entry is rust/hard-coded-cryptographic-value. Each flagged value is a fixed public domain-separation label or a value that only a test uses. None is a password, a key, or an IV, so no secret is exposed and no cipher is weakened.
+# Every entry is rust/hard-coded-cryptographic-value, and every value behind it is a fixed public domain-separation label, a published salt, or a test fixture. The labels are constants such as PLAINTEXT_DIGEST_SALT (b"am-sync-hash") and PLAINTEXT_MUTATION_ID_SALT (b"am-sync-mut"), and the fixture is "a b&c=d", a password string in a test that checks percent-encoding.
+#
+# A published salt is not a secret. Two peers must derive the same digest from it, so it ships in the binary by design and its value is not a weakness. None of these values is a password, a key, or an IV.
 rust/hard-coded-cryptographic-value crates/clio/src/setup_plan_db_tests.rs
 rust/hard-coded-cryptographic-value crates/clio-store/src/index_store_lexical_security_tests.rs
 rust/hard-coded-cryptographic-value crates/clio-sync/src/crypto_nonce_tests.rs
