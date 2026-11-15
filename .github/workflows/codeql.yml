@@ -209,9 +209,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      # A job's permissions replace the workflow's, so the checkout below needs
+      # contents: read named here.
+      contents: read
       issues: write
       checks: write
     steps:
+      # Only the allowlist is needed from the tree, so this checks out that one
+      # directory rather than the whole repository.
+      - name: Check out the known false positives
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/codeql
+          # The default branch, not the analysed ref. A request analyses a pull
+          # request head, and that head must not be able to allowlist itself.
+          ref: ${{ github.event.repository.default_branch }}
+
       # The name and the path are both set. With one artifact and no name, this
       # action extracts the artifact's own files straight into the path, so
       # count.txt landed in artifacts/ instead of artifacts/codeql-findings-rust/
@@ -231,15 +245,25 @@ jobs:
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EVENT_SHA: ${{ github.sha }}
+          ALLOWLIST: .github/codeql/known-false-positives.txt
         run: |
           set -euo pipefail
           # One language, so the table has one row. The loop is the report job's
           # shape with the single entry that applies here.
           languages="rust"
           combined="$RUNNER_TEMP/findings.tsv"
+          dropped="$RUNNER_TEMP/dropped.tsv"
           counts="$RUNNER_TEMP/counts.md"
           : > "$combined"
+          : > "$dropped"
           : > "$counts"
+          # An absent or empty allowlist must drop nothing and must not abort the
+          # report, so the filter reads an empty file instead.
+          allowlist="$ALLOWLIST"
+          if [ ! -s "$allowlist" ]; then
+            echo "::warning::the known false positive allowlist is missing or empty, so every result counts"
+            allowlist=/dev/null
+          fi
           broken=""
           total=0
           sha=""
@@ -261,13 +285,25 @@ jobs:
               printf '| %s | no SARIF |\n' "$language" >> "$counts"
               continue
             fi
-            printf '| %s | %s |\n' "$language" "$count" >> "$counts"
-            total=$((total + count))
+            # A result whose rule id and file path both match the allowlist is
+            # dropped here, so it leaves the count and the state. Each dropped
+            # result is kept in $dropped and printed below, so nothing is hidden.
+            reported=0
             if [ -s "$dir/findings.tsv" ]; then
-              awk -F'\t' -v l="$language" 'BEGIN{OFS="\t"} {print l, $1, $2, $3, $4}' \
-                "$dir/findings.tsv" >> "$combined"
+              reported=$(awk -F'\t' -v lang="$language" -v keep="$combined" -v drop="$dropped" \
+                -f .github/codeql/known-false-positives.awk \
+                "$allowlist" "$dir/findings.tsv")
             fi
+            printf '| %s | %s |\n' "$language" "$reported" >> "$counts"
+            total=$((total + reported))
           done
+          # A reader of the log sees every result the allowlist removed, with its
+          # rule id and file:line, so a drop is never silent.
+          if [ -s "$dropped" ]; then
+            while IFS=$'\t' read -r lang rule location; do
+              echo "known false positive, not counted: $rule $location"
+            done < "$dropped"
+          fi
           [ -n "$sha" ] || sha="$EVENT_SHA"
           if [ -n "$broken" ]; then
             state=broken
@@ -303,6 +339,14 @@ jobs:
               fi
             } >> "$body"
           fi
+          # The posted body names every dropped result too, so a reader of the
+          # codeql issue does not have to open the run log to learn about them.
+          if [ -s "$dropped" ]; then
+            {
+              printf '\nKnown false positives, not counted:\n'
+              awk -F'\t' '{printf "- %s %s\n", $2, $3}' "$dropped"
+            } >> "$body"
+          fi
           echo "$state: $total result(s) at $sha, broken languages:$broken"
           echo "state=$state" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
@@ -316,6 +360,14 @@ jobs:
             echo
             cat "$counts"
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ -s "$dropped" ]; then
+            {
+              echo
+              echo "Known false positives, not counted:"
+              echo
+              awk -F'\t' '{printf "- %s %s\n", $2, $3}' "$dropped"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Report on the request
         if: inputs.request_number != ''
