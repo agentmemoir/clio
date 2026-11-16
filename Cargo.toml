@@ -87,7 +87,7 @@ dbus-secret-service-keyring-store = { version = "1", features = [
 # `fallible_uint` restores the `usize`/`u64` `ToSql`/`FromSql` implementations
 # rusqlite 0.41 moved behind that feature, so `belief_tx`'s `COUNT(*)` read
 # needs no code change.
-rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"] }
+rusqlite = { version = "0.42.0", features = ["bundled", "fallible_uint"] }
 sha2 = "0.11"
 sqlite-vec = "0.1"
 zeroize = { version = "1", features = ["derive"] }
