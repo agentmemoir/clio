@@ -225,7 +225,7 @@ fn list_shows_records_and_never_a_secret_or_digest() {
 }
 
 #[test]
-fn revoke_removes_a_record_and_states_the_restart_timing() {
+fn revoke_removes_a_record_and_states_immediate_effect() {
     let store = scratch("revoke");
     let (code, _, _) = run_auth(&store, &add_args("ci", &["demo"]));
     assert_eq!(code, ExitCode::SUCCESS);
@@ -233,9 +233,10 @@ fn revoke_removes_a_record_and_states_the_restart_timing() {
 
     let (code, out, err) = run_auth(&store, &["token", "revoke", "--label", "ci"]);
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert!(out.contains("next server start"), "{out}");
+    assert!(out.contains("without a restart"), "{out}");
     let payload: Value = serde_json::from_str(out.trim()).expect("json");
     assert_eq!(payload["label"], "ci");
+    assert_eq!(payload["effective"], json!("immediately"));
     let records = records_on_disk(&store);
     assert!(records.is_empty(), "{records:?}");
     // A reload sees the record gone.

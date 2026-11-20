@@ -140,7 +140,11 @@ fn the_real_binary_runs_add_list_and_revoke() {
     let revoke = run(&store, &["auth", "token", "revoke", "--label", "ci"]);
     assert_eq!(revoke.status.code(), Some(0));
     let revoke_out = String::from_utf8_lossy(&revoke.stdout).to_string();
-    assert!(revoke_out.contains("next server start"), "{revoke_out}");
+    assert!(revoke_out.contains("without a restart"), "{revoke_out}");
+    assert!(
+        revoke_out.contains("\"effective\":\"immediately\""),
+        "{revoke_out}"
+    );
     let remaining = serde_json::from_str::<Vec<Value>>(&fs::read_to_string(&store).expect("bytes"))
         .expect("parse");
     assert!(remaining.is_empty(), "{remaining:?}");

@@ -131,7 +131,7 @@ const LIST_NOTE: &str = "prints labels, actors, banks, and creation times; never
 
 /// The `revoke` note: when the change applies, the lock rule, and the refused
 /// flags.
-const REVOKE_NOTE: &str = "removes the record; servers load the store at start, so the change takes effect at the next server start; the write holds the store lock, so it never drops a record a concurrent add wrote, and --db, --backend, --actor, and --bank are refused";
+const REVOKE_NOTE: &str = "removes the record; the running MCP HTTP server picks the change up without a restart; the write holds the store lock, so it never drops a record a concurrent add wrote, and --db, --backend, --actor, and --bank are refused";
 
 /// The `auth token add` line, pinned whole: `--bank` is one accepted name whose
 /// parser keeps every occurrence, and the assembled order writes the repeatable
@@ -211,7 +211,7 @@ pub(crate) const AUTH_TOKEN_LIST: CommandSpec = CommandSpec {
 pub(crate) const AUTH_TOKEN_REVOKE: CommandSpec = CommandSpec {
     name: "auth token revoke",
     aliases: &[],
-    summary: "Remove the record; takes effect at the next server start",
+    summary: "Remove the record; the running MCP HTTP server stops accepting it without a restart",
     notes: &[REVOKE_NOTE],
     positionals: &[],
     documented: &[LABEL, GLOBAL_OUTPUT],
