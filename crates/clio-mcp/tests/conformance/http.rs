@@ -289,7 +289,9 @@ fn t07_http_requires_the_version_header_and_the_served_revision() {
 
 #[test]
 fn t09_non_dev_missing_auth_rejected() {
-    // A store record is the only credential a server accepts; the scratch file is removed after the load.
+    // A store record is the only credential a server accepts. The running
+    // server revalidates the file per request, so a store that disappears
+    // retires its secrets instead of serving the snapshot it loaded.
     let (record, secret) =
         clio_config::auth_tokens::new_auth_token("conf", "harness", &["conf-bank".to_owned()])
             .expect("record");
@@ -298,7 +300,6 @@ fn t09_non_dev_missing_auth_rejected() {
     #[cfg(unix)]
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("tighten");
     let store = clio_mcp::http_auth::CredentialStore::load(&path).expect("load");
-    let _ = std::fs::remove_file(&path);
     let addr = spawn_http(clio_mcp::http::HttpConfig {
         credentials: Some(Arc::new(store)),
         ..clio_mcp::http::HttpConfig::default()
@@ -314,6 +315,7 @@ fn t09_non_dev_missing_auth_rejected() {
         "Authorization: Bearer wrong\r\n",
     );
     assert_eq!(status, 401, "wrong token rejected");
+    // The loaded record still authorizes its own secret while the file exists.
     let good = format!("Authorization: Bearer {secret}\r\n");
     let (status, discovered) = post_admitted(&addr, "server/discover", None, &body, &good);
     assert_eq!(status, 200);
@@ -321,6 +323,11 @@ fn t09_non_dev_missing_auth_rejected() {
         discovered["result"]["supportedVersions"],
         json!([MCP_PROTOCOL_REVISION])
     );
+    // Removing the file while the server runs refuses that same secret, so no
+    // later request is answered from the stale snapshot.
+    std::fs::remove_file(&path).expect("remove");
+    let (status, _) = post_admitted(&addr, "server/discover", None, &body, &good);
+    assert_eq!(status, 401, "a vanished store refuses the secret it loaded");
 }
 
 #[test]
