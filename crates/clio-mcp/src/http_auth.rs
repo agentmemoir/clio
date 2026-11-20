@@ -285,7 +285,10 @@ fn stat_fingerprint(path: &Path) -> Result<Fingerprint, AmError> {
         .map_err(|error| {
             AmError::new(
                 ErrorCode::ConfigCorrupt,
-                format!("credential store {} cannot be read: {error}", path.display()),
+                format!(
+                    "credential store {} cannot be read: {error}",
+                    path.display()
+                ),
             )
         })
 }

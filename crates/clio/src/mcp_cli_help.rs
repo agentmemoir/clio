@@ -75,8 +75,9 @@ where
 
 --token-file PATH
              Credential store whose records name an actor and the banks it may reach
-             (see `clio auth token add`). Loaded once at start; a path that is
-             absent, unreadable, malformed, or holds no record refuses the start.
+             (see `clio auth token add`). Re-read on every request, so a revoked
+             secret stops working on the running server. A path that is absent,
+             unreadable, malformed, or holds no record refuses the start.
              Required on every bind unless --insecure-no-auth is given; outside
              loopback that opt-out also needs --insecure-bind-any.
 
