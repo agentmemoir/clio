@@ -74,6 +74,9 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
+        // A management verb takes the adjacent writer hold, which creates its
+        // lock file; remove it with the store so the fixture leaves nothing.
+        let _ = fs::remove_file(clio_config::auth_tokens::lock_file_path(&self.path));
     }
 }
 
@@ -103,10 +106,42 @@ fn a_loaded_record_resolves_its_own_secret_to_its_own_principal() {
     scratch.write(&[record("ci", &secret, Actor::Harness, &["demo"])]);
     let store = CredentialStore::load(scratch.path()).expect("load");
 
-    let principal = store.resolve(&secret).expect("resolves");
+    let principal = store.resolve(&secret).expect("resolve").expect("resolves");
     assert_eq!(principal.label, "ci");
     assert_eq!(principal.actor, Actor::Harness);
     assert_eq!(principal.banks, vec!["demo".to_owned()]);
+}
+
+#[test]
+fn a_revoked_record_stops_resolving_without_a_restart() {
+    let scratch = Scratch::new("revoked");
+    let ci = secret("ci");
+    let bot = secret("bot");
+    scratch.write(&[
+        record("ci", &ci, Actor::Harness, &["demo"]),
+        record("bot", &bot, Actor::Agent, &["scratch"]),
+    ]);
+    let store = CredentialStore::load(scratch.path()).expect("load");
+    let header = |secret: &str| format!("Bearer {secret}");
+    assert!(matches!(
+        authorize_request(Some(&store), Some(&header(&ci))).expect("bound"),
+        AuthOutcome::Bound(_)
+    ));
+
+    clio_config::auth_tokens::revoke_token(scratch.path(), "ci").expect("revoke");
+
+    assert_eq!(
+        authorize_request(Some(&store), Some(&header(&ci))).unwrap_err(),
+        401,
+        "the revoked secret must stop resolving on the running store"
+    );
+    assert!(
+        matches!(
+            authorize_request(Some(&store), Some(&header(&bot))).expect("survivor bound"),
+            AuthOutcome::Bound(_)
+        ),
+        "the surviving record must still authorize"
+    );
 }
 
 #[test]
@@ -116,10 +151,15 @@ fn an_unknown_secret_resolves_to_nothing() {
     scratch.write(&[record("ci", &known, Actor::Harness, &["demo"])]);
     let store = CredentialStore::load(scratch.path()).expect("load");
 
-    assert!(store.resolve(&secret("other")).is_none());
-    assert!(store.resolve("").is_none());
+    assert!(store.resolve(&secret("other")).expect("resolve").is_none());
+    assert!(store.resolve("").expect("resolve").is_none());
     // A prefix of a real secret is not a secret.
-    assert!(store.resolve(&known[..known.len() - 1]).is_none());
+    assert!(
+        store
+            .resolve(&known[..known.len() - 1])
+            .expect("resolve")
+            .is_none()
+    );
 }
 
 #[test]
@@ -133,8 +173,14 @@ fn each_record_keeps_its_own_actor_and_banks() {
     ]);
     let store = CredentialStore::load(scratch.path()).expect("load");
 
-    let harness = store.resolve(&harness_secret).expect("harness resolves");
-    let agent = store.resolve(&agent_secret).expect("agent resolves");
+    let harness = store
+        .resolve(&harness_secret)
+        .expect("resolve")
+        .expect("harness resolves");
+    let agent = store
+        .resolve(&agent_secret)
+        .expect("resolve")
+        .expect("agent resolves");
     assert_eq!(harness.actor, Actor::Harness);
     assert!(harness.authorize_bank("logs").is_ok());
     assert_eq!(agent.actor, Actor::Agent);
@@ -155,7 +201,7 @@ fn resolution_never_returns_a_secret_or_a_digest() {
     scratch.write(std::slice::from_ref(&record));
     let store = CredentialStore::load(scratch.path()).expect("load");
 
-    let principal = store.resolve(&secret).expect("resolves");
+    let principal = store.resolve(&secret).expect("resolve").expect("resolves");
     let rendered = format!("{principal:?}");
     assert!(!rendered.contains(&secret), "{rendered}");
     assert!(!rendered.contains(&record.secret_sha256), "{rendered}");
@@ -196,7 +242,7 @@ fn an_empty_store_loads_but_authorizes_nobody() {
         store.is_empty(),
         "an empty record file loads no credentials"
     );
-    assert!(store.resolve(&secret("any")).is_none());
+    assert!(store.resolve(&secret("any")).expect("resolve").is_none());
 }
 
 #[test]
