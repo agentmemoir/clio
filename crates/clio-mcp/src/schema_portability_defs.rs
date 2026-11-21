@@ -54,7 +54,9 @@ pub fn portability_defs() -> Vec<ToolDef> {
                 ),
                 (
                     "recipient",
-                    s("Base64-encoded 32-byte X25519 public key of the recipient; the readable bundle is sealed to it and only the matching secret key opens it."),
+                    s(
+                        "Base64-encoded 32-byte X25519 public key of the recipient; the readable bundle is sealed to it and only the matching secret key opens it.",
+                    ),
                 ),
                 (
                     "category",

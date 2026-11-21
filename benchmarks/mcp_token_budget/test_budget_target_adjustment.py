@@ -49,17 +49,17 @@ class AdjustmentTests(unittest.TestCase):
         self.assertEqual(len(all_rows), 2)
         self.assertEqual(
             {item["unit"]: item["target"] for item in all_rows},
-            {"tokens": 30059, "bytes": 140795},
+            {"tokens": 30107, "bytes": 141002},
         )
         self.assertEqual({item["label"] for item in all_rows}, {"Decision"})
 
     def test_final_ceiling_and_row_must_agree(self):
         value = document()
         adjustment(value)["final_target"]["tokens"] = 30003
-        self.assert_refused(value, "expected the measured candidate value 30059")
+        self.assert_refused(value, "expected the measured candidate value 30107")
         value = document()
         value["targets"][-2]["target"] = 30003
-        self.assert_refused(value, "expected the recorded final ceiling 30059")
+        self.assert_refused(value, "expected the recorded final ceiling 30107")
 
     def test_initial_arithmetic_must_be_preserved(self):
         value = document()

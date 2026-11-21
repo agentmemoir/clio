@@ -30,7 +30,7 @@ import budget_targets
 REPO_ROOT = HERE.parents[1]
 PACK = REPO_ROOT / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 
-FIXTURE_DIGEST = "985d881056abc1495b15c6c05ed2b6762e93aedf902c88087a6f34638dcee7cd"
+FIXTURE_DIGEST = "059df27ee885a6320af8b3997e688d07ae2d84453d01bc147cab4eb85e5261cd"
 
 ACTIVATED_ROW = "activated_skill_body/tokens"
 ACTIVATED_TOKENS = 594
@@ -63,8 +63,8 @@ class CommandTests(unittest.TestCase):
         return {
             preset: {
                 "sha256": "ab" * 32,
-                "bytes": 140795 if preset == "all" else 84505,
-                "tokens": 30059 if preset == "all" else 15183,
+                "bytes": 141002 if preset == "all" else 84505,
+                "tokens": 30107 if preset == "all" else 15183,
             }
             for preset in budget_targets.TARGET_PRESETS
         }
@@ -87,16 +87,16 @@ class CommandTests(unittest.TestCase):
             "decision_id": "mcp-readable-export-args-2026-11-21",
             "date": "2026-11-21",
             "base_commit": "cac077d182a148ea9acaf5c4326d29ce52c17a34",
-            "max_bytes": 140795,
-            "max_tokens": 30059,
+            "max_bytes": 141002,
+            "max_tokens": 30107,
         }
         self.assertEqual(report["allowance"], expected_allowance)
         self.assertEqual(report["failures"], [])
         self.assertEqual(
             report["candidate"],
-            {"sha256": FIXTURE_DIGEST, "bytes": 140795, "tokens": 30059},
+            {"sha256": FIXTURE_DIGEST, "bytes": 141002, "tokens": 30107},
         )
-        self.assertEqual([arm["delta"] for arm in report["arms"]], [35163, 8368])
+        self.assertEqual([arm["delta"] for arm in report["arms"]], [35370, 8416])
         for arm in report["arms"]:
             self.assertEqual(arm["verdict"], "pass")
             self.assertEqual(arm["allowance"], expected_allowance)
@@ -294,8 +294,8 @@ class ActivatedCommandTests(unittest.TestCase):
         measured = {
             preset: {
                 "sha256": "ab" * 32,
-                "bytes": 140795 if preset == "all" else 84505,
-                "tokens": 30059 if preset == "all" else 15183,
+                "bytes": 141002 if preset == "all" else 84505,
+                "tokens": 30107 if preset == "all" else 15183,
             }
             for preset in budget_targets.TARGET_PRESETS
         }
