@@ -66,6 +66,18 @@ impl Scratch {
         }
     }
 
+    /// Write bytes that are not valid UTF-8, so the loader fails at its read
+    /// rather than at its parse. Byte values do not depend on the user, so this
+    /// fails the same way for a root runner as for anyone else.
+    fn write_undecodable(&self) {
+        fs::write(&self.path, [0xff, 0xfe, 0xfd]).expect("write undecodable bytes");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600)).expect("tighten");
+        }
+    }
+
     fn path(&self) -> &Path {
         &self.path
     }
@@ -215,6 +227,66 @@ fn an_absent_store_path_is_refused_rather_than_read_as_empty() {
     assert!(err.message.contains("does not exist"), "{}", err.message);
     // The message names the path and the fix; it names no stored value.
     assert!(err.message.contains("auth token add"), "{}", err.message);
+}
+
+/// A reload that meets a malformed file must refuse, and must not latch: once
+/// the file is valid again the same secret authorizes without a restart.
+#[test]
+fn a_store_that_becomes_malformed_after_load_refuses_with_401_then_recovers() {
+    let scratch = Scratch::new("reload-malformed");
+    let secret = secret("r");
+    let header = format!("Bearer {secret}");
+    scratch.write(&[record("ci", &secret, Actor::Harness, &["demo"])]);
+    let store = CredentialStore::load(scratch.path()).expect("load");
+    assert!(
+        matches!(
+            authorize_request(Some(&store), Some(&header)).expect("bound"),
+            AuthOutcome::Bound(_)
+        ),
+        "the loaded record must authorize before the file changes"
+    );
+
+    scratch.write_raw("{ this is not a token store");
+    assert_eq!(
+        authorize_request(Some(&store), Some(&header)).unwrap_err(),
+        401,
+        "a malformed rewrite must refuse instead of serving the old snapshot"
+    );
+
+    scratch.write(&[record("ci", &secret, Actor::Harness, &["demo"])]);
+    assert!(
+        matches!(
+            authorize_request(Some(&store), Some(&header)).expect("bound again"),
+            AuthOutcome::Bound(_)
+        ),
+        "the refusal must not survive the file becoming valid again"
+    );
+}
+
+/// A store path that stops being readable as text must refuse.
+#[test]
+fn a_store_that_becomes_unreadable_after_load_refuses_with_401() {
+    let scratch = Scratch::new("reload-unreadable");
+    let secret = secret("u");
+    let header = format!("Bearer {secret}");
+    scratch.write(&[record("ci", &secret, Actor::Harness, &["demo"])]);
+    let store = CredentialStore::load(scratch.path()).expect("load");
+    assert!(
+        matches!(
+            authorize_request(Some(&store), Some(&header)).expect("bound"),
+            AuthOutcome::Bound(_)
+        ),
+        "the loaded record must authorize before the file changes"
+    );
+
+    // Invalid UTF-8 fails the loader's read on every platform and for every
+    // user, including root; a mode change would not.
+    scratch.write_undecodable();
+    assert_eq!(
+        authorize_request(Some(&store), Some(&header)).unwrap_err(),
+        401,
+        "an unreadable rewrite must refuse the secret"
+    );
 }
 
 #[test]
