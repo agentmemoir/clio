@@ -75,6 +75,10 @@ fn all_pairs() -> Vec<(&'static str, &'static str)> {
         ("CLIO_BANK", "env-bank"),
         ("CLIO_SYNC_ALLOW_PUBLIC_BIND", "true"),
         ("CLIO_SYNC_MAX_ENVELOPE_SKEW_SECS", "45"),
+        (
+            "CLIO_PROVIDER_ALLOW_HOSTS",
+            "api.mem0.ai, provider.internal",
+        ),
         ("CLIO_REPO_ROOT", "/tmp/from-env"),
     ]
 }
@@ -119,6 +123,13 @@ fn every_variable_reaches_the_path_it_owns() {
     assert_eq!(
         rt.env_overlay.get("sync.max_envelope_skew_secs"),
         Some(&json!(45_u64))
+    );
+
+    // A host list cannot stay text either, so it reaches the path as the list of
+    // trimmed entries that was read.
+    assert_eq!(
+        rt.env_overlay.get("provider.allow_hosts"),
+        Some(&json!(["api.mem0.ai", "provider.internal"]))
     );
 
     let secrets = [
@@ -362,6 +373,31 @@ fn an_empty_environment_leaves_the_overlay_empty() {
         "no variable, no overlay entry: {:?}",
         rt.env_overlay
     );
+}
+
+/// The provider allowlist reaches its path as a list of trimmed, non-empty
+/// entries, and a value with no entry in it leaves the path alone so the config
+/// default — the built-in provider host — stands rather than an empty list that
+/// would refuse the shipped provider.
+#[test]
+fn the_provider_allowlist_is_a_list_of_hosts_or_nothing() {
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.apply_process_env(&mut env(&[(
+        "CLIO_PROVIDER_ALLOW_HOSTS",
+        " api.mem0.ai , 10.0.0.5 ,,",
+    )]));
+    assert_eq!(
+        rt.env_overlay.get("provider.allow_hosts"),
+        Some(&json!(["api.mem0.ai", "10.0.0.5"]))
+    );
+    for spelling in ["", " ", ",", " , "] {
+        let mut empty = Runtime::with_env(&|_| None);
+        empty.apply_process_env(&mut env(&[("CLIO_PROVIDER_ALLOW_HOSTS", spelling)]));
+        assert!(
+            !empty.env_overlay.contains_key("provider.allow_hosts"),
+            "`{spelling}` reached the overlay"
+        );
+    }
 }
 
 /// A per-service key outranks the generic one.

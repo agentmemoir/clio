@@ -412,25 +412,19 @@ fn mem0_env_lookup_and_credential_mask_types() {
             None
         }
     };
-    let masked = super::masked_credentials_with(&json!({}), &env_lookup);
-    assert_eq!(masked["api_key"], "[REDACTED]");
-
-    let extracted = super::extract_api_key_with(&json!({}), &env_lookup);
+    let mask =
+        |creds: Value| crate::provider_credentials::masked_credentials(&creds, &env_lookup, true);
+    assert_eq!(mask(json!({}))["api_key"], "[REDACTED]");
+    let extracted = crate::provider_credentials::extract_api_key(&json!({}), &env_lookup, true);
     assert_eq!(extracted.as_deref(), Some("env-secret-xyz9876"));
 
-    let masked_str = super::masked_credentials(&json!({
-        "credentials": "direct-secret-str-5432"
-    }));
+    let masked_str = mask(json!({ "credentials": "direct-secret-str-5432" }));
     assert_eq!(masked_str, "[REDACTED]");
 
-    let masked_null = super::masked_credentials(&json!({
-        "credentials": null
-    }));
+    let masked_null = mask(json!({ "credentials": null }));
     assert_eq!(masked_null, Value::Null);
 
-    let masked_num = super::masked_credentials(&json!({
-        "credentials": 42
-    }));
+    let masked_num = mask(json!({ "credentials": 42 }));
     assert_eq!(masked_num, json!(42));
 }
 
@@ -440,9 +434,8 @@ fn mem0_env_lookup_and_credential_mask_types() {
 #[test]
 fn the_bare_provider_key_name_is_not_read() {
     let bare_only = |k: &str| (k == "MEM0_API_KEY").then(|| "bare-secret".to_owned());
-    assert_eq!(super::extract_api_key_with(&json!({}), &bare_only), None);
-    assert_eq!(
-        super::masked_credentials_with(&json!({}), &bare_only),
-        Value::Null
-    );
+    let extracted = crate::provider_credentials::extract_api_key(&json!({}), &bare_only, true);
+    assert_eq!(extracted, None);
+    let masked = crate::provider_credentials::masked_credentials(&json!({}), &bare_only, true);
+    assert_eq!(masked, Value::Null);
 }

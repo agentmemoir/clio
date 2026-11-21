@@ -21,12 +21,50 @@
 //! changes here. Changes to the parse or the loopback definition should not
 //! require changes here; those are tested where they live.
 
-use super::{ErrorCode, validate_set_value};
+use super::{ErrorCode, validate_set_path, validate_set_value};
 use clio_types::is_loopback_host;
 use serde_json::json;
 
 /// Every path whose value is a service endpoint and so carries an API key.
 const ENDPOINT_PATHS: &[&str] = &["embed.url", "rerank.url", "extract.url"];
+
+#[test]
+fn the_provider_allowlist_is_a_settable_list_of_hosts() {
+    validate_set_path("provider.allow_hosts").expect("allowlisted");
+    validate_set_value("provider.allow_hosts", &json!(["api.mem0.ai"])).expect("one host");
+    validate_set_value("provider.allow_hosts", &json!(["api.mem0.ai", "127.0.0.1"]))
+        .expect("a second host");
+}
+
+#[test]
+fn the_provider_allowlist_refuses_what_is_not_a_list_of_hosts() {
+    for value in [
+        json!("api.mem0.ai"),
+        json!(1),
+        json!(null),
+        json!([]),
+        json!([""]),
+        json!(["  "]),
+        json!(["api.mem0.ai", 7]),
+    ] {
+        let err =
+            validate_set_value("provider.allow_hosts", &value).expect_err("not a usable host list");
+        assert_eq!(err.code, ErrorCode::InvalidType, "{value}");
+    }
+}
+
+#[test]
+fn the_shipped_provider_host_is_the_default_the_allowlist_falls_back_to() {
+    // The knob is only usable if the shipped provider works with no operator
+    // setup, so the default names the built-in endpoint's host rather than an
+    // empty list a narrow-minded operator could not distinguish from a mistake.
+    let defaults = crate::config::merge::system_defaults(&|_key: &str| None);
+    let hosts = defaults
+        .pointer("/provider/allow_hosts")
+        .and_then(|v| v.as_array())
+        .expect("the default is a list");
+    assert_eq!(hosts, &vec![json!(clio_types::BUILT_IN_PROVIDER_HOST)]);
+}
 
 #[test]
 fn a_remote_plain_http_endpoint_is_refused_on_every_endpoint_path() {

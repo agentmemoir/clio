@@ -70,6 +70,13 @@ where
             "max_limit": clio_types::MAX_HISTORY_LIMIT
         },
         "credentials": {},
+        // The built-in provider host is the default so the shipped memory
+        // provider keeps working with no operator setup; an operator adds a
+        // host here for a custom endpoint, and the list is the only place a
+        // provider destination may come from.
+        "provider": {
+            "allow_hosts": [clio_types::BUILT_IN_PROVIDER_HOST]
+        },
         "sync": {
             "omit": true,
             "allow_public_bind": false,

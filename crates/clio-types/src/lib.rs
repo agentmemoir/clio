@@ -66,7 +66,10 @@ pub use mcp_tool_groups::{
     group_of, tools_of,
 };
 pub use mcp_tools::{BOUND_READ_TOOLS, BOUND_WRITE_TOOLS, bound_tools, is_bound};
-pub use net::{HttpTarget, is_loopback_host, parse_scheme_host, url_scheme};
+pub use net::{
+    BUILT_IN_PROVIDER_HOST, HttpTarget, is_denied_destination, is_loopback_host, parse_scheme_host,
+    url_scheme,
+};
 pub use persona::{
     PERSONA_SOURCES, PersonaDocument, PersonaPreference, PersonaStableEntry,
     validate_persona_source,

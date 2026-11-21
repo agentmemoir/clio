@@ -29,10 +29,25 @@ use std::time::Duration;
 use clio_types::{EpistemicKind, SourceType};
 use serde_json::{Value, json};
 
+/// The default fixture state, with the loopback host this suite's fake server
+/// binds to in the operator allowlist. Without that entry the adapter refuses
+/// the fake server's address by design, so the allowlist is part of the fixture
+/// rather than something each test states.
 pub(super) fn state() -> Arc<crate::runtime::McpState> {
     crate::runtime::McpState::open_with_effective(
         &crate::runtime::McpOpenOptions::default(),
-        &serde_json::json!({}),
+        &serde_json::json!({"provider": {"allow_hosts": ["127.0.0.1"]}}),
+    )
+    .expect("state")
+}
+
+/// A state carrying no provider allowlist at all, so the deployment default is
+/// the only entry: this is what a shipped deployment that never configured the
+/// knob looks like.
+pub(super) fn default_allowlist_state(allow_hosts: &[&str]) -> Arc<crate::runtime::McpState> {
+    crate::runtime::McpState::open_with_effective(
+        &crate::runtime::McpOpenOptions::default(),
+        &serde_json::json!({"provider": {"allow_hosts": allow_hosts}}),
     )
     .expect("state")
 }
@@ -46,7 +61,7 @@ pub(super) struct FakeMem0Server {
     pub url: String,
     shutdown: Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
-    pub _requests: Arc<AtomicUsize>,
+    pub requests: Arc<AtomicUsize>,
     pub last_auth: Arc<Mutex<Option<String>>>,
     pub _last_path: Arc<Mutex<Option<String>>>,
 }
@@ -122,7 +137,7 @@ impl FakeMem0Server {
             url: format!("http://127.0.0.1:{port}"),
             shutdown,
             handle: Some(handle),
-            _requests: requests,
+            requests,
             last_auth,
             _last_path: last_path,
         }
