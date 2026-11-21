@@ -237,7 +237,22 @@ fn pull_bank(
         clock: &crate::clock::now_epoch,
         max_envelope_skew_secs: cfg.max_envelope_skew_secs,
     };
+    let mut pages = 0usize;
     loop {
+        // Bounded first: a peer that always answers `has_more` must not keep
+        // this loop fetching. The cursor is durable page by page, so a
+        // legitimately larger backlog resumes from it on the next pull.
+        if pages >= crate::PULL_MAX_PAGES {
+            return Err(AmError::new(
+                ErrorCode::Forbidden,
+                format!(
+                    "sync pull stopped after the {cap}-page cap for bank {bank}: \
+                     the peer did not finish the pull",
+                    cap = crate::PULL_MAX_PAGES
+                ),
+            ));
+        }
+        pages += 1;
         let request = PullRequest {
             bank: bank.to_owned(),
             cursor: cursor.clone(),
@@ -285,6 +300,19 @@ fn pull_bank(
         if frozen {
             break;
         }
+        // A peer that says more rows remain but hands back the cursor this page
+        // already used would serve the same page forever. Cursors are opaque, so
+        // the token is compared as text.
+        if response.has_more && response.next_cursor == cursor {
+            return Err(AmError::new(
+                ErrorCode::Forbidden,
+                format!(
+                    "sync pull for bank {bank} repeated cursor {cursor}: the peer \
+                     answered has_more with the cursor this page already used, so \
+                     the pull would never advance"
+                ),
+            ));
+        }
         cursor.clone_from(&response.next_cursor);
         cfg.sync.cursor_set(bank, "pull", &cursor)?;
         if !response.has_more {
@@ -315,6 +343,9 @@ mod client_freshness_tests;
 #[cfg(test)]
 #[path = "client_plain_policy_tests.rs"]
 mod client_plain_policy_tests;
+#[cfg(test)]
+#[path = "client_pull_bound_tests.rs"]
+mod client_pull_bound_tests;
 #[cfg(test)]
 #[path = "client_receipt_tests.rs"]
 mod client_receipt_tests;
