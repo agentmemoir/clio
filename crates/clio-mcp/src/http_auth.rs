@@ -191,8 +191,9 @@ impl CredentialStore {
 
     /// Whether the store holds no record at all.
     ///
-    /// A store with no record authorizes nothing, so it is not a usable
-    /// credential source for a bind that requires one.
+    /// Such a store authorizes nobody. Whether the server still treats it as a
+    /// credential source is [`Self::is_credential_source`], which is true for a
+    /// store loaded from a file.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.state().credentials.is_empty()
@@ -201,9 +202,11 @@ impl CredentialStore {
     /// Whether this store is a credential source for a request.
     ///
     /// A store loaded from a file stays a source even when every record is
-    /// gone, so a live reload to an empty file refuses a request without a
-    /// header instead of falling back to the unbound answer.
-    fn is_credential_source(&self) -> bool {
+    /// gone: it refuses every request, and the bind guard reads this same answer
+    /// through [`crate::http::has_credential_source`], so a reload to an empty
+    /// file cannot leave a listener that answers only 401.
+    #[must_use]
+    pub fn is_credential_source(&self) -> bool {
         self.path.is_some() || !self.is_empty()
     }
 
@@ -262,10 +265,18 @@ impl CredentialStore {
     }
 
     /// Mark the store degraded, report the reason once, and return the error.
+    ///
+    /// The transition is decided under the lock and the message is written after
+    /// the guard is dropped, so a stalled stderr cannot block every request and
+    /// a failed write cannot panic while the store is locked.
     fn degrade(&self, reason: String) -> AmError {
-        let mut state = self.state();
-        if !state.degraded {
+        let first = {
+            let mut state = self.state();
+            let first = !state.degraded;
             state.degraded = true;
+            first
+        };
+        if first {
             eprintln!("clio-mcp: refusing requests, credential store reload failed: {reason}");
         }
         AmError::new(ErrorCode::ConfigCorrupt, reason)

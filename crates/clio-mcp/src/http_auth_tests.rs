@@ -320,10 +320,10 @@ fn an_unknown_secret_is_401_and_the_answer_matches_a_missing_one() {
 }
 
 #[test]
-fn an_empty_store_is_not_a_credential_source_and_authorizes_nobody() {
-    // An empty store is the same as no store at the credential edge: both are
-    // the unbound answer. That is also what keeps a non-loopback bind with an
-    // empty store failing closed at start rather than serving 401-only.
+fn a_store_with_no_path_and_no_record_is_not_a_credential_source() {
+    // A store built without a file and holding no record is the same as no
+    // store at the credential edge: both are the unbound answer. A store loaded
+    // from a file is a source even with no record, so the bind guard refuses it.
     let empty = CredentialStore::default();
     assert!(matches!(
         authorize_request(Some(&empty), None).expect("unbound"),
