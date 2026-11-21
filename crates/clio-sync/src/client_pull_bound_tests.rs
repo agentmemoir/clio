@@ -346,3 +346,88 @@ fn single_page_pull_still_succeeds() {
     let cursor = b.cursor_get(BANK, "pull").expect("cursor");
     assert_eq!(cursor, Some(done));
 }
+
+/// A peer that cycles between two cursors never hands back the token it was
+/// asked from, so only the set of cursors this pull already consumed can stop
+/// it: the pull fails on the second visit instead of running to the cap.
+#[test]
+fn a_two_cursor_cycle_stops_the_pull_before_the_cap() {
+    let b = sqlite();
+    let a = encode_cursor(BANK, 1);
+    let second = encode_cursor(BANK, 2);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let addr = serve_pages(
+        &[page(&a, true), page(&second, true), page(&a, true)],
+        Some(seen.clone()),
+    );
+    let cfg_b = cfg("dev-b", &b, &addr, vec![paired_key()]);
+    let err = pull(&cfg_b, &[BANK.to_owned()]).expect_err("a cursor cycle is refused");
+    assert_refusal(&err, ErrorCode::Forbidden);
+    assert!(
+        err.message.contains("repeated cursor") && err.message.contains(&a),
+        "the refusal must name the cursor the peer handed back: {}",
+        err.message
+    );
+    assert_eq!(
+        requests_seen(&seen),
+        3,
+        "the cycle is caught on its second visit to {a}, before the cap"
+    );
+    // Only consumed cursors advanced: the last one is the second page's.
+    let cursor = b.cursor_get(BANK, "pull").expect("cursor");
+    assert_eq!(cursor.as_deref(), Some(second.as_str()));
+}
+
+/// A cursor that advances every page is honest work: the consumed-cursor set
+/// must not refuse it, and the pull still applies both pages and exits.
+#[test]
+fn a_two_page_pull_applies_both_pages_and_exits_normally() {
+    let b = sqlite();
+    let a = encode_cursor(BANK, 1);
+    let second = encode_cursor(BANK, 2);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let addr = serve_pages(
+        &[
+            raw_page(&[applied_row("i-first")], &a, true),
+            raw_page(&[applied_row("i-second")], &second, false),
+        ],
+        Some(seen.clone()),
+    );
+    let cfg_b = cfg("dev-b", &b, &addr, vec![paired_key()]);
+    let status = pull(&cfg_b, &[BANK.to_owned()]).expect("advancing pages are a normal pull");
+    assert_eq!(requests_seen(&seen), 2, "the pull stops at its last page");
+    assert_eq!(
+        status.first().and_then(|s| s.pull_cursor.clone()),
+        Some(second.clone())
+    );
+    for id in ["i-first", "i-second"] {
+        assert!(
+            b.get_memory_item(BANK, id).expect("row read").is_some(),
+            "{id} must be applied: only a cursor this pull already used is refused"
+        );
+    }
+    let cursor = b.cursor_get(BANK, "pull").expect("cursor");
+    assert_eq!(cursor, Some(second));
+}
+
+/// On a first pull the starting cursor is the empty token, so a peer that hands
+/// the empty token back has not advanced either: the first page is refused.
+#[test]
+fn a_repeated_empty_cursor_stops_the_pull_with_an_error() {
+    let b = sqlite();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let addr = serve_pages(&[page("", true)], Some(seen.clone()));
+    let cfg_b = cfg("dev-b", &b, &addr, vec![paired_key()]);
+    let err = pull(&cfg_b, &[BANK.to_owned()]).expect_err("a repeated empty cursor is refused");
+    assert_refusal(&err, ErrorCode::Forbidden);
+    assert!(
+        err.message.contains("repeated cursor"),
+        "the refusal must name the repeat: {}",
+        err.message
+    );
+    assert_eq!(
+        requests_seen(&seen),
+        1,
+        "the first page already repeats the starting cursor"
+    );
+}

@@ -34,6 +34,8 @@ use crate::http::post_json;
 use crate::protocol::{BankSyncStatus, PullRequest, PullResponse, SyncStatusReport};
 use clio_store::{DeadLetterStatus, ErasureDenial, Store, SyncStore};
 use clio_types::{AmError, ErrorCode};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 #[path = "client_decrypt.rs"]
@@ -222,6 +224,14 @@ fn required_remote(cfg: &SyncClientConfig) -> Result<String, AmError> {
     })
 }
 
+/// Digest of a consumed cursor: the peer owns each token's size, so the loop
+/// keeps 8 bytes per page instead of the strings.
+fn cursor_digest(cursor: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    cursor.hash(&mut hasher);
+    hasher.finish()
+}
+
 fn pull_bank(
     cfg: &SyncClientConfig,
     remote: &str,
@@ -238,6 +248,7 @@ fn pull_bank(
         max_envelope_skew_secs: cfg.max_envelope_skew_secs,
     };
     let mut pages = 0usize;
+    let mut seen = vec![cursor_digest(&cursor)];
     loop {
         // Bounded first: a peer that always answers `has_more` must not keep
         // this loop fetching. The cursor is durable page by page, so a
@@ -267,17 +278,18 @@ fn pull_bank(
             cfg.token.as_deref(),
             &serde_json::to_value(&request).expect("serialize pull request"),
         )?;
-        // A peer that says more rows remain but hands back the cursor this page
-        // was asked from would serve the same page forever. Cursors are opaque,
-        // so the token is compared as text, and the decision is taken here,
-        // immediately after the response is deserialized and before any row of
-        // this page is applied, so a repeat-refused page applies nothing and
-        // persists nothing. The refusal itself is raised after the row loop
-        // below: the loop still opens each row because an unusable row is what
-        // freezes the bank, and a freeze is a stop for the operator (nothing was
-        // trusted, nothing was applied) rather than a peer protocol violation, so
-        // the freeze must win over this refusal.
-        let repeated = response.has_more && response.next_cursor == cursor;
+        // A peer that says more rows remain but hands back a cursor an earlier
+        // page of this pull already used would serve the same page forever.
+        // Cursors are opaque, so the token is compared by digest, and the
+        // decision is taken here, immediately after the response is
+        // deserialized and before any row of this page is applied, so a
+        // repeat-refused page applies nothing and persists nothing. The refusal
+        // itself is raised after the row loop below: the loop still opens each
+        // row because an unusable row is what freezes the bank, and a freeze is
+        // a stop for the operator (nothing was trusted, nothing was applied)
+        // rather than a peer protocol violation, so the freeze must win over
+        // this refusal.
+        let repeated = response.has_more && seen.contains(&cursor_digest(&response.next_cursor));
         let mut frozen = false;
         for m in &response.mutations {
             // Refuse a wrong-bank row first, before serialization and
@@ -323,14 +335,16 @@ fn pull_bank(
             return Err(AmError::new(
                 ErrorCode::Forbidden,
                 format!(
-                    "sync pull for bank {bank} repeated cursor {cursor}: the peer \
-                     answered has_more with the cursor this page already used, so \
-                     the pull would never advance"
+                    "sync pull for bank {bank} repeated cursor {next}: the peer answered \
+                     has_more with a cursor this pull already used, so the pull would \
+                     never advance",
+                    next = response.next_cursor
                 ),
             ));
         }
         cursor.clone_from(&response.next_cursor);
         cfg.sync.cursor_set(bank, "pull", &cursor)?;
+        seen.push(cursor_digest(&cursor));
         if !response.has_more {
             break;
         }
