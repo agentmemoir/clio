@@ -294,7 +294,7 @@ fn drive_claim(claim: &Claim) {
     let complete = manifest["complete"].as_bool();
     assert_eq!(complete, Some(omissions == 0), "{manifest}");
     let sealed = std::fs::read(&claim.export_path).expect("read the bundle");
-    let opened = open_export_seal(&sealed);
+    let opened = open_export_seal(&sealed).expect("open the sealed export");
     let bundle = String::from_utf8(opened).expect("bundle text");
     assert!(bundle.contains(DENIED_MARKER), "denied marker missing");
     assert!(!bundle.contains(CONTROL_MARKER), "control marker leaked");

@@ -119,6 +119,7 @@ pub use export_custody::{
     CustodyState, DeliveryRefusal, DeliveryResult, DeliverySpec, OpenDestination, deliver_export,
     reconcile_open_destinations,
 };
+pub use export_seal::MAGIC as READABLE_EXPORT_SEAL_MAGIC;
 pub use import::{ImportArgs, ImportReport, SkippedInvalid, import};
 pub use inventory::{
     Custody, InventoryBackend, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, Owner,

@@ -62,7 +62,9 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
 /// readable_export_opt_in?, recipient?)`: one bundle file plus manifest, written
 /// through the durable destination-custody boundary. The default content mode is
 /// the opaque ciphertext backup; a readable export needs the explicit opt-in and
-/// an age recipient key it is sealed to.
+/// an X25519 recipient public key it is sealed to. The manifest checksum covers
+/// the opened bundle, while the custody row records the digest of the delivered
+/// file.
 #[inline(never)]
 fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;

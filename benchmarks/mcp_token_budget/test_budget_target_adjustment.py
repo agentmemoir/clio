@@ -28,8 +28,8 @@ def document():
 
 
 def adjustment(value):
-    """Return the one committed adjustment record."""
-    return value["target_adjustment"][0]
+    """Return the current (last) committed adjustment record."""
+    return value["target_adjustment"][-1]
 
 
 class AdjustmentTests(unittest.TestCase):
@@ -122,18 +122,18 @@ class AdjustmentTests(unittest.TestCase):
     def test_missing_initial_or_measured_candidate_block_is_refused(self):
         value = document()
         adjustment(value).pop("initial")
-        self.assert_refused(value, "target_adjustment 0 keys must be exactly")
+        self.assert_refused(value, "target_adjustment 1 keys must be exactly")
         value = document()
         adjustment(value).pop("measured_candidate")
-        self.assert_refused(value, "target_adjustment 0 keys must be exactly")
+        self.assert_refused(value, "target_adjustment 1 keys must be exactly")
 
     def test_a_wrong_key_set_is_refused(self):
         value = document()
         adjustment(value)["extra"] = 1
-        self.assert_refused(value, "target_adjustment 0 keys must be exactly")
+        self.assert_refused(value, "target_adjustment 1 keys must be exactly")
         value = document()
         adjustment(value)["initial"]["extra"] = 1
-        self.assert_refused(value, "target_adjustment 0.initial keys must be exactly")
+        self.assert_refused(value, "target_adjustment 1.initial keys must be exactly")
 
 
 if __name__ == "__main__":

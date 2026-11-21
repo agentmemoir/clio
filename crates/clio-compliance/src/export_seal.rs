@@ -45,7 +45,7 @@ use sha2::Sha256;
 use x25519_dalek::{X25519_BASEPOINT_BYTES, x25519};
 
 /// File magic for a sealed readable export.
-pub(crate) const MAGIC: &[u8] = b"CLIO-SUBJECT-EXPORT-SEALED-V1";
+pub const MAGIC: &[u8] = b"CLIO-SUBJECT-EXPORT-SEALED-V1";
 
 /// HKDF `info` value that separates this key from every other use.
 const KEY_INFO: &[u8] = b"clio-subject-export-seal-v1";
@@ -63,12 +63,16 @@ const NONCE_LEN: usize = 24;
 ///
 /// # Errors
 /// [`ErrorCode::InvalidArgument`] when the recipient text is not standard
-/// base64 of a 32-byte X25519 public key.
+/// base64 of a 32-byte X25519 public key, or when the key is low order and the
+/// agreed shared secret is all zero. RFC 7748 section 6.1 requires that abort.
 pub(crate) fn seal_to_recipient(bytes: &[u8], recipient: &str) -> Result<Vec<u8>, AmError> {
     let recipient_public = decode_recipient(recipient)?;
     let ephemeral_secret: [u8; PUBLIC_KEY_LEN] = rand::random();
     let ephemeral_public = x25519(ephemeral_secret, X25519_BASEPOINT_BYTES);
     let shared = x25519(ephemeral_secret, recipient_public);
+    if shared == [0u8; PUBLIC_KEY_LEN] {
+        return Err(low_order_recipient());
+    }
 
     let mut salt = [0u8; PUBLIC_KEY_LEN * 2];
     salt[..PUBLIC_KEY_LEN].copy_from_slice(&ephemeral_public);
@@ -116,6 +120,14 @@ fn invalid_recipient() -> AmError {
     AmError::new(
         ErrorCode::InvalidArgument,
         "recipient must be standard base64 text of a 32-byte X25519 public key",
+    )
+}
+
+/// A low-order recipient key agrees an all-zero shared secret, which is public.
+fn low_order_recipient() -> AmError {
+    AmError::new(
+        ErrorCode::InvalidArgument,
+        "recipient X25519 public key is low order: the shared secret is all zero",
     )
 }
 

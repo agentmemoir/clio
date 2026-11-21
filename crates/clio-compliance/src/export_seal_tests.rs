@@ -23,7 +23,7 @@ use base64::Engine as _;
 
 use crate::bundle::ExportContentMode;
 use crate::export::{ExportArgs, ExportDelivery, ExportFilter, export};
-use crate::export_seal::seal_to_recipient;
+use crate::export_seal::{MAGIC, seal_to_recipient};
 use crate::export_tests::{Scratch, args, ctx, fixture, open_sealed, read_sealed, test_recipient};
 use crate::subject_request_events::BindingControls;
 use clio_store::LocalEventStore;
@@ -71,6 +71,42 @@ fn tampered_ciphertext_does_not_open() {
         open_sealed(&sealed).is_err(),
         "a tampered seal must not open"
     );
+}
+
+#[test]
+fn tampered_ephemeral_public_key_does_not_open() {
+    let mut sealed = seal_to_recipient(SENTINEL, &test_recipient()).expect("seal");
+    let ephemeral_first = MAGIC.len();
+    sealed[ephemeral_first] ^= 0xff;
+    assert!(
+        open_sealed(&sealed).is_err(),
+        "the ephemeral public key is bound into the AAD, so a changed header must not open"
+    );
+}
+
+#[test]
+fn seal_rejects_an_all_zero_recipient_key() {
+    let zero = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
+    let error = seal_to_recipient(SENTINEL, &zero).expect_err("refuse a low-order key");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+}
+
+#[test]
+fn readable_export_with_a_low_order_recipient_is_refused_before_any_write() {
+    let f = fixture("seal-zero-recipient");
+    let ctx = ctx(&f, Actor::Harness);
+    let error = export(&ExportArgs {
+        recipient: Some(base64::engine::general_purpose::STANDARD.encode([0u8; 32])),
+        ..args(
+            &f,
+            &ctx,
+            ExportFilter::default(),
+            ExportContentMode::DsarPlaintext,
+        )
+    })
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert!(!f.path.as_path().exists());
 }
 
 #[test]

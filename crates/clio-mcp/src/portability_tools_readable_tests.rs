@@ -20,6 +20,12 @@
 use super::portability_tools_tests::{call, state, store_probe, temp_path};
 use serde_json::{Value, json};
 
+/// The X25519 public key matching a fixed test secret, as base64 recipient text.
+const REAL_RECIPIENT: &str = "UT9mObPoTo21MOhLumiTc9o7bz7PRd8yQUc41Y15LWY=";
+
+/// An all-zero curve point: every shared secret it agrees is all zero.
+const LOW_ORDER_RECIPIENT: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
 #[test]
 fn export_readable_requires_the_opt_in() {
     let s = state();
@@ -33,10 +39,31 @@ fn export_readable_requires_the_opt_in() {
             "bank": "bank-a",
             "actor": "harness",
             "content_mode": "dsar_plaintext",
-            "recipient": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            "recipient": REAL_RECIPIENT
         }),
     );
     assert_eq!(out["ok"], Value::Bool(false), "{out}");
     assert_eq!(out["code"], "forbidden", "{out}");
+    assert!(!std::path::Path::new(&dest).exists());
+}
+
+#[test]
+fn export_readable_rejects_a_low_order_recipient() {
+    let s = state();
+    let dest = temp_path("readable-low-order");
+    let out = call(
+        &s,
+        "export",
+        json!({
+            "destination": dest,
+            "bank": "bank-a",
+            "actor": "harness",
+            "content_mode": "dsar_plaintext",
+            "readable_export_opt_in": true,
+            "recipient": LOW_ORDER_RECIPIENT
+        }),
+    );
+    assert_eq!(out["ok"], Value::Bool(false), "{out}");
+    assert_eq!(out["code"], "invalid_argument", "{out}");
     assert!(!std::path::Path::new(&dest).exists());
 }

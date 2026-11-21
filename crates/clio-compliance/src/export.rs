@@ -144,7 +144,7 @@ pub struct ExportArgs<'a> {
     pub delivery: Option<ExportDelivery<'a>>,
     /// Explicit caller opt-in for a readable (`dsar_plaintext`) export.
     pub readable_export_opt_in: bool,
-    /// Recipient age X25519 public key a readable export is sealed to.
+    /// Recipient X25519 public key a readable export is sealed to.
     pub recipient: Option<String>,
 }
 
@@ -164,8 +164,8 @@ pub struct ExportOutcome {
 /// AUTHORISATION: only `harness` or `system` actors may export; agent/user
 /// callers get [`ErrorCode::Forbidden`] and no file is created. The payload is
 /// built fully in memory. A readable `dsar_plaintext` export additionally needs
-/// an explicit opt-in, which is recorded as a durable event intent, and an age
-/// recipient key it is sealed to before any byte reaches disk. The file is
+/// an explicit opt-in, which is recorded as a durable event intent, and an
+/// X25519 recipient public key it is sealed to before any byte reaches disk. The file is
 /// written through the durable custody boundary; an [`ExportDelivery`] is
 /// required to write.
 ///
@@ -214,7 +214,7 @@ fn require_readable_opt_in(args: &ExportArgs<'_>) -> Result<(), AmError> {
     {
         return Err(AmError::new(
             ErrorCode::Forbidden,
-            "readable export requires an age recipient public key",
+            "readable export requires an X25519 recipient public key",
         ));
     }
     Ok(())

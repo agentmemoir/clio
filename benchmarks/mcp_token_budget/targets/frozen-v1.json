@@ -40,6 +40,36 @@
   },
   "target_adjustment": [
     {
+      "decision_id": "mcp-all-preset-target-adjustment-2026-11-09",
+      "date": "2026-11-09",
+      "preset": "all",
+      "initial": {
+        "baseline_row": {
+          "tokens": "client/synthetic-eager-client/turn/1/tokens",
+          "bytes": "client/synthetic-eager-client/turn/1/bytes"
+        },
+        "factor": {
+          "tokens": 70,
+          "bytes": 80
+        },
+        "target": {
+          "tokens": 15183,
+          "bytes": 84505
+        }
+      },
+      "final_target": {
+        "tokens": 30004,
+        "bytes": 140559
+      },
+      "measured_candidate": {
+        "path": "crates/clio-mcp/tests/fixtures/schema_pack.json",
+        "sha256": "f9820131ad2b5f698e08280d0cf5f6226c2aa5e35258a27568d4fb172f592764",
+        "bytes": 140559,
+        "tokens": 30004
+      },
+      "reason": "The all preset ships the full tool surface, so it cannot reach the shared-row derived ceiling of 15183 tokens and 84505 bytes without removing shipped tools. The final ceilings are the live measurement of clio mcp schema-export --tools all at this commit: 30004 tokens and 140559 bytes, sha256 f9820131ad2b5f698e08280d0cf5f6226c2aa5e35258a27568d4fb172f592764. The record preserves the initial row, factor, and target. No later run recomputes or replaces the final ceilings, and the preset is still checked: any growth above 30004 tokens or 140559 bytes fails the target arm."
+    },
+    {
       "decision_id": "mcp-readable-export-args-2026-11-21",
       "date": "2026-11-21",
       "preset": "all",

@@ -83,6 +83,7 @@ fn export_then_import_restores_a_live_bank() {
     );
 
     let target = Harness::new();
+    // Follows the documented unseal step: open the delivered file, then import it.
     let report = import(&target.args(
         &target.ctx(),
         target.policy(),

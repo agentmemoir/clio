@@ -25,7 +25,7 @@ use crate::bundle::ExportContentMode;
 use crate::export::{ExportArgs, ExportFilter, export};
 pub(crate) use crate::export_seal_test_support::{open_sealed, read_sealed, test_recipient};
 
-/// Write a decrypted copy of an exported bundle for the import path.
+/// Follows the documented unseal step, so `import` consumes the opened bundle.
 pub(crate) fn unseal_file(source: &Path, name: &str) -> DestPath {
     let dest = dest_path(name);
     std::fs::write(dest.as_path(), read_sealed(source)).expect("write the decrypted bundle copy");

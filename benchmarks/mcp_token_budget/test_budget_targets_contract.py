@@ -215,7 +215,7 @@ class ContractTests(unittest.TestCase):
         ):
             with self.subTest(unit=unit):
                 value = document()
-                adjustment = value["target_adjustment"][0]
+                adjustment = value["target_adjustment"][-1]
                 adjustment["initial"]["factor"][unit] = factor
                 adjustment["initial"]["target"][unit] = baseline_value * factor // 100
                 entry(value, "all", unit)["factor"] = factor
