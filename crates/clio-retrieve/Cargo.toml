@@ -12,7 +12,7 @@ clio-config = { workspace = true }
 clio-index = { workspace = true }
 clio-store = { workspace = true }
 clio-types = { workspace = true }
-chrono = { workspace = true }
+jiff = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

@@ -48,7 +48,7 @@ clio-backup = { path = "crates/clio-backup" }
 clio-mcp = { path = "crates/clio-mcp" }
 # deny (not forbid): sqlite-vec registration requires a one-site allow(unsafe_code).
 base64 = "0.23"
-chrono = { version = "0.4", default-features = false, features = ["alloc", "std"] }
+jiff = "1.0.2"
 unicode-normalization = "0.1"
 chacha20poly1305 = "0.11"
 # X25519 key agreement for the readable-export seal. The operator supplies a

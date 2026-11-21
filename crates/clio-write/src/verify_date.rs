@@ -19,7 +19,7 @@
 //! Changes to date format policy should normally require changes here.
 
 use crate::verify::VerifyConfig;
-use chrono::{NaiveDate, NaiveDateTime};
+use jiff::civil::{Date, DateTime};
 use serde_json::Value;
 
 /// Unambiguous format strings tried before numeric slash dates.
@@ -29,8 +29,8 @@ const SAFE_DATETIME: &[&str] = &["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"];
 /// Parsed instant at the precision present in the snapshot or source span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParsedInstant {
-    Date(NaiveDate),
-    DateTime(NaiveDateTime),
+    Date(Date),
+    DateTime(DateTime),
 }
 
 impl ParsedInstant {
@@ -90,8 +90,8 @@ fn try_token(token: &str, expected: ParsedInstant, config: &VerifyConfig) -> Tok
             let Some((a, b, y)) = split_numeric_date(token) else {
                 return TokenOutcome::No;
             };
-            let day_first = NaiveDate::from_ymd_opt(y, b, a).map(ParsedInstant::Date);
-            let month_first = NaiveDate::from_ymd_opt(y, a, b).map(ParsedInstant::Date);
+            let day_first = ymd_option(y, b, a).map(ParsedInstant::Date);
+            let month_first = ymd_option(y, a, b).map(ParsedInstant::Date);
             if day_first.is_some_and(|d| expected.matches(d))
                 || month_first.is_some_and(|d| expected.matches(d))
             {
@@ -112,13 +112,13 @@ fn snapshot_instant(value: &Value) -> Result<ParsedInstant, String> {
     if s.is_empty() {
         return Err("empty date value".into());
     }
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+    if let Ok(dt) = DateTime::strptime("%Y-%m-%dT%H:%M:%S", s) {
         return Ok(ParsedInstant::DateTime(dt));
     }
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+    if let Ok(dt) = DateTime::strptime("%Y-%m-%d %H:%M:%S", s) {
         return Ok(ParsedInstant::DateTime(dt));
     }
-    if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+    if let Ok(d) = Date::strptime("%Y-%m-%d", s) {
         return Ok(ParsedInstant::Date(d));
     }
     Err("snapshot date must be ISO date or date-time".into())
@@ -157,7 +157,7 @@ fn month_name_token(chars: &[char], start: usize) -> Option<(usize, String)> {
         for take in (6..=char_len).rev() {
             let candidate: String = normalized.chars().take(take).collect();
             let candidate = candidate.trim_end();
-            if NaiveDate::parse_from_str(candidate, fmt).is_err() {
+            if Date::strptime(fmt, candidate).is_err() {
                 continue;
             }
             // Map localized prefix length back onto the original UTF-8 window.
@@ -174,7 +174,7 @@ fn month_name_token(chars: &[char], start: usize) -> Option<(usize, String)> {
     None
 }
 
-/// Map common non-English month tokens to English abbreviations chrono accepts.
+/// Map common non-English month tokens to English abbreviations jiff accepts.
 fn localize_months(s: &str) -> String {
     const ALIASES: &[(&str, &str)] = &[
         ("März", "Mar"),
@@ -199,31 +199,41 @@ fn localize_months(s: &str) -> String {
 fn parse_date_token(token: &str, config: &VerifyConfig) -> Result<Option<ParsedInstant>, String> {
     let token = localize_months(token);
     for fmt in SAFE_DATETIME {
-        if let Ok(dt) = NaiveDateTime::parse_from_str(&token, fmt) {
+        if let Ok(dt) = DateTime::strptime(fmt, &token) {
             return Ok(Some(ParsedInstant::DateTime(dt)));
         }
     }
     for fmt in SAFE_DATE {
-        if let Ok(d) = NaiveDate::parse_from_str(&token, fmt) {
+        if let Ok(d) = Date::strptime(fmt, &token) {
             return Ok(Some(ParsedInstant::Date(d)));
         }
     }
     if let Some((a, b, y)) = split_numeric_date(&token) {
         if a > 12 && b <= 12 {
-            return Ok(NaiveDate::from_ymd_opt(y, b, a).map(ParsedInstant::Date));
+            return Ok(ymd_option(y, b, a).map(ParsedInstant::Date));
         }
         if b > 12 && a <= 12 {
-            return Ok(NaiveDate::from_ymd_opt(y, a, b).map(ParsedInstant::Date));
+            return Ok(ymd_option(y, a, b).map(ParsedInstant::Date));
         }
         if a <= 12 && b <= 12 {
             return match config.day_first {
                 None => Err("ambiguous".into()),
-                Some(true) => Ok(NaiveDate::from_ymd_opt(y, b, a).map(ParsedInstant::Date)),
-                Some(false) => Ok(NaiveDate::from_ymd_opt(y, a, b).map(ParsedInstant::Date)),
+                Some(true) => Ok(ymd_option(y, b, a).map(ParsedInstant::Date)),
+                Some(false) => Ok(ymd_option(y, a, b).map(ParsedInstant::Date)),
             };
         }
     }
     Ok(None)
+}
+
+/// Build a civil date from numeric parts, failing closed on out-of-range parts.
+fn ymd_option(year: i32, month: u32, day: u32) -> Option<Date> {
+    let (Ok(year), Ok(month), Ok(day)) =
+        (i16::try_from(year), i8::try_from(month), i8::try_from(day))
+    else {
+        return None;
+    };
+    Date::new(year, month, day).ok()
 }
 
 fn split_numeric_date(token: &str) -> Option<(u32, u32, i32)> {
@@ -245,4 +255,40 @@ fn split_numeric_date(token: &str) -> Option<(u32, u32, i32)> {
         return None;
     }
     Some((a, b, y))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::verify::VerifyConfig;
+
+    #[test]
+    fn month_aliases_normalize_to_parsable_english() {
+        const CASES: &[(&str, &str, &str)] = &[
+            ("März", "Mar", "2026-03-03"),
+            ("août", "Aug", "2026-08-03"),
+            ("Août", "Aug", "2026-08-03"),
+            ("dezember", "Dec", "2026-12-03"),
+            ("Dezember", "Dec", "2026-12-03"),
+            ("décembre", "Dec", "2026-12-03"),
+            ("Décembre", "Dec", "2026-12-03"),
+            ("septiembre", "Sep", "2026-09-03"),
+            ("Septiembre", "Sep", "2026-09-03"),
+        ];
+        for (alias, english, expected) in CASES {
+            let normalized = localize_months(&format!("{alias} 3, 2026"));
+            assert_eq!(normalized, format!("{english} 3, 2026"), "alias {alias}");
+            let parsed = Date::strptime("%b %d, %Y", &normalized)
+                .unwrap_or_else(|err| panic!("alias {alias} failed: {err}"));
+            assert_eq!(parsed.to_string(), *expected, "alias {alias}");
+        }
+    }
+
+    #[test]
+    fn ambiguous_numeric_date_fails_closed() {
+        let value = serde_json::json!({"date": "2026-03-04"});
+        let err = match_date("on 03/04/2026", &value, &VerifyConfig::default())
+            .expect_err("ambiguous numeric date must fail closed");
+        assert_eq!(err, "ambiguous date without day_first policy");
+    }
 }

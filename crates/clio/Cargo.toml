@@ -31,7 +31,7 @@ clio-mcp = { workspace = true }
 # served through the denial-aware entry point with the erasure-journal probe;
 # the crate is already in this binary's build graph through `clio-mcp`.
 clio-sync = { workspace = true }
-chrono = { workspace = true }
+jiff = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anstyle = { workspace = true }
