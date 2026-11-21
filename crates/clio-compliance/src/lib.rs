@@ -60,7 +60,7 @@ mod export_mask;
 mod export_seal;
 mod export_subject;
 #[cfg(test)]
-mod export_test_seal_support;
+mod export_seal_test_support;
 mod import;
 mod inventory;
 mod journal_denial;
