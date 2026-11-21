@@ -142,9 +142,8 @@ pub const PULL_RESPONSE_BYTE_BUDGET: usize = 4 * 1024 * 1024;
 /// only bounds rows per page, and [`PULL_RESPONSE_BYTE_BUDGET`] only bounds the
 /// server's assembly of one page, so without this a peer that always answers
 /// `has_more` keeps the client loop fetching forever. The cap is the client's
-/// own runaway guard, not a limit on a bank's backlog: every page persists its
-/// cursor, so a legitimately larger backlog resumes from the stored cursor on
-/// the next pull.
+/// own runaway guard, not a limit on a bank's backlog. Only an applied page
+/// stores its cursor: a refused or frozen page, and the cap exit, save none.
 pub const PULL_MAX_PAGES: usize = 1000;
 
 /// Byte cap for one pull cursor: a cursor is a short opaque token, so this pull
