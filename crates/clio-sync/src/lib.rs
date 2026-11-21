@@ -137,6 +137,19 @@ pub const PULL_PAGE_LIMIT: usize = 200;
 /// stops before this many serialized row bytes and always keeps one row.
 pub const PULL_RESPONSE_BYTE_BUDGET: usize = 4 * 1024 * 1024;
 
+/// Page cap for one client pull of one bank: how many pages a single
+/// `pull_bank` call may fetch before it stops with an error. [`PULL_PAGE_LIMIT`]
+/// only bounds rows per page, and [`PULL_RESPONSE_BYTE_BUDGET`] only bounds the
+/// server's assembly of one page, so without this a peer that always answers
+/// `has_more` keeps the client loop fetching forever. The cap is the client's
+/// own runaway guard, not a limit on a bank's backlog. Only an applied page
+/// stores its cursor: a refused or frozen page, and the cap exit, save none.
+pub const PULL_MAX_PAGES: usize = 1000;
+
+/// Byte cap for one pull cursor: a cursor is a short opaque token, so this pull
+/// refuses and never stores a larger one.
+pub const PULL_MAX_CURSOR_BYTES: usize = 4096;
+
 /// Default auto-stop TTL for interactive `sync_serve`.
 pub const SERVE_TTL_DEFAULT_SECS: u64 = 30 * 60;
 
