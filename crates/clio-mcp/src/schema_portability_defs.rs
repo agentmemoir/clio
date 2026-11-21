@@ -34,8 +34,10 @@ pub fn portability_defs() -> Vec<ToolDef> {
             description: "Write one JSON memory_export_bundle with a completeness_manifest \
                           (version, counts, checksums, filter, complete flag). \
                           content_mode defaults to ciphertext_backup (opaque bodies without \
-                          DEKs); dsar_plaintext emits authorized readable content. Requires a \
-                          harness/system actor; no DEKs, API keys, or sync credentials in the file.",
+                          DEKs); dsar_plaintext emits authorized readable content only with \
+                          readable_export_opt_in=true and an age recipient public key, and the \
+                          bundle is written sealed to that key. Requires a harness/system \
+                          actor; no DEKs, API keys, or sync credentials in the file.",
             required: &["destination"],
             props: vec![
                 (
@@ -44,7 +46,19 @@ pub fn portability_defs() -> Vec<ToolDef> {
                 ),
                 (
                     "content_mode",
-                    s("ciphertext_backup (default) | dsar_plaintext."),
+                    s(
+                        "ciphertext_backup (default) | dsar_plaintext (needs the opt-in and recipient).",
+                    ),
+                ),
+                (
+                    "readable_export_opt_in",
+                    b("Explicit opt-in for a readable dsar_plaintext export (default false)."),
+                ),
+                (
+                    "recipient",
+                    s(
+                        "age X25519 public key (age1...) the readable bundle is sealed to; required with dsar_plaintext.",
+                    ),
                 ),
                 (
                     "category",

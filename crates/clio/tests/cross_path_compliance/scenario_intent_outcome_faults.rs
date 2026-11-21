@@ -136,6 +136,7 @@ pub(crate) fn spec<'a>(id: &'a str, destination: &'a Path, staging: &'a Path) ->
         custody_owner: "clio",
         required_action: "delivery",
         now: NOW,
+        readable_opt_in: false,
     }
 }
 

@@ -70,6 +70,9 @@ libc = { workspace = true }
 workspace = true
 
 [dev-dependencies]
+# The export scenarios seal a readable bundle and open it back with the matching
+# test identity, so the cross-path assertions read the delivered bytes.
+age = { workspace = true }
 # The deployment config seals its secrets, so a test that runs `clio setup` or
 # `config set` at deployment scope needs a Clio encryption key. The feature
 # compiles in the test-only injection seam; without it such a test would fall

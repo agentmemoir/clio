@@ -51,6 +51,10 @@ base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "std"] }
 unicode-normalization = "0.1"
 chacha20poly1305 = "0.11"
+# Seals a readable export to a recipient's public key before any byte reaches
+# disk. Chosen for the age v1 file format and its external `rage -d` interop, so
+# an operator can decrypt the delivered bundle with a tool Clio does not ship.
+age = { version = "0.12", default-features = false }
 # Stretches the sync key out of its secret: a single fast SHA-256 pass lets a
 # low-entropy secret be brute-forced offline from stolen ciphertext.
 argon2 = "0.6"

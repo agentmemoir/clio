@@ -166,7 +166,7 @@ fn export_matches_the_registered_usage_and_parser() {
     let spec = record("export");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio export --out FILE [--content-mode dsar_plaintext|ciphertext_backup] [--category C] [--time-start TS] [--time-end TS] [--include-archived true|false] [--include-discarded true|false] [--subject S] [--bank BANK] [--actor ACTOR] [--output json|text]",
+        "usage: clio export --out FILE [--content-mode dsar_plaintext|ciphertext_backup] [--readable-export-opt-in true|false] [--recipient AGE_RECIPIENT] [--category C] [--time-start TS] [--time-end TS] [--include-archived true|false] [--include-discarded true|false] [--subject S] [--bank BANK] [--actor ACTOR] [--output json|text]",
         "export full usage"
     );
     assert_eq!(
@@ -179,6 +179,8 @@ fn export_matches_the_registered_usage_and_parser() {
             "output",
             "out",
             "content-mode",
+            "readable-export-opt-in",
+            "recipient",
             "category",
             "time-start",
             "time-end",
@@ -324,7 +326,7 @@ fn the_write_operations_tranche_has_complete_flag_metadata() {
 
 /// Every documented flag carries the kind its consumer parses: the enum
 /// lists name exactly the accepted values (`cli_write_shared`'s four review
-/// actions, `cli_write_portability`'s two content modes and two include
+/// actions, `cli_write_portability`'s two content modes and three boolean
 /// labels and the `clio_types` category wire table, and the `erase_request`
 /// tool's two actors), and every remaining flag stays free text or the shared `--output` global.
 #[test]
@@ -340,7 +342,7 @@ fn the_write_operations_flag_kinds_match_their_consumers() {
                     ValueKind::Enum(&["dsar_plaintext", "ciphertext_backup"])
                 }
                 ("export", "category") => ValueKind::Enum(clio_types::SemanticCategory::WIRE),
-                ("export", "include-archived" | "include-discarded") => {
+                ("export", "include-archived" | "include-discarded" | "readable-export-opt-in") => {
                     ValueKind::Enum(&["true", "false"])
                 }
                 ("erase", "actor") => ValueKind::Enum(&["harness", "system"]),

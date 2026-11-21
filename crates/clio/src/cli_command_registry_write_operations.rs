@@ -255,6 +255,17 @@ pub(crate) const EXPORT: CommandSpec = CommandSpec {
             )
         },
         Flag::choice(
+            "readable-export-opt-in",
+            "true|false",
+            "Explicit opt-in for a readable `dsar_plaintext` export; `cli_write_portability::include_flag` validates `true` or `false` and the tool refuses a readable export without it.",
+            &["true", "false"],
+        ),
+        Flag::text(
+            "recipient",
+            "AGE_RECIPIENT",
+            "age X25519 public key (`age1...`) the readable bundle is sealed to; the tool refuses a readable export when it is absent or empty.",
+        ),
+        Flag::choice(
             "category",
             "C",
             "Narrows the items collection to one semantic category, which `cli_write_portability::export_call` validates against `clio_types::SemanticCategory::WIRE` (`task_spec`, `schema`, `tool_config`, `output_constraint`, `persona`); triples and association edges follow it, so one whose endpoint is filtered out is dropped; the filters do not reach persona_stable, persona_preferences, tasks, failures, beliefs, and tombstones, which stay whole, and the bundle manifest records it; `--subject` scopes the whole bundle.",

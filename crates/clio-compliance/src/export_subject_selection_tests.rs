@@ -63,6 +63,8 @@ fn args<'a>(
         facts,
         backend,
         delivery: None,
+        readable_export_opt_in: true,
+        recipient: Some(crate::export_tests::test_recipient()),
     }
 }
 

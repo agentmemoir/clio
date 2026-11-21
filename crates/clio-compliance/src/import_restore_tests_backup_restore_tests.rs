@@ -102,6 +102,8 @@ fn export_bundle(source: &SqliteStore, bank: &str, mode: ExportContentMode) -> D
         facts: None,
         backend: None,
         delivery: None,
+        readable_export_opt_in: true,
+        recipient: Some(crate::export_tests::test_recipient()),
     })
     .expect("export succeeds");
     dest
@@ -143,7 +145,7 @@ fn backup_bundle_of_two_beliefs_restores_into_a_fresh_store() {
     let dest = export_bundle(&source, &bank, ExportContentMode::CiphertextBackup);
 
     // The exported bundle carries per-record placeholders, not one constant.
-    let text = std::fs::read_to_string(dest.as_path()).unwrap();
+    let text = crate::export_tests::read_sealed(dest.as_path());
     let envelope: BundleEnvelope = serde_json::from_str(&text).unwrap();
     let propositions: Vec<&str> = envelope
         .entities

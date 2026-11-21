@@ -99,6 +99,7 @@ pub(super) fn spec<'a>(
         custody_owner: "clio",
         required_action: "delivery",
         now: NOW,
+        readable_opt_in: false,
     }
 }
 

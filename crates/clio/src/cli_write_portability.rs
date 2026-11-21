@@ -90,7 +90,8 @@ impl WriteGroup for PortabilityWriteGroup {
     }
 }
 
-/// `export --out FILE [--content-mode M] [--category C] [--time-start TS]
+/// `export --out FILE [--content-mode M] [--readable-export-opt-in B]
+/// [--recipient AGE] [--category C] [--time-start TS]
 /// [--time-end TS] [--include-archived B] [--include-discarded B]` → `export`:
 /// one bundle file plus its completeness manifest. The tool refuses
 /// unprivileged actors (`--actor harness|system`); the CLI passes `--actor`
@@ -121,6 +122,15 @@ fn export_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
             };
             args.insert(key.into(), Value::from(value));
         }
+    }
+    include_flag(
+        parsed,
+        "readable-export-opt-in",
+        "readable_export_opt_in",
+        &mut args,
+    )?;
+    if let Some(recipient) = parsed.value("recipient") {
+        args.insert("recipient".into(), Value::from(recipient));
     }
     include_flag(parsed, "include-archived", "include_archived", &mut args)?;
     include_flag(parsed, "include-discarded", "include_discarded", &mut args)?;

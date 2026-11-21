@@ -280,8 +280,11 @@ fn drive_claim(claim: &Claim) {
     //    subject's marker must be absent from the delivered file.
     //    The scope ledger names more families than the manifest counts, and
     //    the families the manifest omits are named in that omission list.
+    let identity = age::x25519::Identity::generate();
+    let recipient = identity.to_public();
     let exported = claim.ok(&format!(
-        "export --out {export} --subject {DENIED_SUBJECT} --content-mode dsar_plaintext"
+        "export --out {export} --subject {DENIED_SUBJECT} --content-mode dsar_plaintext \
+         --readable-export-opt-in true --recipient {recipient}"
     ));
     let manifest = &exported["manifest"];
     family_test_support::assert_every_family(manifest, &claim.fixture);
@@ -290,7 +293,9 @@ fn drive_claim(claim: &Claim) {
     let omissions = manifest["omissions"].as_array().map_or(0, Vec::len);
     let complete = manifest["complete"].as_bool();
     assert_eq!(complete, Some(omissions == 0), "{manifest}");
-    let bundle = std::fs::read_to_string(&claim.export_path).expect("read the bundle");
+    let sealed = std::fs::read(&claim.export_path).expect("read the bundle");
+    let opened = age::decrypt(&identity, &sealed).expect("open the sealed bundle");
+    let bundle = String::from_utf8(opened).expect("bundle text");
     assert!(bundle.contains(DENIED_MARKER), "denied marker missing");
     assert!(!bundle.contains(CONTROL_MARKER), "control marker leaked");
 

@@ -58,8 +58,11 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
     }
 }
 
-/// `export(destination, filter?, content_mode?, subject_id?)`: one bundle file
-/// plus manifest, written through the durable destination-custody boundary.
+/// `export(destination, filter?, content_mode?, subject_id?,
+/// readable_export_opt_in?, recipient?)`: one bundle file plus manifest, written
+/// through the durable destination-custody boundary. The default content mode is
+/// the opaque ciphertext backup; a readable export needs the explicit opt-in and
+/// an age recipient key it is sealed to.
 #[inline(never)]
 fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
@@ -92,6 +95,8 @@ fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         subject_id: subject_id.map(str::to_owned),
     };
     let content_mode = ExportContentMode::parse(opt_str(args, "content_mode"))?;
+    let readable_export_opt_in = opt_bool(args, "readable_export_opt_in", false)?;
+    let recipient = opt_str(args, "recipient").map(str::to_owned);
     let controls = clio_compliance::BindingControls {
         copy_controls_accepted: true,
         ..clio_compliance::BindingControls::default()
@@ -119,6 +124,8 @@ fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         subject_id,
         facts,
         backend: Some(state.inventory_backend),
+        readable_export_opt_in,
+        recipient,
         delivery: Some(clio_compliance::ExportDelivery {
             events: &*state.events,
             custody: &*state.custody,
@@ -174,6 +181,7 @@ fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
         custody_owner: "clio",
         required_action: "delivery",
         now: &now,
+        readable_opt_in: false,
     };
     clio_compliance::write_review_export(
         &ctx,
@@ -265,3 +273,7 @@ fn masked_credentials(args: &Value) -> serde_json::Value {
 #[cfg(test)]
 #[path = "portability_tools_tests.rs"]
 mod portability_tools_tests;
+
+#[cfg(test)]
+#[path = "portability_tools_readable_tests.rs"]
+mod portability_tools_readable_tests;

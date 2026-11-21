@@ -57,7 +57,10 @@ mod erasure_step_probe;
 mod export;
 mod export_custody;
 mod export_mask;
+mod export_seal;
 mod export_subject;
+#[cfg(test)]
+mod export_test_seal_support;
 mod import;
 mod inventory;
 mod journal_denial;
