@@ -400,3 +400,7 @@ fn run_revoke(
 #[cfg(test)]
 #[path = "auth_cli_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "auth_cli_help_tests.rs"]
+mod auth_cli_help_tests;
