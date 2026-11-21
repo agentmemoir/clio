@@ -118,7 +118,7 @@ Deliver the subject's stored content as one bundle file:
 clio export --out ./s1-bundle.json --subject s1 --actor harness
 ```
 
-The command writes one bundle file plus its completeness manifest, and refuses any actor except `harness` or `system`. `--subject` bounds the bundle to one subject; omit it to export the whole store. `--content-mode dsar_plaintext` is the default, and `--content-mode ciphertext_backup` selects the backup bundle. `--out` must lie inside the deployment export root, which is `CLIO_EXPORT_ROOT` when it is set, else `<data directory>/exports`, else `<working directory>/clio-exports`, and a relative path is joined to that root, so `./s1-bundle.json` above lands at `<root>/s1-bundle.json`; a destination outside the root is refused and nothing is written.
+The command writes one bundle file plus its completeness manifest, and refuses any actor except `harness` or `system`. `--subject` bounds the bundle to one subject; omit it to export the whole store. `--content-mode ciphertext_backup` is the default, and `--content-mode dsar_plaintext` selects the readable export. `--out` must lie inside the deployment export root, which is `CLIO_EXPORT_ROOT` when it is set, else `<data directory>/exports`, else `<working directory>/clio-exports`, and a relative path is joined to that root, so `./s1-bundle.json` above lands at `<root>/s1-bundle.json`; a destination outside the root is refused and nothing is written.
 
 The command prints one line with the destination, the content mode, a `complete` flag, the entity count, and the start of the content hash. Check `complete=true` on that line before you deliver the bundle; the manifest behind it also carries the per-type counts and the full hash.
 

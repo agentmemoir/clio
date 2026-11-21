@@ -246,11 +246,11 @@ pub(crate) const EXPORT: CommandSpec = CommandSpec {
     documented: &[
         OUT_REQUIRED,
         Flag {
-            default: Some("dsar_plaintext"),
+            default: Some("ciphertext_backup"),
             ..Flag::choice(
                 "content-mode",
                 "dsar_plaintext|ciphertext_backup",
-                "Selects the bundle content mode that `cli_write_portability::export_call` validates against `dsar_plaintext` or `ciphertext_backup`, and the tool defaults it to `dsar_plaintext` when omitted.",
+                "Selects the bundle content mode that `cli_write_portability::export_call` validates against `dsar_plaintext` or `ciphertext_backup`, and the tool defaults it to `ciphertext_backup` when omitted.",
                 &["dsar_plaintext", "ciphertext_backup"],
             )
         },

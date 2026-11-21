@@ -127,7 +127,7 @@ fn export_writes_bundle_manifest_for_privileged_actor() {
         }),
     );
     assert_eq!(out["ok"], Value::Bool(true), "{out}");
-    assert_eq!(out["content_mode"], "dsar_plaintext");
+    assert_eq!(out["content_mode"], "ciphertext_backup");
     let manifest = &out["manifest"];
     assert_eq!(manifest["complete"], Value::Bool(true));
     let text = fs::read_to_string(&dest).expect("bundle file");

@@ -353,14 +353,14 @@ fn the_write_operations_flag_kinds_match_their_consumers() {
 }
 
 /// The recorded defaults are the values the tools apply when the flag is
-/// omitted: the export tool bundles plaintext with archived and discarded
-/// rows, and compliance erasure defaults to the crypto-shred reason code,
+/// omitted: the export tool bundles opaque ciphertext with archived and
+/// discarded rows, and compliance erasure defaults to the crypto-shred reason code,
 /// whose named constant lives in `clio_compliance`, outside this crate's
 /// dependency set.
 #[test]
 fn the_recorded_defaults_are_the_values_the_tools_apply() {
     for (name, flag, default) in [
-        ("export", "content-mode", Some("dsar_plaintext")),
+        ("export", "content-mode", Some("ciphertext_backup")),
         ("export", "include-archived", Some("true")),
         ("export", "include-discarded", Some("true")),
         ("erase", "reason-code", Some("COMPLIANCE_CRYPTO_SHRED")),

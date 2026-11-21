@@ -1,0 +1,1 @@
+An export made without `--content-mode` now writes the opaque `ciphertext_backup` bundle, so the default export never carries readable memory content; pass `--content-mode dsar_plaintext` when a readable DSAR bundle is intended.
