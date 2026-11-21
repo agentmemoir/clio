@@ -63,10 +63,7 @@ pub(crate) fn check_provider_target(
         )
     })?;
     let host = normalise_host(&target.host);
-    if allow_hosts
-        .iter()
-        .any(|allowed| allowed.trim().eq_ignore_ascii_case(&host))
-    {
+    if host_is_allowlisted(&host, allow_hosts) {
         return Ok(HttpTarget {
             scheme: target.scheme,
             host,
@@ -128,14 +125,34 @@ pub(crate) fn allow_hosts_from(state: &McpState) -> Vec<String> {
     hosts
 }
 
-/// Refuse `url` as a provider destination under this deployment's allowlist.
+/// Whether the operator allowlist names `url`'s host.
 ///
-/// # Errors
-/// As [`check_provider_target`].
-pub(crate) fn require_provider_target(state: &McpState, url: &str) -> Result<(), AmError> {
+/// This is the same compare the gate runs, through [`host_is_allowlisted`], so a
+/// host cannot be sanctioned for the credential decision and refused by the gate
+/// or the other way round. It is not itself a gate: a caller judges the
+/// destination first and asks this only about a URL that has already passed.
+pub(crate) fn allowlisted_host(state: &McpState, url: &str) -> bool {
     let hosts = allow_hosts_from(state);
     let refs: Vec<&str> = hosts.iter().map(String::as_str).collect();
-    check_provider_target(url, &refs).map(|_| ())
+    http_target(url).is_ok_and(|target| {
+        let host = normalise_host(&target.host);
+        host_is_allowlisted(&host, &refs)
+    })
+}
+
+/// The provider base URL the caller asked for, or `default`, before any rule.
+fn provider_url<'a>(options: &'a Value, default: &'a str) -> &'a str {
+    options
+        .get("api_base_url")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            options
+                .get("base_url")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or(default)
 }
 
 /// The provider base URL the caller asked for, or `default`, once it has passed
@@ -152,19 +169,20 @@ pub(crate) fn checked_base_url<'a>(
     options: &'a Value,
     default: &'a str,
 ) -> Result<&'a str, AmError> {
-    let url = options
-        .get("api_base_url")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            options
-                .get("base_url")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-        })
-        .unwrap_or(default);
-    require_provider_target(state, url)?;
+    let url = provider_url(options, default);
+    let hosts = allow_hosts_from(state);
+    let refs: Vec<&str> = hosts.iter().map(String::as_str).collect();
+    check_provider_target(url, &refs)?;
     Ok(url)
+}
+
+/// The one allowlist compare: an entry names `host` when the two agree
+/// case-insensitively after trimming. Both the gate and the credential decision
+/// come through here, so a host cannot be sanctioned for one and not the other.
+fn host_is_allowlisted(host: &str, allow_hosts: &[&str]) -> bool {
+    allow_hosts
+        .iter()
+        .any(|allowed| allowed.trim().eq_ignore_ascii_case(host))
 }
 
 /// The host as a comparison key: lowercased, with exactly one trailing dot

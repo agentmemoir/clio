@@ -36,7 +36,7 @@ use std::time::Duration;
 use clio_admission::AdmissionPolicy;
 use clio_admission::gated::{GateRequest, gated_create_raw};
 use clio_compliance::ImportReport;
-use clio_config::secret::{mask_secret, masked_clone, scrub_inline_secrets};
+use clio_config::secret::scrub_inline_secrets;
 use clio_types::{
     AmError, EpistemicKind, ErrorCode, ItemKind, MemoryItem, OpContext, SemanticCategory,
     SourceType,
@@ -51,6 +51,9 @@ const DEFAULT_PAGE_SIZE: u64 = 50;
 const DEFAULT_MAX_ITEMS: u64 = 500;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The environment the credential fallback reads, as a seam a test can supply.
+pub(crate) type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
+
 enum ItemOutcome {
     Created,
     Skipped,
@@ -60,6 +63,14 @@ enum ItemOutcome {
 /// Import memories from Mem0 end-to-end: pull, credential masking, dry-run
 /// reporting, gating, `provider:<id>` provenance, and external-id idempotency.
 pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Value, AmError> {
+    import_mem0(state, args, &|k| std::env::var(k).ok())
+}
+
+pub(crate) fn import_mem0(
+    state: &McpState,
+    args: &Value,
+    env: EnvLookup<'_>,
+) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args)?;
     let dry_run = opt_bool(args, "dry_run", false)?;
@@ -67,6 +78,7 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
 
     let base_url =
         crate::provider_destination::checked_base_url(state, options, DEFAULT_MEM0_BASE_URL)?;
+    let sanctioned = crate::provider_destination::allowlisted_host(state, base_url);
     let user_id = opt_str(options, "user_id");
     let agent_id = opt_str(options, "agent_id");
     let page_size = options
@@ -80,14 +92,7 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
         .unwrap_or(DEFAULT_MAX_ITEMS)
         .max(1);
 
-    let api_key = extract_api_key(args);
-    let auth_header = api_key.as_deref().map(|k| {
-        if k.starts_with("Token ") || k.starts_with("Bearer ") {
-            k.to_owned()
-        } else {
-            format!("Token {k}")
-        }
-    });
+    let auth_header = crate::provider_credentials::authorization(args, env, sanctioned)?;
 
     let policy = gated_write_policy(state, ctx.bank.as_str(), args)?;
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
@@ -169,7 +174,7 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
     Ok(json!({
         "ok": true,
         "provider": "mem0",
-        "credentials_masked": masked_credentials(args),
+        "credentials_masked": crate::provider_credentials::masked_credentials(args, env, sanctioned),
         "report": serde_json::to_value(&report).expect("import report serializes"),
         "writes_performed": if dry_run { 0 } else { would_create },
         "bank": ctx.bank.as_str()
@@ -282,50 +287,6 @@ fn process_mem0_item(
     } else {
         Ok(ItemOutcome::Rejected(decision.rejection_reason))
     }
-}
-
-/// Fully-redacted view of accepted credentials (never plaintext).
-pub(crate) fn masked_credentials(args: &Value) -> Value {
-    masked_credentials_with(args, &|k| std::env::var(k).ok())
-}
-
-pub(crate) fn masked_credentials_with(args: &Value, env: &dyn Fn(&str) -> Option<String>) -> Value {
-    if let Some(creds) = args.get("credentials") {
-        match creds {
-            Value::String(s) => Value::String(mask_secret(s)),
-            Value::Object(_) => masked_clone(creds),
-            Value::Null => Value::Null,
-            other => masked_clone(other),
-        }
-    } else if let Some(env_key) = env("CLIO_MEM0_API_KEY") {
-        json!({ "api_key": mask_secret(&env_key) })
-    } else {
-        Value::Null
-    }
-}
-
-fn extract_api_key(args: &Value) -> Option<String> {
-    extract_api_key_with(args, &|k| std::env::var(k).ok())
-}
-
-fn extract_api_key_with(args: &Value, env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-    if let Some(creds) = args.get("credentials") {
-        if let Some(s) = creds.as_str()
-            && !s.trim().is_empty()
-        {
-            return Some(s.trim().to_owned());
-        }
-        if let Some(obj) = creds.as_object() {
-            for key in ["api_key", "token", "key", "secret"] {
-                if let Some(val) = obj.get(key).and_then(Value::as_str)
-                    && !val.trim().is_empty()
-                {
-                    return Some(val.trim().to_owned());
-                }
-            }
-        }
-    }
-    env("CLIO_MEM0_API_KEY").filter(|s| !s.trim().is_empty())
 }
 
 fn build_mem0_url(
