@@ -19,7 +19,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::{PULL_PAGE_LIMIT, SERVE_TTL_DEFAULT_SECS};
+use super::{PULL_MAX_PAGES, PULL_PAGE_LIMIT, SERVE_TTL_DEFAULT_SECS};
 
 /// The interactive serve TTL stays at the documented default of 30 minutes:
 /// the usage text promises it, so code and help cannot drift apart.
@@ -41,5 +41,17 @@ fn the_pull_page_stays_bounded() {
     assert_eq!(
         PULL_PAGE_LIMIT, 200,
         "the pull page must stay bounded at its documented size"
+    );
+}
+
+/// The client pull stays bounded to the documented number of pages: the cap
+/// error and the changelog both promise 1000, so the value is pinned here for
+/// the same reason as the page size. Pinned by value rather than by a second
+/// constant, which the linter rejects under `-D warnings`.
+#[test]
+fn the_pull_page_cap_stays_bounded() {
+    assert_eq!(
+        PULL_MAX_PAGES, 1000,
+        "the client pull page cap must stay at its documented value"
     );
 }

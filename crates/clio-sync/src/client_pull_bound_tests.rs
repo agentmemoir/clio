@@ -5,14 +5,17 @@
 //!
 //! This module tests the pull loop's bounds: a peer that answers `has_more`
 //! cannot keep one `pull_bank` call fetching forever. A page that hands back
-//! the cursor it was asked from stops the pull with an error, a peer that never
-//! finishes stops the pull at the page cap with an error, and a peer that
-//! finishes after one page still succeeds, so the guards do not break normal
-//! operation.
+//! the cursor it was asked from stops the pull with an error *before* its rows
+//! are applied, a peer that never finishes stops the pull at the page cap with
+//! an error that says the cursor is saved and a re-run continues, a page that
+//! freezes the bank still breaks cleanly, and a peer that finishes after one
+//! page still succeeds, so the guards do not break normal operation.
 //!
 //! ## Owns
-//! - The cursor-repeat stop and the page-cap stop, each asserting the exact
-//!   number of requests the fake peer received, and the one-page happy path
+//! - The cursor-repeat stop, the page-cap stop, the refused-page assertion that
+//!   none of its rows were written, the freeze-beats-repeat control, and the
+//!   one-page happy path, each asserting the exact number of requests the fake
+//!   peer received
 //! - The scripted fake peer used by these tests only
 //!
 //! ## Does not own
@@ -25,10 +28,11 @@
 //!
 //! Keep this module focused on pull-loop bound tests.
 
-use crate::client::client_tests::{cfg, paired_key, sqlite};
+use crate::client::client_tests::{cfg, item, paired_key, sqlite};
 use crate::client::pull;
-use crate::protocol::encode_cursor;
-use clio_store::SyncStore;
+use crate::envelope_fixtures::seal_own_content;
+use crate::protocol::{SyncContent, SyncMutation, encode_cursor};
+use clio_store::{DeadLetterStatus, Store, SyncStore};
 use clio_types::{AmError, ErrorCode};
 use serde_json::json;
 use std::io::{Read, Write};
@@ -38,16 +42,40 @@ use std::thread;
 
 const BANK: &str = "bA";
 
-/// One pull page as raw wire JSON: no rows, the given resume cursor, and the
-/// given `has_more` flag. A row-free page keeps these tests about the loop's
-/// bounds: nothing to apply, nothing to decrypt, only the cursor and the flag.
+/// One pull page as raw wire JSON: the given rows, the given resume cursor, and
+/// the given `has_more` flag.
 fn page(next_cursor: &str, has_more: bool) -> String {
+    raw_page(&[], next_cursor, has_more)
+}
+
+/// [`page`] with rows: the bound tests that must prove a refused page applied
+/// nothing serve one real row through here.
+fn raw_page(rows: &[SyncMutation], next_cursor: &str, has_more: bool) -> String {
     serde_json::to_string(&json!({
-        "mutations": [],
+        "mutations": rows,
         "next_cursor": next_cursor,
         "has_more": has_more,
     }))
     .expect("page json")
+}
+
+/// One real `item` upsert for `BANK`, sealed under the one shared key so the
+/// client can open it: the row a repeat-refused page must not write.
+fn applied_row(id: &str) -> SyncMutation {
+    let document = serde_json::to_value(item(BANK, id, "s1", "2026-01-01T00:00:00Z", "from relay"))
+        .expect("item json");
+    seal_own_content(SyncMutation {
+        sync_mutation_id: format!("m-up-{id}"),
+        bank: BANK.to_owned(),
+        entity_kind: "item".into(),
+        entity_id: id.to_owned(),
+        op: "upsert".into(),
+        transaction_time: "2026-01-01T00:00:00Z".into(),
+        device_id: "relay".into(),
+        content: SyncContent::Plain(document),
+        content_hash: "h".into(),
+        admission_receipt: None,
+    })
 }
 
 /// Serve `pages` in order, one page per connection, and record each request
@@ -110,13 +138,12 @@ fn requests_seen(seen: &Arc<Mutex<Vec<String>>>) -> usize {
     seen.lock().expect("seen lock").len()
 }
 
-/// The refusal shape every bound shares: this crate's refusal code, and a
-/// message naming the bank the pull was for.
-fn assert_refusal(err: &AmError) {
+/// The refusal shape every bound shares: the bound's own code, and a message
+/// naming the bank the pull was for.
+fn assert_refusal(err: &AmError, code: ErrorCode) {
     assert_eq!(
-        err.code,
-        ErrorCode::Forbidden,
-        "a bound stops the pull as a refusal: {err:?}"
+        err.code, code,
+        "a bound stops the pull under its own code: {err:?}"
     );
     assert!(
         err.message.contains(BANK),
@@ -144,7 +171,7 @@ fn repeated_cursor_stops_the_pull_with_an_error() {
     );
     let cfg_b = cfg("dev-b", &b, &addr, vec![paired_key()]);
     let err = pull(&cfg_b, &[BANK.to_owned()]).expect_err("a repeated cursor is refused");
-    assert_refusal(&err);
+    assert_refusal(&err, ErrorCode::Forbidden);
     assert!(
         err.message.contains("repeated cursor") && err.message.contains(&repeated),
         "the refusal must name the cursor that did not advance: {}",
@@ -156,6 +183,51 @@ fn repeated_cursor_stops_the_pull_with_an_error() {
         "the pull stops on the first repeat, not after an unbounded run"
     );
     // Nothing advanced past the cursor the first page persisted.
+    let cursor = b.cursor_get(BANK, "pull").expect("cursor");
+    assert_eq!(cursor.as_deref(), Some(repeated.as_str()));
+}
+
+/// A page that repeats the cursor it was asked from is refused *before* its
+/// rows can land: the decision is taken right after the response is
+/// deserialized, so the one real row that page carries is opened but never
+/// applied. If the check ever drifts back below the apply loop, that row is
+/// written and this test fails.
+#[test]
+fn a_repeat_refused_page_writes_none_of_its_rows() {
+    let b = sqlite();
+    let repeated = encode_cursor(BANK, 1);
+    let row = applied_row("i-refused");
+    // Page one hands out `repeated` and persists it; page two is served to a
+    // request that already carried `repeated`, carries one real row, and hands
+    // the same token back with `has_more: true`: no progress.
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let addr = serve_pages(
+        &[
+            page(&repeated, true),
+            raw_page(std::slice::from_ref(&row), &repeated, true),
+        ],
+        Some(seen.clone()),
+    );
+    let cfg_b = cfg("dev-b", &b, &addr, vec![paired_key()]);
+    let err = pull(&cfg_b, &[BANK.to_owned()]).expect_err("a repeated cursor is refused");
+    assert_refusal(&err, ErrorCode::Forbidden);
+    assert_eq!(
+        requests_seen(&seen),
+        2,
+        "the pull stops on the first repeat, not after an unbounded run"
+    );
+    assert!(
+        b.get_memory_item(BANK, "i-refused")
+            .expect("row read")
+            .is_none(),
+        "the refused page's row must not be written"
+    );
+    assert!(
+        b.journal_list_since(BANK, 0, 200)
+            .expect("journal")
+            .is_empty(),
+        "the refused page's row must not be journaled"
+    );
     let cursor = b.cursor_get(BANK, "pull").expect("cursor");
     assert_eq!(cursor.as_deref(), Some(repeated.as_str()));
 }
@@ -177,18 +249,82 @@ fn pull_stops_after_the_page_cap() {
     let addr = serve_pages(&pages, Some(seen.clone()));
     let cfg_b = cfg("dev-b", &b, &addr, vec![paired_key()]);
     let err = pull(&cfg_b, &[BANK.to_owned()]).expect_err("a peer that never finishes is refused");
-    assert_refusal(&err);
+    // The cap is this loop's own bound, not a peer violation, so it carries a
+    // range code rather than the `Forbidden` a repeated cursor carries: an
+    // honest peer whose backlog exceeded the cap must not read as an attack.
+    assert_refusal(&err, ErrorCode::OutOfRange);
+    assert_ne!(
+        err.code,
+        ErrorCode::Forbidden,
+        "the cap must not share the repeated cursor's refusal code: {err:?}"
+    );
     assert!(
         err.message
-            .contains(&format!("{}-page cap", crate::PULL_MAX_PAGES))
-            && err.message.contains("did not finish"),
-        "the refusal must name the cap and the unfinished pull: {}",
+            .contains(&format!("{}-page cap", crate::PULL_MAX_PAGES)),
+        "the refusal must name the cap: {}",
+        err.message
+    );
+    // The wording promises the operator that this is resumable: the cursor of
+    // every page is durable, so re-running continues from it.
+    assert!(
+        err.message.contains("the cursor is saved")
+            && err
+                .message
+                .contains("running the pull again continues from there"),
+        "the refusal must say the cursor is saved and a re-run continues: {}",
+        err.message
+    );
+    assert!(
+        !err.message.contains("did not finish"),
+        "the cap must not blame the peer for an honest oversized backlog: {}",
         err.message
     );
     assert_eq!(
         requests_seen(&seen),
         crate::PULL_MAX_PAGES,
         "exactly the capped number of pages, no more"
+    );
+    // The cap lost nothing: the last page's cursor is the one stored.
+    let cursor = b.cursor_get(BANK, "pull").expect("cursor");
+    assert_eq!(
+        cursor.as_deref(),
+        Some(encode_cursor(BANK, i64::try_from(crate::PULL_MAX_PAGES).expect("cap")).as_str()),
+        "the cap leaves the last persisted cursor in place so a re-run resumes"
+    );
+}
+
+/// A page that repeats its cursor *and* carries a row this node cannot trust
+/// freezes the bank instead of failing as a repeat: the freeze is a stop for
+/// the operator (the cursor must stay where the poisoned row is), not a peer
+/// protocol violation, so it wins over the repeat refusal.
+#[test]
+fn a_frozen_page_wins_over_the_repeat_refusal() {
+    let b = sqlite();
+    // A plaintext row while this node holds a key: `decrypt_for_apply`
+    // quarantines it, which freezes the cursor at the prior position.
+    let mut poisoned = applied_row("i-frozen");
+    poisoned.content = SyncContent::Plain(json!({}));
+    // The empty first cursor repeated with `has_more: true` is the same fixed
+    // point as a non-empty one, and it lets the poisoned row be the only row.
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let addr = serve_pages(&[raw_page(&[poisoned], "", true)], Some(seen.clone()));
+    let cfg_b = cfg("dev-b", &b, &addr, vec![paired_key()]);
+    let status = pull(&cfg_b, &[BANK.to_owned()]).expect("a freeze is a clean stop, not an error");
+    assert_eq!(requests_seen(&seen), 1, "the frozen page ends the pull");
+    assert_eq!(
+        status.first().and_then(|s| s.pull_cursor.clone()),
+        Some(String::new())
+    );
+    assert_eq!(
+        b.dead_letter_count(BANK, DeadLetterStatus::Open)
+            .expect("dead letters"),
+        1,
+        "the untrusted row is quarantined for the operator"
+    );
+    let cursor = b.cursor_get(BANK, "pull").expect("cursor");
+    assert!(
+        cursor.as_deref().unwrap_or_default().is_empty(),
+        "the cursor stays frozen at the poisoned row: {cursor:?}"
     );
 }
 
