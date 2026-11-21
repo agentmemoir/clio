@@ -147,6 +147,10 @@ pub const PULL_RESPONSE_BYTE_BUDGET: usize = 4 * 1024 * 1024;
 /// the next pull.
 pub const PULL_MAX_PAGES: usize = 1000;
 
+/// Byte cap for one pull cursor: a cursor is a short opaque token, so this pull
+/// refuses and never stores a larger one.
+pub const PULL_MAX_CURSOR_BYTES: usize = 4096;
+
 /// Default auto-stop TTL for interactive `sync_serve`.
 pub const SERVE_TTL_DEFAULT_SECS: u64 = 30 * 60;
 

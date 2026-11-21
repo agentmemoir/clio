@@ -56,6 +56,17 @@ pub(crate) const BODY_CAP_BYTES: usize = 16 * 1024 * 1024;
 /// request deadline passed to `read_request` is the real bound.
 pub(crate) const READ_SLICE: Duration = Duration::from_secs(5);
 
+/// Largest response body the client will buffer from a peer. The peer declares
+/// nothing this side can trust, so the read itself is capped one byte past this
+/// limit: a body that fills the extra byte is refused before it is parsed, and a
+/// body at or below the cap still reads to its end.
+///
+/// This cap must exceed the largest push body the sync server accepts
+/// (`BODY_CAP_BYTES`, 16 MiB) plus the JSON envelope, because the server's pull
+/// page budget always keeps one row: a stored row that big must still be
+/// pullable. Twice the accepted maximum leaves that headroom.
+pub(crate) const MAX_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
+
 /// Why `read_request` did not produce a request. The connection owner maps
 /// these to refusals: oversize head/body to 413, deadline to 408, and plain
 /// I/O errors to a silent close (as before the bounds existed).
@@ -307,8 +318,22 @@ pub(crate) fn post_json_status(
         .write_all(head.as_bytes())
         .and_then(|()| stream.write_all(&payload))
         .map_err(io_send)?;
+    // The 10 s read timeout above still applies per read. The take stops the
+    // body one byte past the cap, so a peer that would stream an unbounded body
+    // costs one read past the limit and never a whole body.
     let mut response = Vec::new();
-    stream.read_to_end(&mut response).map_err(io_recv)?;
+    Read::take(&mut stream, MAX_RESPONSE_BYTES as u64 + 1)
+        .read_to_end(&mut response)
+        .map_err(io_recv)?;
+    if response.len() > MAX_RESPONSE_BYTES {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            format!(
+                "sync peer at {remote} sent a response larger than {MAX_RESPONSE_BYTES} bytes; \
+                 the client refuses it"
+            ),
+        ));
+    }
     let text = String::from_utf8_lossy(&response);
     let status: u16 = text
         .split_whitespace()

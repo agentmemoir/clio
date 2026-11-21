@@ -232,6 +232,19 @@ fn cursor_digest(cursor: &str) -> u64 {
     hasher.finish()
 }
 
+/// The refusal for a cursor too large to be the short opaque token the protocol
+/// defines, naming the bank, the token's byte length, and the limit.
+fn oversized_cursor(bank: &str, cursor: &str) -> AmError {
+    AmError::new(
+        ErrorCode::Forbidden,
+        format!(
+            "sync pull for bank {bank} refused a {len}-byte cursor: a cursor is a short opaque \
+             token, and this pull never stores or resends a larger one",
+            len = cursor.len()
+        ),
+    )
+}
+
 fn pull_bank(
     cfg: &SyncClientConfig,
     remote: &str,
@@ -278,6 +291,12 @@ fn pull_bank(
             cfg.token.as_deref(),
             &serde_json::to_value(&request).expect("serialize pull request"),
         )?;
+        // A cursor is a short opaque token. Checked before the repeat decision
+        // and the row loop, so a refused page applies nothing and no cursor is
+        // stored or resent.
+        if response.next_cursor.len() > crate::PULL_MAX_CURSOR_BYTES {
+            return Err(oversized_cursor(bank, &response.next_cursor));
+        }
         // A peer that says more rows remain but hands back a cursor an earlier
         // page of this pull already used would serve the same page forever.
         // Cursors are opaque, so the token is compared by digest, and the
@@ -376,6 +395,9 @@ mod client_plain_policy_tests;
 #[cfg(test)]
 #[path = "client_pull_bound_tests.rs"]
 mod client_pull_bound_tests;
+#[cfg(test)]
+#[path = "client_pull_size_tests.rs"]
+mod client_pull_size_tests;
 #[cfg(test)]
 #[path = "client_receipt_tests.rs"]
 mod client_receipt_tests;

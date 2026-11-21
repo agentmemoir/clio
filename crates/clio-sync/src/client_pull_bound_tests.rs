@@ -44,7 +44,7 @@ const BANK: &str = "bA";
 
 /// One pull page as raw wire JSON: the given rows, the given resume cursor, and
 /// the given `has_more` flag.
-fn page(next_cursor: &str, has_more: bool) -> String {
+pub(crate) fn page(next_cursor: &str, has_more: bool) -> String {
     raw_page(&[], next_cursor, has_more)
 }
 
@@ -82,7 +82,7 @@ fn applied_row(id: &str) -> SyncMutation {
 /// body when `seen` is given. The thread ends after the last page, so a pull
 /// that kept fetching past the scripted pages finds the listener closed
 /// instead of a page: the fixture cannot hide a runaway loop.
-fn serve_pages(pages: &[String], seen: Option<Arc<Mutex<Vec<String>>>>) -> String {
+pub(crate) fn serve_pages(pages: &[String], seen: Option<Arc<Mutex<Vec<String>>>>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("addr").to_string();
     let pages = pages.to_vec();
@@ -134,13 +134,13 @@ fn read_declared_request(stream: &mut std::net::TcpStream) -> String {
 }
 
 /// How many requests the fake peer answered.
-fn requests_seen(seen: &Arc<Mutex<Vec<String>>>) -> usize {
+pub(crate) fn requests_seen(seen: &Arc<Mutex<Vec<String>>>) -> usize {
     seen.lock().expect("seen lock").len()
 }
 
 /// The refusal shape every bound shares: the bound's own code, and a message
 /// naming the bank the pull was for.
-fn assert_refusal(err: &AmError, code: ErrorCode) {
+pub(crate) fn assert_refusal(err: &AmError, code: ErrorCode) {
     assert_eq!(
         err.code, code,
         "a bound stops the pull under its own code: {err:?}"

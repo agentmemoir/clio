@@ -45,9 +45,9 @@ fn the_pull_page_stays_bounded() {
 }
 
 /// The client pull stays bounded to the documented number of pages: the cap
-/// error and the changelog both promise 1000, so the value is pinned here for
-/// the same reason as the page size. Pinned by value rather than by a second
-/// constant, which the linter rejects under `-D warnings`.
+/// error promises 1000, so the value is pinned here for the same reason as
+/// the page size. Pinned by value rather than by a second constant, which the
+/// linter rejects under `-D warnings`.
 #[test]
 fn the_pull_page_cap_stays_bounded() {
     assert_eq!(
