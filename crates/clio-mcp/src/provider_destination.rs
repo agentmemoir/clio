@@ -11,10 +11,13 @@
 //! - Host normalisation (case, one trailing dot) and the operator allowlist match
 //! - The address-class refusal for a host the allowlist does not name
 //! - Reading the allowlist out of the effective config document
+//! - Requiring the judged host to be the fetchable host, by asking for the
+//!   unambiguous split rather than the lenient one
 //!
 //! ## Does not own
 //! - Address classification itself (`clio_types::net::is_denied_destination`)
-//! - The URL parse (`clio_types::net::http_target`)
+//! - The URL parse and the parser-disagreement refusal
+//!   (`clio_types::net::strict_http_target`)
 //! - Pagination, item mapping, or the request (`provider_adapter`)
 //! - Where the operator value is stored (`clio-config`)
 //!
@@ -28,7 +31,7 @@
 
 use std::net::IpAddr;
 
-use clio_types::net::http_target;
+use clio_types::net::strict_http_target;
 use clio_types::{AmError, BUILT_IN_PROVIDER_HOST, ErrorCode, HttpTarget, is_denied_destination};
 use serde_json::Value;
 
@@ -49,14 +52,24 @@ const ALLOW_HOSTS_POINTER: &str = "/provider/allow_hosts";
 /// address is still refused, because reaching an arbitrary public host on a
 /// caller's word is the same defect one hop further out.
 ///
+/// The split is [`strict_http_target`], not [`http_target`]. The fetch happens in
+/// `clio-index`, whose own parse ends the authority at the first `/` only and
+/// keeps a backslash and the userinfo in its host value. Reading this string two
+/// ways is the defect: `http://127.0.0.1:1\@api.mem0.ai/v1` is `api.mem0.ai` to
+/// this split — the default allowlisted host — and `127.0.0.1:1\@api.mem0.ai` to
+/// the transport. The strict split refuses every spelling the two could disagree
+/// about, so the host judged here is the host fetched there by construction
+/// rather than because the disagreement happened to fail a later parse.
+///
 /// # Errors
-/// The scheme is not `http`/`https`, the host is a denied address, or the host
-/// is not in the operator allowlist. Every one is [`ErrorCode::Forbidden`].
+/// The scheme is not `http`/`https`, the authority carries a byte two parsers
+/// could read differently, the host is a denied address, or the host is not in
+/// the operator allowlist. Every one is [`ErrorCode::Forbidden`].
 pub(crate) fn check_provider_target(
     url: &str,
     allow_hosts: &[&str],
 ) -> Result<HttpTarget, AmError> {
-    let target = http_target(url).map_err(|reason| {
+    let target = strict_http_target(url).map_err(|reason| {
         AmError::new(
             ErrorCode::Forbidden,
             format!("provider base URL refused: {reason}"),
@@ -134,7 +147,7 @@ pub(crate) fn allow_hosts_from(state: &McpState) -> Vec<String> {
 pub(crate) fn allowlisted_host(state: &McpState, url: &str) -> bool {
     let hosts = allow_hosts_from(state);
     let refs: Vec<&str> = hosts.iter().map(String::as_str).collect();
-    http_target(url).is_ok_and(|target| {
+    strict_http_target(url).is_ok_and(|target| {
         let host = normalise_host(&target.host);
         host_is_allowlisted(&host, &refs)
     })
@@ -160,7 +173,10 @@ fn provider_url<'a>(options: &'a Value, default: &'a str) -> &'a str {
 ///
 /// Resolving and judging in one place is what keeps the judgement from being
 /// skipped: there is one door into a provider request, and the address it opens
-/// is the address that was judged.
+/// is the address that was judged. That claim rests on [`check_provider_target`]
+/// running [`strict_http_target`], which refuses a string the transport's own
+/// parse could read as a different host, so no disagreement between the two the
+/// caller sees survives to the request.
 ///
 /// # Errors
 /// As [`check_provider_target`].

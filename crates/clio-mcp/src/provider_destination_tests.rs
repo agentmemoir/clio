@@ -8,6 +8,10 @@
 //!
 //! ## Owns
 //! - One rejection per address class, plus the allowlist and scheme decisions
+//! - The rejections that only one rule can produce, so the test fails when that
+//!   rule is removed rather than passing on a broader rule
+//! - The refused spellings where the gate's split and the transport's split
+//!   disagree about the host
 //! - The trailing-dot and case normalisation the allowlist compare depends on
 //!
 //! ## Does not own
@@ -94,9 +98,28 @@ fn an_ipv4_mapped_metadata_destination_is_refused() {
 #[test]
 fn a_nat64_metadata_destination_is_refused() {
     // 64:ff9b::a9fe:a9fe carries 169.254.169.254; the prefix is globally
-    // reachable on paper, so only the decode catches it.
+    // reachable on paper, so only the decode catches it. The message is what
+    // makes this a test of the address rule rather than of the allowlist: an
+    // undecoded address reaches the "not in the operator allowlist" refusal
+    // instead of the "non-public address" one.
     let err = refused("http://[64:ff9b::a9fe:a9fe]/v1");
     assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(err.message.contains("non-public address"), "{err}");
+}
+
+#[test]
+fn a_local_use_nat64_metadata_destination_is_refused() {
+    // The `/48` prefix reserved for local use carries the same address and is
+    // marked not globally reachable, so it must be decoded too.
+    for url in [
+        "http://[64:ff9b:1::a9fe:a9fe]/v1",
+        "http://[64:ff9b:1::7f00:1]/v1",
+        "http://[64:ff9b:1:2:3:4:a9fe:a9fe]/v1",
+    ] {
+        let err = refused(url);
+        assert_eq!(err.code, ErrorCode::Forbidden, "{url}");
+        assert!(err.message.contains("non-public address"), "{url}: {err}");
+    }
 }
 
 #[test]
@@ -146,9 +169,46 @@ fn a_bare_localhost_name_is_refused_by_address_class() {
 
 #[test]
 fn a_non_http_scheme_is_refused_before_any_address_rule() {
-    for url in ["ftp://api.mem0.ai/v1", "postgres://db.example.com/clio"] {
-        let err = refused(url);
+    // Each URL's host IS allowlisted, so the scheme rule is the only rule left
+    // that can refuse it. With an empty allowlist every URL is refused by the
+    // allowlist instead and this test would pass with the scheme check deleted.
+    for (url, host) in [
+        ("ftp://api.mem0.ai/v1", "api.mem0.ai"),
+        ("postgres://db.example.com/clio", "db.example.com"),
+        ("file://api.mem0.ai/v1", "api.mem0.ai"),
+    ] {
+        let err = check_provider_target(url, &[host])
+            .expect_err("the allowlist names the host, so only the scheme can refuse this");
         assert_eq!(err.code, ErrorCode::Forbidden, "{url}");
+        assert!(
+            err.message.contains("must be http:// or https://"),
+            "the refusal must name the scheme rule: {url}: {err}"
+        );
+    }
+}
+
+#[test]
+fn a_transport_split_the_gate_does_not_share_is_refused() {
+    // The transport ends the authority at the first `/` only and keeps the
+    // userinfo and the backslash in its host, so it would connect to
+    // `127.0.0.1:34311\@api.mem0.ai`. The lenient split reads the same string as
+    // `api.mem0.ai` — the default allowlisted host — so an allowlist that names
+    // it must not be enough to admit this.
+    for url in [
+        "http://127.0.0.1:34311\\@api.mem0.ai/v1",
+        "http://127.0.0.1:34311\\@api.mem0.ai",
+        "http://127.0.0.1\\@api.mem0.ai/v1",
+        "http://api.mem0.ai\\@127.0.0.1/v1",
+        "http://user:pw@127.0.0.1:34311/v1",
+        "http://api.mem0.ai@127.0.0.1:34311/v1",
+    ] {
+        let err = check_provider_target(url, &["api.mem0.ai", "127.0.0.1"])
+            .expect_err("the two parsers read this authority differently");
+        assert_eq!(err.code, ErrorCode::Forbidden, "{url}");
+        assert!(
+            err.message.contains("cannot be stated"),
+            "the refusal must name the ambiguous authority: {url}: {err}"
+        );
     }
 }
 

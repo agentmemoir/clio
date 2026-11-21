@@ -24,7 +24,7 @@
 use clio_types::ErrorCode;
 use serde_json::{Value, json};
 
-use super::{authorization, extract_api_key, masked_credentials};
+use super::{ACCEPTED_CREDENTIAL_KEYS, authorization, extract_api_key, masked_credentials};
 
 const ENV_KEY: &str = "env-secret-xyz9876";
 
@@ -128,6 +128,102 @@ fn a_caller_credential_is_masked_whether_or_not_the_destination_is_allowlisted()
             json!(42)
         );
     }
+}
+
+/// Every key the extractor reads is a key the report masks, so a credential that
+/// can reach the header can never be echoed in cleartext. `key` carries the probe
+/// that exposed the drift: the name heuristics did not recognise it.
+#[test]
+fn every_accepted_credential_key_is_masked_in_the_report() {
+    for key in ACCEPTED_CREDENTIAL_KEYS {
+        let secret = "sk-live-CALLERSECRET";
+        let mut object = serde_json::Map::new();
+        object.insert((*key).to_owned(), json!(secret));
+        let args = json!({"credentials": Value::Object(object)});
+        assert_eq!(
+            extract_api_key(&args, &no_env, true).as_deref(),
+            Some(secret),
+            "{key} is an accepted key"
+        );
+        let report = masked_credentials(&args, &no_env, true);
+        assert_eq!(
+            report.get(*key).and_then(Value::as_str),
+            Some("[REDACTED]"),
+            "{key} must be masked: {report}"
+        );
+        assert!(
+            !report.to_string().contains(secret),
+            "{key} leaked into the report: {report}"
+        );
+    }
+}
+
+/// A bare-string credential is the secret itself; the general JSON masker walks
+/// objects only and left it untouched.
+#[test]
+fn a_bare_string_credential_is_masked() {
+    for sanctioned in [true, false] {
+        let report = masked_credentials(
+            &json!({"credentials": "sk-live-STRINGKEY99"}),
+            &no_env,
+            sanctioned,
+        );
+        assert_eq!(report, json!("[REDACTED]"));
+        assert!(!report.to_string().contains("STRINGKEY99"));
+    }
+}
+
+#[test]
+fn an_object_and_an_array_of_credentials_are_masked() {
+    let object = masked_credentials(
+        &json!({"credentials": {"key": "sk-live-K1", "token": "sk-live-T1"}}),
+        &no_env,
+        true,
+    );
+    assert_eq!(
+        object,
+        json!({"key": "[REDACTED]", "token": "[REDACTED]"}),
+        "{object}"
+    );
+    let array = masked_credentials(
+        &json!({"credentials": ["sk-live-A1", {"key": "sk-live-A2"}, 7]}),
+        &no_env,
+        true,
+    );
+    assert_eq!(
+        array,
+        json!(["[REDACTED]", {"key": "[REDACTED]"}, 7]),
+        "{array}"
+    );
+    let text = array.to_string() + &object.to_string();
+    assert!(!text.contains("sk-live"), "{text}");
+}
+
+/// Masking must not mangle what is not a credential: an unaccepted field keeps
+/// its ordinary value, including a count that a name heuristic would eat.
+#[test]
+fn a_non_secret_field_is_not_mangled() {
+    let report = masked_credentials(
+        &json!({"credentials": {"key": "sk-live-K1", "region": "us-east-1", "max_tokens": 64}}),
+        &no_env,
+        true,
+    );
+    assert_eq!(
+        report,
+        json!({"key": "[REDACTED]", "region": "us-east-1", "max_tokens": 64}),
+        "{report}"
+    );
+}
+
+/// The unsupported-provider stub is the other live path for the same value:
+/// `{"provider":"openai","credentials":"sk-live-..."}` reported the string as-is
+/// because the general masker only walks objects.
+#[test]
+fn the_stub_report_masks_a_bare_string_credential() {
+    let args = json!({"provider": "openai", "credentials": "sk-live-STRINGKEY99"});
+    let reported = crate::portability_tools::masked_credentials(&args);
+    assert_eq!(reported, json!("[REDACTED]"), "{reported}");
+    assert!(!reported.to_string().contains("STRINGKEY99"));
 }
 
 /// The hard rename, pinned: the prefixed name is the only one read, and the bare

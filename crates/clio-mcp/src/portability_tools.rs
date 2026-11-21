@@ -258,9 +258,15 @@ fn import_provider_stub(state: &McpState, args: &Value) -> Result<Value, AmError
     }))
 }
 
-/// Fully-redacted view of any accepted credential parameters (never plaintext).
-fn masked_credentials(args: &Value) -> serde_json::Value {
-    clio_config::secret::masked_clone(args.get("credentials").unwrap_or(&serde_json::Value::Null))
+/// The stub's `credentials_masked` value for `args`, routed through the
+/// credential module rather than the general JSON masker: a bare-string
+/// credential is the secret itself, and the general walk only rewrites object
+/// members.
+pub(crate) fn masked_credentials(args: &Value) -> Value {
+    args.get("credentials").map_or(
+        Value::Null,
+        crate::provider_credentials::masked_credential_value,
+    )
 }
 
 #[cfg(test)]

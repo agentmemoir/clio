@@ -46,6 +46,19 @@ fn assert_refused(out: &Value, host: &str) {
     );
 }
 
+/// The refusal text a host refused by its address class receives, as opposed to
+/// the one a host that is merely unlisted receives: an allowlist refusal names
+/// the host too, so only the wording tells the two rules apart.
+fn assert_refused_by_address_class(out: &Value, host: &str) {
+    assert_refused(out, host);
+    assert!(
+        out["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("non-public address")),
+        "{host} must be refused for its address class rather than for being unlisted: {out}"
+    );
+}
+
 #[test]
 fn a_cloud_metadata_destination_is_refused_before_any_request() {
     // The fake server stands in for the caller's argument plumbing: nothing is
@@ -67,7 +80,7 @@ fn a_cloud_metadata_destination_is_refused_before_any_request() {
         }),
     );
 
-    assert_refused(&out, "169.254.169.254");
+    assert_refused_by_address_class(&out, "169.254.169.254");
     assert_eq!(
         server.requests.load(std::sync::atomic::Ordering::SeqCst),
         before,
@@ -89,7 +102,7 @@ fn a_loopback_destination_off_the_allowlist_is_refused() {
             "options": { "api_base_url": "http://[::1]:9/v1", "base_url": "http://[::1]:9/v1" }
         }),
     );
-    assert_refused(&out, "::1");
+    assert_refused_by_address_class(&out, "::1");
 }
 
 #[test]
@@ -138,20 +151,40 @@ fn an_allowlisted_loopback_destination_still_reaches_the_provider() {
 
 #[test]
 fn a_non_http_scheme_is_refused() {
-    let s = state();
-    let out = call(
-        &s,
-        "import_provider",
-        json!({
-            "provider": "mem0",
-            "dry_run": true,
-            "bank": "test-bank-destination",
-            "actor": "harness",
-            "options": { "api_base_url": "ftp://127.0.0.1/v1" }
-        }),
-    );
-    assert_eq!(out["ok"], Value::Bool(false), "{out}");
-    assert_eq!(out["code"], "forbidden", "{out}");
+    // Each state's allowlist names the host its own URL carries, so the scheme
+    // rule is the only rule left that can refuse it. With an allowlist of just
+    // the shipped host every one of these is refused by the allowlist instead,
+    // and the test would pass with the scheme check deleted.
+    for (url, host) in [
+        (
+            "ftp://provider.example.invalid/v1",
+            "provider.example.invalid",
+        ),
+        ("postgres://db.example.invalid/clio", "db.example.invalid"),
+        ("file://api.example.invalid/v1", "api.example.invalid"),
+    ] {
+        let s = default_allowlist_state(&[host]);
+        let out = call(
+            &s,
+            "import_provider",
+            json!({
+                "provider": "mem0",
+                "dry_run": true,
+                "bank": "test-bank-destination",
+                "actor": "harness",
+                "options": { "api_base_url": url }
+            }),
+        );
+        assert_eq!(out["ok"], Value::Bool(false), "{url}: {out}");
+        assert_eq!(out["code"], "forbidden", "{url}: {out}");
+        let scheme = url.split_once("://").map_or("", |(scheme, _)| scheme);
+        assert!(
+            out["message"].as_str().is_some_and(
+                |m| m.contains(&format!("must be http:// or https://, got `{scheme}://`"))
+            ),
+            "the refusal must name the scheme rule and the scheme it refused: {url}: {out}"
+        );
+    }
 }
 
 /// The tool surface, with the environment seam supplied: the shipped key can

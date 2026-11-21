@@ -33,6 +33,12 @@ use serde_json::{Value, json};
 /// The environment variable holding the server's own provider key.
 pub(crate) const SERVER_KEY_VAR: &str = "CLIO_MEM0_API_KEY";
 
+/// The object keys an `import_provider` credential may be read from.
+///
+/// One list feeds both the extractor and the report, so a key that can reach the
+/// `Authorization` header is always a key the report masks.
+pub(crate) const ACCEPTED_CREDENTIAL_KEYS: &[&str] = &["api_key", "token", "key", "secret"];
+
 /// The `Authorization` header value for a provider pull, or the refusal that
 /// stops a pull from being sent to a destination the operator never sanctioned.
 ///
@@ -85,12 +91,7 @@ pub(crate) fn masked_credentials(
     sanctioned: bool,
 ) -> Value {
     if let Some(creds) = args.get("credentials") {
-        return match creds {
-            Value::String(s) => Value::String(mask_secret(s)),
-            Value::Object(_) => masked_clone(creds),
-            Value::Null => Value::Null,
-            other => masked_clone(other),
-        };
+        return masked_credential_value(creds);
     }
     if !sanctioned {
         return Value::Null;
@@ -113,12 +114,42 @@ fn caller_credential(args: &Value) -> Option<String> {
         return Some(s.trim().to_owned());
     }
     let obj = creds.as_object()?;
-    ["api_key", "token", "key", "secret"]
+    ACCEPTED_CREDENTIAL_KEYS
         .iter()
         .find_map(|key| obj.get(*key).and_then(Value::as_str))
         .map(str::trim)
         .filter(|val| !val.is_empty())
         .map(str::to_owned)
+}
+
+/// The redacted report of a caller-supplied `credentials` value.
+///
+/// Every shape the extractor can read is masked here: a bare string is the
+/// credential itself, an object is masked under [`ACCEPTED_CREDENTIAL_KEYS`] so
+/// the reported keys and the accepted keys cannot drift, and an array is masked
+/// element by element. Anything else is an operand-free shape the extractor
+/// ignores, so it is passed through the general masker.
+#[must_use]
+pub(crate) fn masked_credential_value(creds: &Value) -> Value {
+    match creds {
+        Value::String(s) => Value::String(mask_secret(s)),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| (key.clone(), masked_member(key, value)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(masked_credential_value).collect()),
+        other => masked_clone(other),
+    }
+}
+
+/// One member of a credential object: accepted keys are masked whatever their
+/// type; every other key keeps the general masking rule.
+fn masked_member(key: &str, value: &Value) -> Value {
+    if ACCEPTED_CREDENTIAL_KEYS.contains(&key) {
+        return Value::String(mask_secret(""));
+    }
+    masked_clone(value)
 }
 
 fn header_value(key: &str) -> String {
