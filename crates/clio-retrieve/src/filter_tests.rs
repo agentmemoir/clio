@@ -140,9 +140,9 @@ fn system_now_iso_is_parseable() {
 fn system_now_iso_has_the_second_precision_utc_shape() {
     let now = system_now_iso();
 
-    let parsed = chrono::DateTime::parse_from_rfc3339(&now).expect("rfc3339 stamp");
-    assert_eq!(parsed.format("%Y-%m-%dT%H:%M:%SZ").to_string(), now);
-    assert_eq!(parsed.offset().local_minus_utc(), 0, "stamp must be UTC");
+    let parsed = now.parse::<jiff::Timestamp>().expect("rfc3339 stamp");
+    assert_eq!(parsed.strftime("%Y-%m-%dT%H:%M:%SZ").to_string(), now);
+    assert!(now.ends_with('Z'), "stamp must be UTC");
 
     // Second precision: no fractional seconds and a fixed 20-character length.
     assert_eq!(now.len(), 20, "{now:?}");
@@ -154,7 +154,7 @@ fn system_now_iso_has_the_second_precision_utc_shape() {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock after epoch")
         .as_secs() as i64;
-    let delta = (parsed.timestamp() - host_secs).abs();
+    let delta = (parsed.as_second() - host_secs).abs();
     assert!(delta < 60, "stamp {now:?} is {delta}s from the host clock");
 }
 

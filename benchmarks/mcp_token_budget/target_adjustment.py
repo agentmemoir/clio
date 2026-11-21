@@ -141,7 +141,7 @@ def validate(value, presets, units, targets, factors) -> dict:
             _fail(
                 f"{where}.preset is {preset!r}, expected one of {list(presets)}"
             )
-        if preset in adjustments:
+        if preset in adjustments and date <= adjustments[preset]["date"]:
             _fail(f"duplicate target adjustment for preset {preset!r}")
         initial = _object(item["initial"], f"{where}.initial", INITIAL_KEYS)
         baseline_row = _units(
@@ -164,14 +164,6 @@ def validate(value, presets, units, targets, factors) -> dict:
                     f"{where}.final_target.{unit} is {final_target[unit]}, "
                     f"expected the measured candidate value {measured[unit]}"
                 )
-        _check_rows(
-            preset,
-            {"baseline_row": baseline_row, "factor": factor, "target": target},
-            final_target,
-            targets,
-            units,
-            factors,
-        )
         adjustments[preset] = {
             "decision_id": item["decision_id"],
             "date": item["date"],
@@ -185,4 +177,13 @@ def validate(value, presets, units, targets, factors) -> dict:
             "measured_candidate": measured,
             "reason": item["reason"],
         }
+    for preset, record in adjustments.items():
+        _check_rows(
+            preset,
+            record["initial"],
+            record["final_target"],
+            targets,
+            units,
+            factors,
+        )
     return adjustments

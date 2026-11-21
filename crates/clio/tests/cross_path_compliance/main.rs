@@ -33,6 +33,7 @@ mod sync_wire_support;
 
 mod case_fixtures;
 mod cli_test_support;
+mod export_seal_test_support;
 mod family_fixtures;
 mod family_test_support;
 mod peer_probe_test_support;

@@ -46,10 +46,10 @@ pub const BUNDLE_FORMAT_VERSION: u64 = 1;
 /// `export_content_mode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExportContentMode {
-    /// Authorized decrypt → readable plaintext content (default).
+    /// Authorized decrypt → readable plaintext content.
     #[serde(rename = "dsar_plaintext")]
     DsarPlaintext,
-    /// Opaque content bodies + metadata; no DEK material in the file.
+    /// Opaque content bodies + metadata; no DEK material in the file (default).
     #[serde(rename = "ciphertext_backup")]
     CiphertextBackup,
 }
@@ -64,14 +64,14 @@ impl ExportContentMode {
         }
     }
 
-    /// Parse from caller input (defaults empty to the DSAR default).
+    /// Parse from caller input (omitted or empty selects `ciphertext_backup`).
     ///
     /// # Errors
     /// Unknown mode label.
     pub fn parse(raw: Option<&str>) -> Result<Self, AmError> {
         match raw.unwrap_or("") {
-            "" | "dsar_plaintext" => Ok(Self::DsarPlaintext),
-            "ciphertext_backup" => Ok(Self::CiphertextBackup),
+            "" | "ciphertext_backup" => Ok(Self::CiphertextBackup),
+            "dsar_plaintext" => Ok(Self::DsarPlaintext),
             other => Err(AmError::new(
                 ErrorCode::InvalidArgument,
                 format!("content_mode must be dsar_plaintext|ciphertext_backup, got `{other}`"),

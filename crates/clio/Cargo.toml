@@ -31,7 +31,7 @@ clio-mcp = { workspace = true }
 # served through the denial-aware entry point with the erasure-journal probe;
 # the crate is already in this binary's build graph through `clio-mcp`.
 clio-sync = { workspace = true }
-chrono = { workspace = true }
+jiff = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anstyle = { workspace = true }
@@ -70,6 +70,13 @@ libc = { workspace = true }
 workspace = true
 
 [dev-dependencies]
+# The cross-path export scenario seals a readable bundle to a test X25519
+# key and opens it back, so the delivered bytes need no production open
+# path.
+base64 = { workspace = true }
+chacha20poly1305 = { workspace = true }
+hkdf = { workspace = true }
+x25519-dalek = { workspace = true }
 # The deployment config seals its secrets, so a test that runs `clio setup` or
 # `config set` at deployment scope needs a Clio encryption key. The feature
 # compiles in the test-only injection seam; without it such a test would fall

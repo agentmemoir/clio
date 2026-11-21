@@ -274,11 +274,13 @@ fn persona_import_staging_matches_the_export_side_context_contract() {
         facts: None,
         backend: None,
         delivery: None,
+        readable_export_opt_in: true,
+        recipient: Some(crate::export_tests::test_recipient()),
     })
     .expect("export succeeds");
 
     // The exported bundle carries the scrubbed value, not the raw secret.
-    let text = std::fs::read_to_string(dest.as_path()).unwrap();
+    let text = crate::export_tests::read_sealed(dest.as_path());
     assert!(!text.contains("sk-test-1234567890"));
     let envelope: BundleEnvelope = serde_json::from_str(&text).unwrap();
     assert_eq!(
@@ -292,7 +294,9 @@ fn persona_import_staging_matches_the_export_side_context_contract() {
 
     // Import-side staging lands on the same value (plain create path).
     let h = Harness::new();
-    let report = import(&h.args(&h.ctx(), h.policy(), &dest_str, false, false, None))
+    let plain =
+        crate::export_tests::unseal_file(std::path::Path::new(&dest_str), "persona-contract-plain");
+    let report = import(&h.args(&h.ctx(), h.policy(), plain.as_str(), false, false, None))
         .expect("import succeeds");
     assert_eq!(report.would_create, 2);
     let history = h

@@ -113,7 +113,7 @@ fn bundle_with_a_context_dropped_by_the_scrub_bound_still_imports() {
         ExportContentMode::DsarPlaintext,
     ))
     .expect("export succeeds");
-    let text = std::fs::read_to_string(f.path.as_path()).expect("bundle readable");
+    let text = crate::export_tests::read_sealed(f.path.as_path());
     assert!(
         !text.contains("[REDACTED]"),
         "the expanded value must not be written"
@@ -124,7 +124,8 @@ fn bundle_with_a_context_dropped_by_the_scrub_bound_still_imports() {
     );
 
     let h = Harness::new();
-    import(&h.args(&h.ctx(), h.policy(), f.path.as_str(), false, false, None))
+    let plain = crate::export_tests::unseal_file(f.path.as_path(), "dropped-context-plain");
+    import(&h.args(&h.ctx(), h.policy(), plain.as_str(), false, false, None))
         .expect("a bundle with a dropped context still imports");
     let restored = h
         .store

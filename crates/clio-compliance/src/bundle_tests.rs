@@ -78,12 +78,63 @@ fn t22_bundle_roundtrip_through_value() {
 }
 
 #[test]
-fn t22_bundle_content_mode_parse_defaults_to_dsar() {
+fn t22_bundle_content_mode_parse_defaults_to_ciphertext_backup() {
     assert_eq!(
         ExportContentMode::parse(None).unwrap(),
+        ExportContentMode::CiphertextBackup
+    );
+    assert_eq!(
+        ExportContentMode::parse(Some("")).unwrap(),
+        ExportContentMode::CiphertextBackup
+    );
+    assert_eq!(
+        ExportContentMode::parse(Some("dsar_plaintext")).unwrap(),
         ExportContentMode::DsarPlaintext
     );
     assert!(ExportContentMode::parse(Some("yaml")).is_err());
+}
+
+/// The default mode must never put readable content in the bundle: an item
+/// whose snapshot and gist hold a unique sentinel appears only as opaque
+/// ciphertext, and the sentinel is absent from the delivered bytes.
+#[test]
+fn t22_bundle_default_mode_exports_no_readable_bytes() {
+    use crate::export::{ExportFilter, export};
+    use crate::export_tests::{args, ctx, fixture, item, read};
+    use clio_store::Store;
+    use clio_types::Actor;
+
+    const SENTINEL: &str = "sentinel-default-mode-7q4xz";
+    let f = fixture("default-mode");
+    let mut seeded = item(
+        "default-1",
+        &f.bank,
+        "sub-a",
+        Some(SemanticCategory::Schema),
+        None,
+        Some(serde_json::json!({"secret": SENTINEL})),
+    );
+    seeded.gist = Some(format!("gist {SENTINEL}"));
+    f.store.create_memory_item(&seeded, "tester").unwrap();
+
+    let mode = ExportContentMode::parse(None).unwrap();
+    assert_eq!(mode, ExportContentMode::CiphertextBackup);
+    let ctx = ctx(&f, Actor::Harness);
+    let outcome = export(&args(&f, &ctx, ExportFilter::default(), mode)).unwrap();
+    assert_eq!(outcome.content_mode, ExportContentMode::CiphertextBackup);
+
+    let text = read(&f);
+    assert!(!text.contains(SENTINEL));
+    assert!(!text.contains("plain gist"));
+    let envelope: BundleEnvelope = serde_json::from_str(&text).unwrap();
+    assert_eq!(envelope.entities.items.len(), 0);
+    let opaque = envelope
+        .entities
+        .opaque_items
+        .iter()
+        .find(|o| o.id == "default-1")
+        .expect("the seeded item is exported opaquely");
+    assert_ne!(opaque.content_cipher, "");
 }
 
 #[test]

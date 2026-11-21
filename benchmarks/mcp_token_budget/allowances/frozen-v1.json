@@ -68,6 +68,15 @@
       "candidate_sha256": "f9820131ad2b5f698e08280d0cf5f6226c2aa5e35258a27568d4fb172f592764",
       "max_bytes": 140559,
       "max_tokens": 30004
+    },
+    {
+      "decision_id": "mcp-readable-export-args-2026-11-21",
+      "date": "2026-11-21",
+      "reason": "The readable DSAR export adds two required arguments, readable_export_opt_in and recipient, with the text that states the default ciphertext mode, the opt-in requirement, and the seal to a base64-encoded 32-byte X25519 recipient public key whose matching secret key alone opens the bundle. The canonical tools array is 141002 bytes and 30107 cl100k_base tokens; this record covers the new candidate digest at exactly the measured size.",
+      "base_commit": "cac077d182a148ea9acaf5c4326d29ce52c17a34",
+      "candidate_sha256": "059df27ee885a6320af8b3997e688d07ae2d84453d01bc147cab4eb85e5261cd",
+      "max_bytes": 141002,
+      "max_tokens": 30107
     }
   ]
 }

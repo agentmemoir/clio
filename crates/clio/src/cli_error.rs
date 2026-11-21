@@ -315,9 +315,13 @@ pub(crate) fn reject_repeated_flag(flag: &str, seen: bool) -> Result<(), CliErro
 /// forms are RFC 3339, a calendar date, and a date-time without a zone. Any
 /// other text would be stored or filtered as a literal string.
 pub(crate) fn reject_bad_timestamp(flag: &str, value: &str) -> Result<(), CliError> {
-    let readable = chrono::DateTime::parse_from_rfc3339(value).is_ok()
-        || chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
-        || chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S").is_ok();
+    let readable = value.parse::<jiff::Timestamp>().is_ok()
+        || jiff::fmt::strtime::parse("%Y-%m-%d", value)
+            .and_then(|parsed| parsed.to_date())
+            .is_ok()
+        || jiff::fmt::strtime::parse("%Y-%m-%dT%H:%M:%S", value)
+            .and_then(|parsed| parsed.to_datetime())
+            .is_ok();
     if readable {
         return Ok(());
     }
