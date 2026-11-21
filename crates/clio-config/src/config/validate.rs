@@ -69,6 +69,7 @@ const ALLOWED_SET_PATHS: &[&str] = &[
     "credentials.embed_api_key",
     "credentials.rerank_api_key",
     "credentials.extract_api_key",
+    "provider.allow_hosts",
 ];
 
 /// Prefixes that must never be set (gate control, ranking knobs, packaging claims).
@@ -352,6 +353,25 @@ pub(crate) fn validate_set_value(path: &str, value: &Value) -> Result<(), AmErro
                 ));
             }
         },
+        "provider.allow_hosts" => {
+            // Every entry is compared against a parsed host, so an entry that is
+            // not text, or text with nothing in it, can only widen or narrow the
+            // list by accident. An empty list is refused for the same reason:
+            // clearing it would refuse the shipped provider, which is not what an
+            // operator narrowing the list meant to do.
+            let usable = value.as_array().is_some_and(|entries| {
+                !entries.is_empty()
+                    && entries
+                        .iter()
+                        .all(|entry| entry.as_str().is_some_and(|host| !host.trim().is_empty()))
+            });
+            if !usable {
+                return Err(AmError::new(
+                    ErrorCode::InvalidType,
+                    "provider.allow_hosts must be a non-empty list of non-empty host names",
+                ));
+            }
+        }
         _ => {}
     }
     Ok(())

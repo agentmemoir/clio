@@ -65,9 +65,8 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
     let dry_run = opt_bool(args, "dry_run", false)?;
     let options = args.get("options").unwrap_or(&Value::Null);
 
-    let base_url = opt_str(options, "api_base_url")
-        .or_else(|| opt_str(options, "base_url"))
-        .unwrap_or(DEFAULT_MEM0_BASE_URL);
+    let base_url =
+        crate::provider_destination::checked_base_url(state, options, DEFAULT_MEM0_BASE_URL)?;
     let user_id = opt_str(options, "user_id");
     let agent_id = opt_str(options, "agent_id");
     let page_size = options
@@ -439,3 +438,7 @@ mod provider_adapter_tests;
 #[cfg(test)]
 #[path = "provider_adapter_edge_tests.rs"]
 mod provider_adapter_edge_tests;
+
+#[cfg(test)]
+#[path = "provider_adapter_destination_tests.rs"]
+mod provider_adapter_destination_tests;

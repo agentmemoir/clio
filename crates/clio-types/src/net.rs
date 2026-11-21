@@ -27,7 +27,81 @@
 //!
 //! Keep this module focused on address classification with no I/O.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+/// The host of the built-in external memory provider endpoint.
+///
+/// It is the one destination the shipped configuration allows without any
+/// operator setup, so the provider keeps working out of the box. Defined here
+/// because both the config default and the destination policy have to agree on
+/// it, and this crate is the only one they both depend on.
+pub const BUILT_IN_PROVIDER_HOST: &str = "api.mem0.ai";
+
+/// The address an IPv6 address inside `64:ff9b::/96` carries in its last four
+/// bytes, when the address is inside that prefix.
+///
+/// IANA marks the prefix Globally Reachable, no std predicate flags it, and
+/// `to_canonical` leaves it unchanged, so this decode is the only way such an
+/// address faces the IPv4 tests at all.
+fn nat64_embedded(ip: Ipv6Addr) -> Option<Ipv4Addr> {
+    let segments = ip.segments();
+    let inside_prefix = segments[0] == 0x0064
+        && segments[1] == 0xff9b
+        && segments[2..6].iter().all(|segment| *segment == 0);
+    if !inside_prefix {
+        return None;
+    }
+    let octets = ip.octets();
+    Some(Ipv4Addr::new(
+        octets[12], octets[13], octets[14], octets[15],
+    ))
+}
+
+/// True when `ip` is an address a server must not be aimed at on behalf of a
+/// caller: this machine, a private network, a link-local segment, a cloud
+/// metadata endpoint, or a range reserved for something that is not a public
+/// peer.
+///
+/// The IPv6 form is canonicalised first, so an IPv4-mapped address
+/// (`::ffff:127.0.0.1`) faces the IPv4 tests as the IPv4 address it is. IPv4
+/// ranges that std has no stable predicate for are read from their masks.
+#[must_use]
+pub fn is_denied_destination(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(ipv4) => is_denied_ipv4(ipv4),
+        IpAddr::V6(ipv6) => {
+            is_denied_ipv6(ipv6) || nat64_embedded(ipv6).is_some_and(is_denied_ipv4)
+        }
+    }
+}
+
+fn is_denied_ipv4(ip: Ipv4Addr) -> bool {
+    if ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+    {
+        return true;
+    }
+    let [first, second, _, _] = ip.octets();
+    // Carrier-grade NAT, the benchmarking range, the reserved class E block,
+    // and "this network" all name something that is not a public peer.
+    (first == 100 && (second & 0xc0) == 64)
+        || (first == 198 && (second & 0xfe) == 18)
+        || (first & 0xf0) == 240
+        || first == 0
+}
+
+fn is_denied_ipv6(ip: Ipv6Addr) -> bool {
+    ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || ip.is_unique_local()
+        || ip.is_unicast_link_local()
+}
 
 /// `url` with a `user:password@` userinfo replaced by `***`, so a refusal can
 /// echo the address without echoing the password in it.
