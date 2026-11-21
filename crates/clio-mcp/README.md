@@ -10,7 +10,7 @@ The `clio-mcp` crate publishes machine-readable `tool_schema`s for the Core tool
 
 ## Network credentials
 
-`--token-file PATH` reads the token store that `clio auth token add` manages, and re-reads it on every request, so a revoked secret stops working on the running server without a restart. Each record names an actor and the banks it may reach, and a request presenting that record's secret acts as that actor and reaches only those banks.
+`--token-file PATH` reads the token store that `clio auth token add` manages. The server checks the file on every request and reloads it when it changed, so a revoked secret stops working on the running server without a restart. Each record names an actor and the banks it may reach, and a request presenting that record's secret acts as that actor and reaches only those banks.
 
 Three rules, all refusals rather than fallbacks:
 

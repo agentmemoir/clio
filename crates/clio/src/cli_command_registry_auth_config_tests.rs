@@ -100,9 +100,10 @@ fn auth_token_revoke_matches_the_registered_usage_and_parser() {
     assert_eq!(
         spec.full_usage(),
         "usage: clio auth token revoke --label LABEL [--output json|text]\n       removes the \
-         record; the running MCP HTTP server picks the change up without a restart; the write \
-         holds the store lock, so it never drops a record a concurrent add wrote, and --db, \
-         --backend, --actor, and --bank are refused",
+         record; the running MCP HTTP server applies the change without a restart, while the \
+         sync server applies it at its next start; the write holds the store lock, so it never \
+         drops a record a concurrent add wrote, and --db, --backend, --actor, and --bank are \
+         refused",
         "auth token revoke full usage"
     );
     assert_eq!(
@@ -330,7 +331,7 @@ fn the_seven_records_carry_the_catalog_rows_and_no_extra_surfaces() {
         ),
         (
             "auth token revoke",
-            "Remove the record; the running MCP HTTP server stops accepting it without a restart",
+            "Remove the record; the running MCP HTTP server stops accepting it without a restart, and the sync server applies the change at its next start",
         ),
         ("config get", "read one configuration path"),
         ("config set", "write one configuration path at a scope"),

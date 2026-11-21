@@ -233,10 +233,11 @@ fn revoke_removes_a_record_and_states_immediate_effect() {
 
     let (code, out, err) = run_auth(&store, &["token", "revoke", "--label", "ci"]);
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert!(out.contains("without a restart"), "{out}");
+    assert!(out.contains("without a restart") && out.contains("the sync server applies it at its next start"), "{out}");
     let payload: Value = serde_json::from_str(out.trim()).expect("json");
     assert_eq!(payload["label"], "ci");
     assert_eq!(payload["effective"], json!("immediately"));
+    assert_eq!(payload["note"], json!("the running MCP HTTP server applies the change without a restart, while the sync server applies it at its next start"));
     let records = records_on_disk(&store);
     assert!(records.is_empty(), "{records:?}");
     // A reload sees the record gone.

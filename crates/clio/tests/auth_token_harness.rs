@@ -142,6 +142,10 @@ fn the_real_binary_runs_add_list_and_revoke() {
     let revoke_out = String::from_utf8_lossy(&revoke.stdout).to_string();
     assert!(revoke_out.contains("without a restart"), "{revoke_out}");
     assert!(
+        revoke_out.contains("the sync server applies it at its next start"),
+        "{revoke_out}"
+    );
+    assert!(
         revoke_out.contains("\"effective\":\"immediately\""),
         "{revoke_out}"
     );

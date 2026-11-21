@@ -362,7 +362,7 @@ fn row(record: &AuthTokenRecord) -> Value {
 }
 
 /// `auth token revoke --label L`; a running MCP HTTP server applies the change
-/// without a restart.
+/// without a restart, while the sync server applies it at its next start.
 ///
 /// The removal runs under the store's exclusive hold
 /// (`clio_config::auth_tokens::revoke_token`), so a rewrite cannot drop a
@@ -386,11 +386,12 @@ fn run_revoke(
         "ok": true,
         "label": label,
         "effective": "immediately",
-        "note": "the running MCP HTTP server picks the change up without a restart",
+        "note": "the running MCP HTTP server applies the change without a restart, \
+                 while the sync server applies it at its next start",
     });
     let text = format!(
-        "token `{label}` revoked; the running MCP HTTP server picks the change up \
-         without a restart"
+        "token `{label}` revoked; the running MCP HTTP server applies the change \
+         without a restart, while the sync server applies it at its next start"
     );
     emit(io, mode, &payload, &text);
     ExitCode::from(EXIT_OK)
