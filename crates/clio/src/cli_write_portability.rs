@@ -91,7 +91,7 @@ impl WriteGroup for PortabilityWriteGroup {
 }
 
 /// `export --out FILE [--content-mode M] [--readable-export-opt-in B]
-/// [--recipient AGE] [--category C] [--time-start TS]
+/// [--recipient B64] [--category C] [--time-start TS]
 /// [--time-end TS] [--include-archived B] [--include-discarded B]` → `export`:
 /// one bundle file plus its completeness manifest. The tool refuses
 /// unprivileged actors (`--actor harness|system`); the CLI passes `--actor`

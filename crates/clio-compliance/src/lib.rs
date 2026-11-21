@@ -58,9 +58,9 @@ mod export;
 mod export_custody;
 mod export_mask;
 mod export_seal;
-mod export_subject;
 #[cfg(test)]
 mod export_seal_test_support;
+mod export_subject;
 mod import;
 mod inventory;
 mod journal_denial;

@@ -3,9 +3,9 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the recipient-seal tests: the age X25519
-//! round trip, malformed recipient text, and the readable-export opt-in gate
-//! that records a durable event before delivery.
+//! This module is responsible for the recipient-seal tests: the X25519 round
+//! trip, malformed recipient text, a tampered ciphertext, and the
+//! readable-export opt-in gate that records a durable event before delivery.
 //!
 //! ## Owns
 //! - Seal, opt-in refusal, and sealed-payload assertions over the shared export
@@ -19,17 +19,19 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use base64::Engine as _;
+
 use crate::bundle::ExportContentMode;
 use crate::export::{ExportArgs, ExportDelivery, ExportFilter, export};
 use crate::export_seal::seal_to_recipient;
-use crate::export_tests::{
-    Scratch, args, ctx, fixture, read_sealed, test_identity, test_recipient,
-};
+use crate::export_tests::{Scratch, args, ctx, fixture, open_sealed, read_sealed, test_recipient};
 use crate::subject_request_events::BindingControls;
 use clio_store::LocalEventStore;
 use clio_types::{Actor, ErrorCode};
 
-const SENTINEL: &[u8] = b"plain gist";
+/// Text that must never appear in a sealed file. It stands for readable memory
+/// content on its way to disk.
+const SENTINEL: &[u8] = b"sentinel-sealed-export";
 
 #[test]
 fn seal_round_trips_to_the_recipient_identity() {
@@ -39,14 +41,36 @@ fn seal_round_trips_to_the_recipient_identity() {
             .windows(SENTINEL.len())
             .any(|window| window == SENTINEL)
     );
-    let opened = age::decrypt(test_identity(), &sealed).expect("decrypt");
+    assert!(
+        !sealed.windows(4).any(|window| window == b"gist"),
+        "the plaintext gist is not on disk",
+    );
+    let opened = open_sealed(&sealed).expect("open");
     assert_eq!(opened, SENTINEL);
 }
 
 #[test]
 fn seal_rejects_malformed_recipient_text() {
-    let error = seal_to_recipient(SENTINEL, "not-a-key").expect_err("refuse");
+    let error = seal_to_recipient(SENTINEL, "not-a-key!!!").expect_err("refuse");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
+}
+
+#[test]
+fn seal_rejects_recipient_text_of_the_wrong_length() {
+    let short = base64::engine::general_purpose::STANDARD.encode([7u8; 31]);
+    let error = seal_to_recipient(SENTINEL, &short).expect_err("refuse");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+}
+
+#[test]
+fn tampered_ciphertext_does_not_open() {
+    let mut sealed = seal_to_recipient(SENTINEL, &test_recipient()).expect("seal");
+    let last = sealed.len() - 1;
+    sealed[last] ^= 0xff;
+    assert!(
+        open_sealed(&sealed).is_err(),
+        "a tampered seal must not open"
+    );
 }
 
 #[test]
@@ -90,7 +114,25 @@ fn malformed_recipient_is_rejected_before_any_write() {
     let f = fixture("seal-bad-recipient");
     let ctx = ctx(&f, Actor::Harness);
     let error = export(&ExportArgs {
-        recipient: Some("not-a-key".to_owned()),
+        recipient: Some("not-a-key!!!".to_owned()),
+        ..args(
+            &f,
+            &ctx,
+            ExportFilter::default(),
+            ExportContentMode::DsarPlaintext,
+        )
+    })
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert!(!f.path.as_path().exists());
+}
+
+#[test]
+fn short_recipient_is_rejected_before_any_write() {
+    let f = fixture("seal-short-recipient");
+    let ctx = ctx(&f, Actor::Harness);
+    let error = export(&ExportArgs {
+        recipient: Some(base64::engine::general_purpose::STANDARD.encode([7u8; 31])),
         ..args(
             &f,
             &ctx,
@@ -115,7 +157,7 @@ fn readable_export_is_sealed_to_the_recipient_key() {
     ))
     .expect("sealed export delivers");
     let raw = std::fs::read(f.path.as_path()).expect("read the sealed file");
-    assert!(!raw.windows(SENTINEL.len()).any(|window| window == SENTINEL));
+    assert!(!raw.windows(4).any(|window| window == b"gist"));
     let opened = read_sealed(f.path.as_path());
     assert!(opened.contains("plain gist"));
 }

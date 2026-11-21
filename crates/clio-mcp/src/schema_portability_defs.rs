@@ -33,10 +33,10 @@ pub fn portability_defs() -> Vec<ToolDef> {
             name: "export",
             description: "Write one JSON memory_export_bundle with a completeness_manifest \
                           (version, counts, checksums, filter, complete flag). \
-                          content_mode defaults to ciphertext_backup (opaque bodies without \
-                          DEKs); dsar_plaintext emits authorized readable content only with \
-                          readable_export_opt_in=true and an age recipient public key, and the \
-                          bundle is written sealed to that key. Requires a harness/system \
+                          content_mode defaults to ciphertext_backup; dsar_plaintext needs \
+                          readable_export_opt_in=true and a base64-encoded 32-byte X25519 \
+                          public key of the recipient, and the bundle is sealed to it, so \
+                          only the matching secret key opens it. Requires a harness/system \
                           actor; no DEKs, API keys, or sync credentials in the file.",
             required: &["destination"],
             props: vec![
@@ -46,19 +46,15 @@ pub fn portability_defs() -> Vec<ToolDef> {
                 ),
                 (
                     "content_mode",
-                    s(
-                        "ciphertext_backup (default) | dsar_plaintext (needs the opt-in and recipient).",
-                    ),
+                    s("ciphertext_backup (default) | dsar_plaintext (needs opt-in and recipient)."),
                 ),
                 (
                     "readable_export_opt_in",
-                    b("Explicit opt-in for a readable dsar_plaintext export (default false)."),
+                    b("Opt in to a readable dsar_plaintext export (default false)."),
                 ),
                 (
                     "recipient",
-                    s(
-                        "age X25519 public key (age1...) the readable bundle is sealed to; required with dsar_plaintext.",
-                    ),
+                    s("Base64-encoded 32-byte X25519 public key of the recipient; the readable bundle is sealed to it and only the matching secret key opens it."),
                 ),
                 (
                     "category",

@@ -305,7 +305,7 @@ class ContractTests(unittest.TestCase):
         value = document()
         entry(value, "all", "tokens")["target"] = 15183
         entry(value, "all", "tokens")["headroom"] = 21691 - 15183
-        self.assert_refused(value, "expected the recorded final ceiling 30004")
+        self.assert_refused(value, "expected the recorded final ceiling 30059")
 
     def test_a_target_entry_with_the_wrong_keys_is_refused(self):
         value = document()

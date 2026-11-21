@@ -33,7 +33,7 @@ fn export_readable_requires_the_opt_in() {
             "bank": "bank-a",
             "actor": "harness",
             "content_mode": "dsar_plaintext",
-            "recipient": "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+            "recipient": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         }),
     );
     assert_eq!(out["ok"], Value::Bool(false), "{out}");

@@ -23,7 +23,7 @@
 
 use crate::bundle::ExportContentMode;
 use crate::export::{ExportArgs, ExportFilter, export};
-pub(crate) use crate::export_seal_test_support::{read_sealed, test_identity, test_recipient};
+pub(crate) use crate::export_seal_test_support::{open_sealed, read_sealed, test_recipient};
 
 /// Write a decrypted copy of an exported bundle for the import path.
 pub(crate) fn unseal_file(source: &Path, name: &str) -> DestPath {

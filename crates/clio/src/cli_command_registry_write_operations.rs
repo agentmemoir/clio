@@ -262,8 +262,8 @@ pub(crate) const EXPORT: CommandSpec = CommandSpec {
         ),
         Flag::text(
             "recipient",
-            "AGE_RECIPIENT",
-            "age X25519 public key (`age1...`) the readable bundle is sealed to; the tool refuses a readable export when it is absent or empty.",
+            "B64_X25519_PUBLIC_KEY",
+            "Base64-encoded 32-byte X25519 public key of the recipient; the readable bundle is sealed to it and only the matching secret key opens it. The tool refuses a readable export when it is absent or empty.",
         ),
         Flag::choice(
             "category",

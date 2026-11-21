@@ -166,7 +166,7 @@ fn export_matches_the_registered_usage_and_parser() {
     let spec = record("export");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio export --out FILE [--content-mode dsar_plaintext|ciphertext_backup] [--readable-export-opt-in true|false] [--recipient AGE_RECIPIENT] [--category C] [--time-start TS] [--time-end TS] [--include-archived true|false] [--include-discarded true|false] [--subject S] [--bank BANK] [--actor ACTOR] [--output json|text]",
+        "usage: clio export --out FILE [--content-mode dsar_plaintext|ciphertext_backup] [--readable-export-opt-in true|false] [--recipient B64_X25519_PUBLIC_KEY] [--category C] [--time-start TS] [--time-end TS] [--include-archived true|false] [--include-discarded true|false] [--subject S] [--bank BANK] [--actor ACTOR] [--output json|text]",
         "export full usage"
     );
     assert_eq!(
