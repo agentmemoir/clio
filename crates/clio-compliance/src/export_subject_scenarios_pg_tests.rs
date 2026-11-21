@@ -91,7 +91,7 @@ fn subject_export_pg_delivers_under_custody_with_only_the_selected_subject() {
         staging_entries(&staging).is_empty(),
         "the managed staging file is removed"
     );
-    let text = std::fs::read_to_string(scratch.destination()).expect("read the payload");
+    let text = crate::export_tests::read_sealed(&scratch.destination());
     assert!(
         !text.contains(OTHER),
         "no other subject marker in the payload"

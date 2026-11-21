@@ -51,6 +51,13 @@ base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "std"] }
 unicode-normalization = "0.1"
 chacha20poly1305 = "0.11"
+# X25519 key agreement for the readable-export seal. The operator supplies a
+# 32-byte public key as base64 text, and the matching secret key never enters
+# Clio.
+x25519-dalek = "2"
+# Stretches the export seal key out of an X25519 shared secret. HKDF-SHA256
+# binds the ephemeral and recipient public keys through the salt.
+hkdf = "0.13"
 # Stretches the sync key out of its secret: a single fast SHA-256 pass lets a
 # low-entropy secret be brute-forced offline from stolen ciphertext.
 argon2 = "0.6"

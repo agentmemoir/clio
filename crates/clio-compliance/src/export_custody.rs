@@ -61,6 +61,9 @@ const EVENT_KIND: &str = "export_delivery";
 /// The opaque event scope label every export delivery writes.
 const EVENT_SCOPE: &str = "export_custody";
 
+/// The durable scope the delivery intent carries for a readable export opt-in.
+const READABLE_EVENT_SCOPE: &str = "export_readable_optin";
+
 /// The stored delivery state of an export destination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustodyState {
@@ -122,6 +125,9 @@ pub struct DeliverySpec<'a> {
     pub required_action: &'a str,
     /// The time to record, RFC3339 UTC, injected so tests control the clock.
     pub now: &'a str,
+    /// True when the caller explicitly opted in to a readable payload; the
+    /// durable intent then carries the readable-opt-in scope before delivery.
+    pub readable_opt_in: bool,
 }
 
 /// One open destination found by reconciliation.
@@ -177,7 +183,11 @@ pub fn deliver_export(
     let intent = LocalEventIntent {
         action_id: spec.action_id,
         actor: ctx.actor.as_str(),
-        scope: EVENT_SCOPE,
+        scope: if spec.readable_opt_in {
+            READABLE_EVENT_SCOPE
+        } else {
+            EVENT_SCOPE
+        },
         kind: EVENT_KIND,
         event_time: spec.now,
     };

@@ -215,7 +215,7 @@ class ContractTests(unittest.TestCase):
         ):
             with self.subTest(unit=unit):
                 value = document()
-                adjustment = value["target_adjustment"][0]
+                adjustment = value["target_adjustment"][-1]
                 adjustment["initial"]["factor"][unit] = factor
                 adjustment["initial"]["target"][unit] = baseline_value * factor // 100
                 entry(value, "all", unit)["factor"] = factor
@@ -305,7 +305,7 @@ class ContractTests(unittest.TestCase):
         value = document()
         entry(value, "all", "tokens")["target"] = 15183
         entry(value, "all", "tokens")["headroom"] = 21691 - 15183
-        self.assert_refused(value, "expected the recorded final ceiling 30004")
+        self.assert_refused(value, "expected the recorded final ceiling 30107")
 
     def test_a_target_entry_with_the_wrong_keys_is_refused(self):
         value = document()

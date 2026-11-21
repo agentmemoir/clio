@@ -253,10 +253,10 @@ class CompareTests(unittest.TestCase):
             for item in result["comparisons"]
             if item["preset"] == "all"
         }
-        self.assertEqual(adjusted["tokens"]["target"], 30004)
-        self.assertEqual(adjusted["bytes"]["target"], 140559)
-        self.assertEqual(adjusted["tokens"]["headroom"], 30004 - 21691)
-        self.assertEqual(adjusted["bytes"]["headroom"], 140559 - 105632)
+        self.assertEqual(adjusted["tokens"]["target"], 30107)
+        self.assertEqual(adjusted["bytes"]["target"], 141002)
+        self.assertEqual(adjusted["tokens"]["headroom"], 30107 - 21691)
+        self.assertEqual(adjusted["bytes"]["headroom"], 141002 - 105632)
 
     def test_the_final_ceiling_is_not_recomputed(self):
         targets = self.targets()
@@ -264,7 +264,7 @@ class CompareTests(unittest.TestCase):
             item for item in targets
             if item["preset"] == "all" and item["unit"] == "tokens"
         )
-        self.assertEqual(all_tokens["target"], 30004)
+        self.assertEqual(all_tokens["target"], 30107)
         self.assertNotEqual(all_tokens["target"], 15183)
         self.assertEqual(all_tokens["label"], "Decision")
 
@@ -285,7 +285,7 @@ class CompareTests(unittest.TestCase):
         for preset in budget_targets.TARGET_PRESETS:
             if preset == "all":
                 measured[preset] = {
-                    "sha256": "ab" * 32, "bytes": 140559, "tokens": 30004
+                    "sha256": "ab" * 32, "bytes": 141002, "tokens": 30107
                 }
             else:
                 measured[preset] = {
@@ -322,13 +322,13 @@ class CompareTests(unittest.TestCase):
             preset: {"sha256": "ab" * 32, "bytes": 84505, "tokens": 15183}
             for preset in budget_targets.TARGET_PRESETS
         }
-        measured["all"] = {"sha256": "ab" * 32, "bytes": 140560, "tokens": 30005}
+        measured["all"] = {"sha256": "ab" * 32, "bytes": 141003, "tokens": 30108}
         with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", True):
             result = budget_targets.compare(self.targets(), FROZEN_ROWS, measured)
         self.assertEqual(len(result["failures"]), 2)
         for failure in result["failures"]:
             self.assertIn("'all'", failure)
-            self.assertIn("30005" if "tokens" in failure else "140560", failure)
+            self.assertIn("30108" if "tokens" in failure else "141003", failure)
 
     def test_a_missing_preset_measurement_raises(self):
         measured = candidates()

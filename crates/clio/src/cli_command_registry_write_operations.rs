@@ -246,14 +246,25 @@ pub(crate) const EXPORT: CommandSpec = CommandSpec {
     documented: &[
         OUT_REQUIRED,
         Flag {
-            default: Some("dsar_plaintext"),
+            default: Some("ciphertext_backup"),
             ..Flag::choice(
                 "content-mode",
                 "dsar_plaintext|ciphertext_backup",
-                "Selects the bundle content mode that `cli_write_portability::export_call` validates against `dsar_plaintext` or `ciphertext_backup`, and the tool defaults it to `dsar_plaintext` when omitted.",
+                "Selects the bundle content mode that `cli_write_portability::export_call` validates against `dsar_plaintext` or `ciphertext_backup`, and the tool defaults it to `ciphertext_backup` when omitted.",
                 &["dsar_plaintext", "ciphertext_backup"],
             )
         },
+        Flag::choice(
+            "readable-export-opt-in",
+            "true|false",
+            "Explicit opt-in for a readable `dsar_plaintext` export; `cli_write_portability::include_flag` validates `true` or `false` and the tool refuses a readable export without it.",
+            &["true", "false"],
+        ),
+        Flag::text(
+            "recipient",
+            "B64_X25519_PUBLIC_KEY",
+            "Base64-encoded 32-byte X25519 public key of the recipient; the readable bundle is sealed to it and only the matching secret key opens it. The tool refuses a readable export when it is absent or empty.",
+        ),
         Flag::choice(
             "category",
             "C",

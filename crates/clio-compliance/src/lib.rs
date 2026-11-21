@@ -57,6 +57,9 @@ mod erasure_step_probe;
 mod export;
 mod export_custody;
 mod export_mask;
+mod export_seal;
+#[cfg(test)]
+mod export_seal_test_support;
 mod export_subject;
 mod import;
 mod inventory;
@@ -116,6 +119,7 @@ pub use export_custody::{
     CustodyState, DeliveryRefusal, DeliveryResult, DeliverySpec, OpenDestination, deliver_export,
     reconcile_open_destinations,
 };
+pub use export_seal::MAGIC as READABLE_EXPORT_SEAL_MAGIC;
 pub use import::{ImportArgs, ImportReport, SkippedInvalid, import};
 pub use inventory::{
     Custody, InventoryBackend, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, Owner,

@@ -96,6 +96,7 @@ fn spec<'a>(action_id: &'a str, destination: &'a Path, staging_dir: &'a Path) ->
         custody_owner: "clio",
         required_action: "delivery",
         now: EVENT_TIME,
+        readable_opt_in: false,
     }
 }
 

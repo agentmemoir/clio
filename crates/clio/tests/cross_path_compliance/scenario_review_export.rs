@@ -136,6 +136,7 @@ fn spec<'a>(action_id: &'a str, destination: &'a Path, staging: &'a Path) -> Del
         custody_owner: "clio",
         required_action: "delivery",
         now: NOW,
+        readable_opt_in: false,
     }
 }
 /// Deliver one review export through the seam both real bindings delegate to.
