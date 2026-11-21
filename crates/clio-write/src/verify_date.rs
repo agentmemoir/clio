@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn ambiguous_numeric_date_fails_closed() {
-        let value = serde_json::json!({"date": "2026-03-04"});
+        let value = serde_json::json!("2026-03-04");
         let err = match_date("on 03/04/2026", &value, &VerifyConfig::default())
             .expect_err("ambiguous numeric date must fail closed");
         assert_eq!(err, "ambiguous date without day_first policy");
