@@ -232,6 +232,7 @@ fn import_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
 /// non-writing stub with `PROVIDER_IMPORT_UNSUPPORTED`.
 #[inline(never)]
 fn import_provider_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
+    state.authorize_admin()?;
     let provider = req_str(args, "provider")?;
     match provider {
         "mem0" => crate::provider_adapter::import_provider_mem0(state, args),
