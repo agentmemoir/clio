@@ -12,6 +12,7 @@
 //! - The loopback refusal message and its pinned substrings
 //! - The non-loopback refusal message and the empty-store case
 //! - `insecure_no_auth` restoring the unauthenticated loopback server
+//! - A store loaded from a file with no record refused at bind
 //!
 //! ## Does not own
 //! - The admission truth table itself (`http_start_guard_tests`)
@@ -134,7 +135,80 @@ fn non_loopback_without_a_usable_store_fails_closed() {
     }
 }
 
-/// A store path holding no usable record authorizes nothing, so it must not
+/// A store loaded from a file whose record list is empty is still a credential
+/// source: it refuses every request, so the bind is refused at start rather than
+/// started and left answering only 401.
+#[test]
+fn a_store_loaded_from_a_file_with_no_record_is_refused_at_start() {
+    let scratch = Scratch::new("empty-store");
+    scratch.write(&[]);
+    let store = CredentialStore::load(scratch.path()).expect("an empty record file loads");
+    let state = crate::runtime::McpState::open_with_effective(
+        &crate::runtime::McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let cfg = HttpConfig {
+        credentials: Some(Arc::new(store)),
+        ..HttpConfig::default()
+    };
+    assert!(
+        has_credential_source(&cfg),
+        "a store loaded from a file is a credential source even with no record"
+    );
+    let message = serve_with_listener(state, cfg, listener)
+        .expect_err("a store with no record must not admit a bind")
+        .to_string();
+    assert!(
+        message.contains("loopback bind requires an auth token"),
+        "the refusal names the loopback rule: {message}"
+    );
+}
+
+/// One scratch store path per call, removed when the value drops.
+struct Scratch {
+    path: std::path::PathBuf,
+}
+
+impl Scratch {
+    fn new(name: &str) -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "am-mcp-start-{name}-{}-{nanos}.json",
+            std::process::id()
+        ));
+        Self { path }
+    }
+
+    /// Write a store the loader will accept: owner-only, and listed as a
+    /// `.json` under the temp directory.
+    fn write(&self, records: &[AuthTokenRecord]) {
+        clio_config::auth_tokens::save_auth_tokens(&self.path, records).expect("save the store");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))
+                .expect("tighten");
+        }
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(clio_config::auth_tokens::lock_file_path(&self.path));
+    }
+}
+
+/// A store with no path and no record authorizes nothing, so it must not
 /// satisfy the non-loopback credential startup rule: the server fails closed
 /// exactly as it would with no store at all.
 #[test]

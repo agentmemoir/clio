@@ -108,8 +108,9 @@ pub struct HttpConfig {
     pub bind: String,
     /// Loaded network-credential store (actor plus banks per record).
     ///
-    /// `Some` with an empty store authorizes nothing, which is why a bind that
-    /// requires a credential treats it as no credential source at all.
+    /// A supplied store is a credential source even when it holds no record: it
+    /// then refuses every request, so the bind is refused at start rather than
+    /// serving a listener that answers only 401.
     pub credentials: Option<Arc<CredentialStore>>,
     /// Serve without requiring any credential, even on loopback.
     ///
@@ -180,9 +181,9 @@ where
 {
     let loopback = listener.local_addr().is_ok_and(|a| a.ip().is_loopback());
     if let Some(refusal) = bind_refusal(&cfg, loopback) {
-        // A store with no record authorizes nothing, so it is not a source. Each
-        // refusal names the one way an operator satisfies the rule, and the
-        // opening phrases are pinned substrings a runbook and a search hold.
+        // The bind is refused, so the accept loop never starts. Each refusal
+        // names the one way an operator satisfies the rule, and the opening
+        // phrases are pinned substrings a runbook and a search hold.
         let message = match refusal {
             BindRefusal::Loopback => {
                 "mcp http: loopback bind requires an auth token: point --token-file at a store \
@@ -351,13 +352,15 @@ where
     })
 }
 
-/// Whether this config authorizes anyone over the network.
+/// Whether this config carries a credential source for its requests.
 ///
-/// A store is usable only when it holds a record: an empty store makes every
-/// request a 401, so treating it as a source would only hide that at start.
+/// The decision is [`CredentialStore::is_credential_source`]: a supplied store
+/// is a source even with no record, so the start guard refuses that bind.
 #[must_use]
 pub fn has_credential_source(cfg: &HttpConfig) -> bool {
-    cfg.credentials.as_ref().is_some_and(|c| !c.is_empty())
+    cfg.credentials
+        .as_ref()
+        .is_some_and(|s| s.is_credential_source())
 }
 
 /// Whether an `Accept` header admits a JSON answer.
