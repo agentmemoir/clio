@@ -42,8 +42,24 @@ pub enum BindRefusal {
 /// A non-loopback bind exposes the listener to every interface, so it needs
 /// both opt-outs: `insecure_no_auth` alone is the loopback development answer
 /// and must not silently widen a bind.
+///
+/// A supplied store that holds no record authorizes nobody, so serving it would
+/// answer 401 to every request. The bind is refused instead, whatever the
+/// opt-outs say, because the opt-outs are for serving without credentials rather
+/// than for serving a store that can never match one.
 #[must_use]
 pub fn bind_refusal(cfg: &HttpConfig, loopback: bool) -> Option<BindRefusal> {
+    if cfg
+        .credentials
+        .as_ref()
+        .is_some_and(|store| store.is_empty())
+    {
+        return Some(if loopback {
+            BindRefusal::Loopback
+        } else {
+            BindRefusal::NonLoopback
+        });
+    }
     if has_credential_source(cfg) {
         return None;
     }

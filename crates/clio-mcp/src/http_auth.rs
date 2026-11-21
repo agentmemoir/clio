@@ -4,11 +4,14 @@
 //! # Responsibility
 //!
 //! This module is responsible for the network transport's credential edge: the
-//! one-time load of the token store at server start, and the per-request
-//! resolution of a presented bearer secret to the principal its record names.
+//! load of the token store, its revalidation as the file changes, and the
+//! per-request resolution of a presented bearer secret to the principal its
+//! record names.
 //!
 //! ## Owns
 //! - `CredentialStore::load`: the fail-closed read of an operator-named store
+//! - `CredentialStore::resolve`: the snapshot check and the reload that follows
+//!   a changed file
 //! - The request-shaped check over one request's `Authorization` header
 //! - `AuthOutcome`: the credential that matched, or the unbound dev-mode answer
 //!
@@ -25,12 +28,18 @@
 //!
 //! Keep this module focused on the credential edge and nothing past it.
 //!
-//! # The store is loaded once
+//! # The store is revalidated per request
 //!
-//! A request must not re-read a file: that would make every request's cost
-//! depend on the filesystem, and it would make a store edit take effect
-//! mid-request. Revocation therefore takes effect at the next server start,
-//! which is what the store's management verbs already tell the operator.
+//! A request does not re-read the file, but it does `stat` it. The device,
+//! inode, modification time, and length are compared with the values captured
+//! when the records were loaded. When they differ, the shared loader runs again
+//! and the new records replace the old snapshot, so a secret revoked by the
+//! token management verbs stops resolving on the running server. The cost is
+//! one `stat` per authorized request.
+//!
+//! A reload that fails refuses the request rather than serving the previous
+//! snapshot: a stale snapshot would keep a revoked secret alive. The reason is
+//! reported once, when the store enters that state, not once per request.
 //!
 //! # Why the scan does not stop at the match
 //!
@@ -43,8 +52,9 @@
 
 use crate::principal::Principal;
 use clio_config::auth_tokens::{AuthTokenRecord, ct_eq, digest_hex, load_auth_tokens};
-use clio_types::AmError;
-use std::path::Path;
+use clio_types::{AmError, ErrorCode};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 /// One loaded record: the principal it names plus the only secret-derived value
 /// that exists on disk.
@@ -54,14 +64,83 @@ struct StoredCredential {
     digest: String,
 }
 
+/// Identity of one version of the store file.
+///
+/// The inode is part of it because the writer replaces the file with a
+/// temporary file and a rename: a rewrite in the same clock tick changes the
+/// inode while the modification time may stay the same.
+#[cfg(unix)]
+type Fingerprint = (u64, u64, i64, i64, u64);
+
+#[cfg(not(unix))]
+type Fingerprint = (Option<std::time::SystemTime>, u64);
+
+fn fingerprint(metadata: &std::fs::Metadata) -> Fingerprint {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+            metadata.len(),
+        )
+    }
+    #[cfg(not(unix))]
+    {
+        (metadata.modified().ok(), metadata.len())
+    }
+}
+
+/// The records of one store version and the file identity that produced them.
+#[derive(Debug, Clone, Default)]
+struct StoreState {
+    credentials: Vec<StoredCredential>,
+    fingerprint: Option<Fingerprint>,
+    degraded: bool,
+}
+
+impl StoreState {
+    fn from_records(records: Vec<AuthTokenRecord>) -> Self {
+        let mut state = Self::default();
+        state.replace(records);
+        state
+    }
+
+    /// Swap in a freshly loaded set of records.
+    fn replace(&mut self, records: Vec<AuthTokenRecord>) {
+        self.credentials = records
+            .into_iter()
+            .map(|record| StoredCredential {
+                principal: Principal::new(record.label, record.actor, record.banks),
+                digest: record.secret_sha256,
+            })
+            .collect();
+    }
+}
+
 /// The loaded credential store, held for the life of one server.
 ///
 /// Public so a host can load the store itself and hand the result to
 /// [`crate::http::HttpConfig`]; the store file itself stays owned by
 /// `clio_config::auth_tokens`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct CredentialStore {
-    credentials: Vec<StoredCredential>,
+    /// The file the records came from; absent for a store built without one.
+    path: Option<PathBuf>,
+    state: Mutex<StoreState>,
+}
+
+impl Clone for CredentialStore {
+    /// Copy the current snapshot. The copy keeps the same file identity, so it
+    /// revalidates against the same path.
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            state: Mutex::new(self.state().clone()),
+        }
+    }
 }
 
 impl CredentialStore {
@@ -78,14 +157,24 @@ impl CredentialStore {
     pub fn load(path: &Path) -> Result<Self, AmError> {
         if !path.is_file() {
             return Err(AmError::new(
-                clio_types::ErrorCode::ConfigCorrupt,
+                ErrorCode::ConfigCorrupt,
                 format!(
                     "credential store {} does not exist; create it with `clio auth token add`",
                     path.display()
                 ),
             ));
         }
-        Ok(Self::from_records(load_auth_tokens(path)?))
+        let before = stat_fingerprint(path)?;
+        let records = load_auth_tokens(path)?;
+        let after = stat_fingerprint(path)?;
+        let mut state = StoreState::from_records(records);
+        // A file that changed while it was being read is re-read on the first
+        // request: no fingerprint means "not in step with the file".
+        state.fingerprint = (before == after).then_some(after);
+        Ok(Self {
+            path: Some(path.to_path_buf()),
+            state: Mutex::new(state),
+        })
     }
 
     /// Build a store from already-validated records.
@@ -95,23 +184,30 @@ impl CredentialStore {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn from_records(records: Vec<AuthTokenRecord>) -> Self {
         Self {
-            credentials: records
-                .into_iter()
-                .map(|record| StoredCredential {
-                    principal: Principal::new(record.label, record.actor, record.banks),
-                    digest: record.secret_sha256,
-                })
-                .collect(),
+            path: None,
+            state: Mutex::new(StoreState::from_records(records)),
         }
     }
 
     /// Whether the store holds no record at all.
     ///
-    /// A store with no record authorizes nothing, so it is not a usable
-    /// credential source for a bind that requires one.
+    /// Such a store authorizes nobody. Whether the server still treats it as a
+    /// credential source is [`Self::is_credential_source`], which is true for a
+    /// store loaded from a file.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.credentials.is_empty()
+        self.state().credentials.is_empty()
+    }
+
+    /// Whether this store is a credential source for a request.
+    ///
+    /// A store loaded from a file stays a source even when every record is
+    /// gone: it refuses every request, and the bind guard reads this same answer
+    /// through [`crate::http::has_credential_source`], so a reload to an empty
+    /// file cannot leave a listener that answers only 401.
+    #[must_use]
+    pub fn is_credential_source(&self) -> bool {
+        self.path.is_some() || !self.is_empty()
     }
 
     /// Resolve a presented secret to the principal its record names.
@@ -119,17 +215,93 @@ impl CredentialStore {
     /// `None` for an unknown secret. Every record is compared regardless of an
     /// earlier match, so a recognized credential and an unrecognized one cost
     /// the same.
-    #[must_use]
-    pub(crate) fn resolve(&self, presented: &str) -> Option<Principal> {
+    ///
+    /// # Errors
+    /// The reload error when the store file changed and can no longer be read.
+    /// The caller refuses the request; serving the previous snapshot would keep
+    /// a revoked secret alive.
+    pub(crate) fn resolve(&self, presented: &str) -> Result<Option<Principal>, AmError> {
+        self.refresh()?;
         let digest = digest_hex(presented);
+        let state = self.state();
         let mut matched: Option<&StoredCredential> = None;
-        for credential in &self.credentials {
+        for credential in &state.credentials {
             if ct_eq(credential.digest.as_bytes(), digest.as_bytes()) {
                 matched = Some(credential);
             }
         }
-        matched.map(|c| c.principal.clone())
+        Ok(matched.map(|c| c.principal.clone()))
     }
+
+    /// Reload the records when the file no longer matches the snapshot.
+    fn refresh(&self) -> Result<(), AmError> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(());
+        };
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                return Err(self.degrade(format!(
+                    "credential store {} cannot be read: {error}",
+                    path.display()
+                )));
+            }
+        };
+        let current = fingerprint(&metadata);
+        let in_step = self.state().fingerprint.as_ref() == Some(&current);
+        if in_step {
+            return Ok(());
+        }
+        match load_auth_tokens(path) {
+            Ok(records) => {
+                let mut state = self.state();
+                state.replace(records);
+                state.fingerprint = Some(current);
+                state.degraded = false;
+                Ok(())
+            }
+            Err(error) => Err(self.degrade(error.message)),
+        }
+    }
+
+    /// Mark the store degraded, report the reason once, and return the error.
+    ///
+    /// The transition is decided under the lock and the message is written after
+    /// the guard is dropped, so a stalled stderr cannot block every request and
+    /// a failed write cannot panic while the store is locked.
+    fn degrade(&self, reason: String) -> AmError {
+        let first = {
+            let mut state = self.state();
+            let first = !state.degraded;
+            state.degraded = true;
+            first
+        };
+        if first {
+            eprintln!("clio-mcp: refusing requests, credential store reload failed: {reason}");
+        }
+        AmError::new(ErrorCode::ConfigCorrupt, reason)
+    }
+
+    fn state(&self) -> MutexGuard<'_, StoreState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Read the identity of the store file, refusing a file that cannot be stat'ed.
+fn stat_fingerprint(path: &Path) -> Result<Fingerprint, AmError> {
+    std::fs::metadata(path)
+        .map(|metadata| fingerprint(&metadata))
+        .map_err(|error| {
+            AmError::new(
+                ErrorCode::ConfigCorrupt,
+                format!(
+                    "credential store {} cannot be read: {error}",
+                    path.display()
+                ),
+            )
+        })
 }
 
 /// What the credential check found for one request.
@@ -151,22 +323,29 @@ pub(crate) enum AuthOutcome {
 ///
 /// # Errors
 /// `401` when a credential source is configured and this request does not
-/// present a secret one of its records names. The answer is the same for a
-/// missing header, a malformed scheme, and an unknown secret, so a refusal
-/// discloses nothing about which credentials exist.
+/// present a secret one of its records names, or when the store file can no
+/// longer be read. The answer is the same for a missing header, a malformed
+/// scheme, and an unknown secret, so a refusal discloses nothing about which
+/// credentials exist.
 pub(crate) fn authorize_request(
     store: Option<&CredentialStore>,
     header: Option<&str>,
 ) -> Result<AuthOutcome, u16> {
-    let Some(presented) = header.map(str::trim) else {
+    let Some(store) = store else {
+        return Ok(AuthOutcome::Unbound);
+    };
+    let Some(secret) = header
+        .map(str::trim)
+        .and_then(|presented| presented.strip_prefix("Bearer "))
+    else {
         return credential_required(store);
     };
-    let Some(secret) = presented.strip_prefix("Bearer ") else {
-        return credential_required(store);
-    };
-    match store.and_then(|s| s.resolve(secret)) {
-        Some(principal) => Ok(AuthOutcome::Bound(principal)),
-        None => credential_required(store),
+    match store.resolve(secret) {
+        Ok(Some(principal)) => Ok(AuthOutcome::Bound(principal)),
+        Ok(None) => credential_required(store),
+        // A store that changed and can no longer be read refuses the request;
+        // the answer stays the same as for a bad secret.
+        Err(_) => Err(401),
     }
 }
 
@@ -175,8 +354,8 @@ pub(crate) fn authorize_request(
 /// Keeping this in one place is what makes "a request without credentials never
 /// reaches a tool" true on a bound server: there is no other path from a
 /// missing header to a dispatch.
-fn credential_required(store: Option<&CredentialStore>) -> Result<AuthOutcome, u16> {
-    if store.is_some_and(|s| !s.is_empty()) {
+fn credential_required(store: &CredentialStore) -> Result<AuthOutcome, u16> {
+    if store.is_credential_source() {
         return Err(401);
     }
     Ok(AuthOutcome::Unbound)

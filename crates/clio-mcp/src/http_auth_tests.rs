@@ -66,6 +66,18 @@ impl Scratch {
         }
     }
 
+    /// Write bytes that are not valid UTF-8, so the loader fails at its read
+    /// rather than at its parse. Byte values do not depend on the user, so this
+    /// fails the same way for a root runner as for anyone else.
+    fn write_undecodable(&self) {
+        fs::write(&self.path, [0xff, 0xfe, 0xfd]).expect("write undecodable bytes");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600)).expect("tighten");
+        }
+    }
+
     fn path(&self) -> &Path {
         &self.path
     }
@@ -74,6 +86,9 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
+        // A management verb takes the adjacent writer hold, which creates its
+        // lock file; remove it with the store so the fixture leaves nothing.
+        let _ = fs::remove_file(clio_config::auth_tokens::lock_file_path(&self.path));
     }
 }
 
@@ -103,10 +118,42 @@ fn a_loaded_record_resolves_its_own_secret_to_its_own_principal() {
     scratch.write(&[record("ci", &secret, Actor::Harness, &["demo"])]);
     let store = CredentialStore::load(scratch.path()).expect("load");
 
-    let principal = store.resolve(&secret).expect("resolves");
+    let principal = store.resolve(&secret).expect("resolve").expect("resolves");
     assert_eq!(principal.label, "ci");
     assert_eq!(principal.actor, Actor::Harness);
     assert_eq!(principal.banks, vec!["demo".to_owned()]);
+}
+
+#[test]
+fn a_revoked_record_stops_resolving_without_a_restart() {
+    let scratch = Scratch::new("revoked");
+    let ci = secret("ci");
+    let bot = secret("bot");
+    scratch.write(&[
+        record("ci", &ci, Actor::Harness, &["demo"]),
+        record("bot", &bot, Actor::Agent, &["scratch"]),
+    ]);
+    let store = CredentialStore::load(scratch.path()).expect("load");
+    let header = |secret: &str| format!("Bearer {secret}");
+    assert!(matches!(
+        authorize_request(Some(&store), Some(&header(&ci))).expect("bound"),
+        AuthOutcome::Bound(_)
+    ));
+
+    clio_config::auth_tokens::revoke_token(scratch.path(), "ci").expect("revoke");
+
+    assert_eq!(
+        authorize_request(Some(&store), Some(&header(&ci))).unwrap_err(),
+        401,
+        "the revoked secret must stop resolving on the running store"
+    );
+    assert!(
+        matches!(
+            authorize_request(Some(&store), Some(&header(&bot))).expect("survivor bound"),
+            AuthOutcome::Bound(_)
+        ),
+        "the surviving record must still authorize"
+    );
 }
 
 #[test]
@@ -116,10 +163,15 @@ fn an_unknown_secret_resolves_to_nothing() {
     scratch.write(&[record("ci", &known, Actor::Harness, &["demo"])]);
     let store = CredentialStore::load(scratch.path()).expect("load");
 
-    assert!(store.resolve(&secret("other")).is_none());
-    assert!(store.resolve("").is_none());
+    assert!(store.resolve(&secret("other")).expect("resolve").is_none());
+    assert!(store.resolve("").expect("resolve").is_none());
     // A prefix of a real secret is not a secret.
-    assert!(store.resolve(&known[..known.len() - 1]).is_none());
+    assert!(
+        store
+            .resolve(&known[..known.len() - 1])
+            .expect("resolve")
+            .is_none()
+    );
 }
 
 #[test]
@@ -133,8 +185,14 @@ fn each_record_keeps_its_own_actor_and_banks() {
     ]);
     let store = CredentialStore::load(scratch.path()).expect("load");
 
-    let harness = store.resolve(&harness_secret).expect("harness resolves");
-    let agent = store.resolve(&agent_secret).expect("agent resolves");
+    let harness = store
+        .resolve(&harness_secret)
+        .expect("resolve")
+        .expect("harness resolves");
+    let agent = store
+        .resolve(&agent_secret)
+        .expect("resolve")
+        .expect("agent resolves");
     assert_eq!(harness.actor, Actor::Harness);
     assert!(harness.authorize_bank("logs").is_ok());
     assert_eq!(agent.actor, Actor::Agent);
@@ -155,7 +213,7 @@ fn resolution_never_returns_a_secret_or_a_digest() {
     scratch.write(std::slice::from_ref(&record));
     let store = CredentialStore::load(scratch.path()).expect("load");
 
-    let principal = store.resolve(&secret).expect("resolves");
+    let principal = store.resolve(&secret).expect("resolve").expect("resolves");
     let rendered = format!("{principal:?}");
     assert!(!rendered.contains(&secret), "{rendered}");
     assert!(!rendered.contains(&record.secret_sha256), "{rendered}");
@@ -169,6 +227,66 @@ fn an_absent_store_path_is_refused_rather_than_read_as_empty() {
     assert!(err.message.contains("does not exist"), "{}", err.message);
     // The message names the path and the fix; it names no stored value.
     assert!(err.message.contains("auth token add"), "{}", err.message);
+}
+
+/// A reload that meets a malformed file must refuse, and must not latch: once
+/// the file is valid again the same secret authorizes without a restart.
+#[test]
+fn a_store_that_becomes_malformed_after_load_refuses_with_401_then_recovers() {
+    let scratch = Scratch::new("reload-malformed");
+    let secret = secret("r");
+    let header = format!("Bearer {secret}");
+    scratch.write(&[record("ci", &secret, Actor::Harness, &["demo"])]);
+    let store = CredentialStore::load(scratch.path()).expect("load");
+    assert!(
+        matches!(
+            authorize_request(Some(&store), Some(&header)).expect("bound"),
+            AuthOutcome::Bound(_)
+        ),
+        "the loaded record must authorize before the file changes"
+    );
+
+    scratch.write_raw("{ this is not a token store");
+    assert_eq!(
+        authorize_request(Some(&store), Some(&header)).unwrap_err(),
+        401,
+        "a malformed rewrite must refuse instead of serving the old snapshot"
+    );
+
+    scratch.write(&[record("ci", &secret, Actor::Harness, &["demo"])]);
+    assert!(
+        matches!(
+            authorize_request(Some(&store), Some(&header)).expect("bound again"),
+            AuthOutcome::Bound(_)
+        ),
+        "the refusal must not survive the file becoming valid again"
+    );
+}
+
+/// A store path that stops being readable as text must refuse.
+#[test]
+fn a_store_that_becomes_unreadable_after_load_refuses_with_401() {
+    let scratch = Scratch::new("reload-unreadable");
+    let secret = secret("u");
+    let header = format!("Bearer {secret}");
+    scratch.write(&[record("ci", &secret, Actor::Harness, &["demo"])]);
+    let store = CredentialStore::load(scratch.path()).expect("load");
+    assert!(
+        matches!(
+            authorize_request(Some(&store), Some(&header)).expect("bound"),
+            AuthOutcome::Bound(_)
+        ),
+        "the loaded record must authorize before the file changes"
+    );
+
+    // Invalid UTF-8 fails the loader's read on every platform and for every
+    // user, including root; a mode change would not.
+    scratch.write_undecodable();
+    assert_eq!(
+        authorize_request(Some(&store), Some(&header)).unwrap_err(),
+        401,
+        "an unreadable rewrite must refuse the secret"
+    );
 }
 
 #[test]
@@ -196,7 +314,7 @@ fn an_empty_store_loads_but_authorizes_nobody() {
         store.is_empty(),
         "an empty record file loads no credentials"
     );
-    assert!(store.resolve(&secret("any")).is_none());
+    assert!(store.resolve(&secret("any")).expect("resolve").is_none());
 }
 
 #[test]
@@ -274,10 +392,10 @@ fn an_unknown_secret_is_401_and_the_answer_matches_a_missing_one() {
 }
 
 #[test]
-fn an_empty_store_is_not_a_credential_source_and_authorizes_nobody() {
-    // An empty store is the same as no store at the credential edge: both are
-    // the unbound answer. That is also what keeps a non-loopback bind with an
-    // empty store failing closed at start rather than serving 401-only.
+fn a_store_with_no_path_and_no_record_is_not_a_credential_source() {
+    // A store built without a file and holding no record is the same as no
+    // store at the credential edge: both are the unbound answer. A store loaded
+    // from a file is a source even with no record, so the bind guard refuses it.
     let empty = CredentialStore::default();
     assert!(matches!(
         authorize_request(Some(&empty), None).expect("unbound"),
