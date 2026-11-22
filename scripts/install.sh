@@ -39,7 +39,7 @@ ZMFbLPYEQPe2d5Q0oM2B4Tp35HNqB5aYvdpkor9RJ2Ety1Ix53vdxttn2HfhIlD3
 kLJC3lmz0AgQ+w+852Jav1RoFDAsTgLjLWfQABhTIpz7AgMBAAE=
 -----END PUBLIC KEY-----'
 
-# Written to stderr so that `curl ... | sh` leaves nothing on stdout for a
+# Written to stderr, so a `curl` install piped into `sh` leaves nothing on stdout for a
 # caller who is redirecting it.
 log() { printf '%s\n' "$*" >&2; }
 die() {
