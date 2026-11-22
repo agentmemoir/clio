@@ -89,11 +89,11 @@ impl DekProvider for FaultyKms {
         self.inner.diagnose_masked(subject_id)
     }
 
-    fn blind_index_key(&self) -> Result<[u8; 32], AmError> {
+    fn blind_index_key(&self) -> Result<clio_store::Zeroizing<[u8; 32]>, AmError> {
         self.inner.blind_index_key()
     }
 
-    fn ensure_blind_index_key(&self) -> Result<[u8; 32], AmError> {
+    fn ensure_blind_index_key(&self) -> Result<clio_store::Zeroizing<[u8; 32]>, AmError> {
         self.inner.ensure_blind_index_key()
     }
 }

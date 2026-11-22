@@ -158,14 +158,14 @@ impl DekProvider for FailOpenKms {
         format!("fail-open kms for `{subject_id}`")
     }
 
-    fn blind_index_key(&self) -> Result<[u8; 32], AmError> {
+    fn blind_index_key(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, AmError> {
         // Deterministic per test process: this double exists to probe failure
         // classification, not to model key storage.
-        Ok([0x7b; 32])
+        Ok(zeroize::Zeroizing::new([0x7b; 32]))
     }
 
-    fn ensure_blind_index_key(&self) -> Result<[u8; 32], AmError> {
-        Ok([0x7b; 32])
+    fn ensure_blind_index_key(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, AmError> {
+        Ok(zeroize::Zeroizing::new([0x7b; 32]))
     }
 }
 

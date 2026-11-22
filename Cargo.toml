@@ -50,7 +50,7 @@ clio-mcp = { path = "crates/clio-mcp" }
 base64 = "0.23"
 jiff = "1.0.2"
 unicode-normalization = "0.1"
-chacha20poly1305 = "0.11"
+chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 # X25519 key agreement for the readable-export seal. The operator supplies a
 # 32-byte public key as base64 text, and the matching secret key never enters
 # Clio.

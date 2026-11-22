@@ -313,6 +313,7 @@ pub use clio_types::{
     TripleEndOutcome, TripleQuery, TripleRecord, UpdateRule, ensure_discrete_update_rule,
     interval_contains,
 };
+pub use zeroize::Zeroizing;
 
 #[cfg(test)]
 mod erase_test_support;

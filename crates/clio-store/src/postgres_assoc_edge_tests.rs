@@ -240,10 +240,10 @@ impl DekProvider for FailEncryptKms {
     fn decrypt(&self, _: &str, _: &str, _: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
         Err(AmError::new(ErrorCode::Forbidden, "no"))
     }
-    fn blind_index_key(&self) -> Result<[u8; 32], AmError> {
+    fn blind_index_key(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, AmError> {
         Err(AmError::new(ErrorCode::Internal, "inject key failure"))
     }
-    fn ensure_blind_index_key(&self) -> Result<[u8; 32], AmError> {
+    fn ensure_blind_index_key(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, AmError> {
         Err(AmError::new(ErrorCode::Internal, "inject key failure"))
     }
     fn destroy_dek(&self, _: &str) -> Result<(), AmError> {
