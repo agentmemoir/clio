@@ -77,6 +77,15 @@
       "candidate_sha256": "059df27ee885a6320af8b3997e688d07ae2d84453d01bc147cab4eb85e5261cd",
       "max_bytes": 141002,
       "max_tokens": 30107
+    },
+    {
+      "decision_id": "mcp-allow-duplicate-removal-2026-11-22",
+      "date": "2026-11-22",
+      "reason": "Removing the caller-facing allow_duplicate waiver removes the tool argument and the property text that described it, so the canonical tools array falls to 139124 bytes and 29744 cl100k_base tokens. This record covers the new candidate digest at exactly the measured size.",
+      "base_commit": "ac0b9fd27a431bb763e8698c9a8e51d26f67e687",
+      "candidate_sha256": "4580e1a598ed2996226b3af163084ba8b3850be8332668e42b0fd93564f33b2f",
+      "max_bytes": 139124,
+      "max_tokens": 29744
     }
   ]
 }

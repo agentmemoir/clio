@@ -177,7 +177,6 @@ pub(crate) const REMEMBER: CommandSpec = CommandSpec {
         SOURCE_TYPE,
         EVIDENCE_REF,
         CONTEXT,
-        Flag::toggle("allow-duplicate", "`cli_write_core` waives duplicates."),
         CORE_DRY_RUN,
         GLOBAL_OUTPUT,
     ],

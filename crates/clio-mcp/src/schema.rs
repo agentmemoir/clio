@@ -215,7 +215,7 @@ fn description_bound_definition() -> Value {
         "tokenizer": "cl100k_base",
         "tokenizer_version": "0.14.0",
         "scope_rule": "Every JSON path listed in locations is resolved inside its tool object, and each one that holds a description is measured on its own; a value at or below both limits passes.",
-        "target_names": ["min_score", "min_scores", "provenance_floor", "include_exact", "fidelity", "context", "bank", "actor", "explain", "allow_duplicate"],
+        "target_names": ["min_score", "min_scores", "provenance_floor", "include_exact", "fidelity", "context", "bank", "actor", "explain"],
         "tool_descriptions": ["maintenance_status"]
     })
 }

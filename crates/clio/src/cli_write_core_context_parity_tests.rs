@@ -51,11 +51,12 @@ fn cli_and_mcp_store_the_same_context() {
         "store",
         json!({
             "item": {"id": "itm-mcp-parity", "subject_id": "s", "gist": "deploys happen on Fridays"},
-            "allow_duplicate": true,
             "category": "task_spec",
             "epistemic_kind": "fact",
             "context": "team chat",
-            "bank": "demo",
+            // A separate bank keeps the identical text out of the exact-duplicate
+            // gate, which is unconditional; context parity is what this test owns.
+            "bank": "demo-mcp",
             "actor": "agent",
             "timestamp": TS
         }),
@@ -69,7 +70,7 @@ fn cli_and_mcp_store_the_same_context() {
         .expect("cli item");
     let mcp_item = s
         .store
-        .get_memory_item("demo", "itm-mcp-parity")
+        .get_memory_item("demo-mcp", "itm-mcp-parity")
         .unwrap()
         .expect("mcp item");
     assert_eq!(cli_item.context.as_deref(), Some("team chat"));

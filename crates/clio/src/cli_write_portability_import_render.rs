@@ -4,9 +4,9 @@
 //! # Responsibility
 //!
 //! This module is responsible for the `clio import` human text view: the
-//! summary line (created/skipped/rejected/overwritten plus the skipped-invalid
-//! naming tail) and the detail lines for the fields the JSON report carries —
-//! `written`, `created_ids`, `rejection_samples`, and `notes`.
+//! summary line (created/skipped/rejected/overwritten plus the duplicate-text
+//! and skipped-invalid tails) and the detail lines for the fields the JSON
+//! report carries — `written`, `created_ids`, `rejection_samples`, and `notes`.
 //!
 //! ## Owns
 //! - The `import` text view over the MCP `import` payload
@@ -41,12 +41,16 @@ pub(crate) fn render_import(payload: &Value) -> String {
         count("would_reject"),
         count("would_overwrite"),
     );
+    let duplicate = duplicate_tail(report);
     let summary = if report.get("dry_run") == Some(&Value::Bool(true)) {
-        format!("import dry-run: would create {create}, skip {skip}, reject {reject} (zero writes)")
+        format!(
+            "import dry-run: would create {create}, skip {skip}, reject {reject}\
+             {duplicate} (zero writes)"
+        )
     } else if report.get("applied") != Some(&Value::Bool(true)) {
         format!(
             "import applied nothing: would create {create}, skip {skip}, \
-             reject {reject}, overwrite {overwrite}"
+             reject {reject}, overwrite {overwrite}{duplicate}"
         )
     } else {
         let invalid = skipped_invalid_tail(report);
@@ -56,12 +60,12 @@ pub(crate) fn render_import(payload: &Value) -> String {
         if create == 0 && overwrite == 0 {
             format!(
                 "import: nothing restored: created 0, overwrote 0, skipped {skip}, \
-                 rejected {reject}{invalid}"
+                 rejected {reject}{invalid}{duplicate}"
             )
         } else {
             format!(
                 "import: created {create}, skipped {skip}, rejected {reject}, \
-                 overwrote {overwrite}{invalid}"
+                 overwrote {overwrite}{invalid}{duplicate}"
             )
         }
     };
@@ -117,6 +121,19 @@ fn named(entries: &[String]) -> String {
         "none".to_owned()
     } else {
         entries.join(", ")
+    }
+}
+
+/// The text-mode tail counting rows dropped because their text already exists
+/// under another identity. Empty when the report holds none.
+fn duplicate_tail(report: &Value) -> String {
+    match report
+        .get("would_skip_duplicate")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+    {
+        0 => String::new(),
+        count => format!(", skipped duplicate {count}"),
     }
 }
 

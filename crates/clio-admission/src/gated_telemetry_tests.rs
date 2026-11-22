@@ -19,7 +19,7 @@
 //!
 //! Keep this module focused on admission event telemetry tests.
 
-use super::gated_test_support::{ctx, gate_req, gist_item, weak_source};
+use super::gated_test_support::{StubSource, ctx, gate_req, gist_item, strong_source, weak_source};
 use super::{VecSink, gated_create};
 use crate::decision::Candidate;
 use crate::policy::AdmissionPolicy;
@@ -130,14 +130,14 @@ fn accept_events_keep_a_count_and_its_name() {
     // An accepted item's preview is a masked view, but a count must survive it
     // under its own name: the operator reads the same shape the tool returns.
     let env = RankingEnv::system_defaults();
-    let policy = AdmissionPolicy::new(&env).with_force(true);
+    let policy = AdmissionPolicy::new(&env);
     let sink = VecSink::default();
     let ctx = ctx();
     let mut item = gist_item("count-1", "plain note without markers");
     item.epistemic_kind = EpistemicKind::Belief;
     item.source_type = Some(SourceType::UserStated);
     item.snapshot = Some(json!({"lesson_tokens": 5}));
-    let source = weak_source();
+    let source = strong_source();
     let req = gate_req(&item, &ctx, policy, &sink, "2026-09-17T00:00:00Z");
     let decision = gated_create(
         &req,
@@ -160,19 +160,22 @@ fn accept_events_keep_a_count_and_its_name() {
 #[test]
 fn user_stated_source_lifts_confidence() {
     let env = RankingEnv::system_defaults();
-    // `weak_source` mirrors the item, so novelty is 0 and the item is an exact
-    // duplicate of its neighbor. Force waives that one rejection so this test
-    // keeps measuring what it is about: the confidence factor. The novelty
-    // arithmetic below is unchanged.
-    let policy = AdmissionPolicy::new(&env).with_force(true);
+    // Novelty must stay 0 for the arithmetic below, and an exact duplicate is
+    // now always rejected. A neighbor with the same words in a different order
+    // is not an exact duplicate, so it keeps novelty at 0 without tripping the
+    // duplicate gate.
+    let source = StubSource {
+        neighbors: vec!["markers memo plain note without 1".to_owned()],
+        ..StubSource::default()
+    };
     let sink = VecSink::default();
     let ctx = ctx();
     let mut item = gist_item("conf-1", "plain note without markers");
     item.epistemic_kind = EpistemicKind::Belief;
     item.source_type = Some(SourceType::UserStated);
-    // Utility 0.5, confidence 0.9, novelty 0, recency 1.0, gist prior 0.4:
-    // 0.2 * 2.8 = 0.56 admits; the same unstated text scores 0.48 and rejects.
-    let source = weak_source();
+    // Utility 0.5, confidence 0.9, novelty 0, gist prior 0.4. The stated text
+    // clears the threshold; the same text with no source type falls short.
+    let policy = AdmissionPolicy::new(&env);
     let req = gate_req(&item, &ctx, policy.clone(), &sink, "2026-09-17T00:00:00Z");
     let decision = gated_create(
         &req,

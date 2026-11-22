@@ -35,6 +35,7 @@ use std::time::Duration;
 
 use clio_admission::AdmissionPolicy;
 use clio_admission::gated::{GateRequest, gated_create_raw};
+use clio_admission::is_exact_duplicate_reason;
 use clio_compliance::ImportReport;
 use clio_config::secret::scrub_inline_secrets;
 use clio_types::{
@@ -44,7 +45,7 @@ use clio_types::{
 use serde_json::{Value, json};
 
 use crate::runtime::{McpState, StderrSinks, StoreSignals};
-use crate::write_tools::{gated_write_policy, opt_bool, opt_str};
+use crate::write_tools::{admission_policy, opt_bool, opt_str};
 
 const DEFAULT_MEM0_BASE_URL: &str = "https://api.mem0.ai/v1";
 const DEFAULT_PAGE_SIZE: u64 = 50;
@@ -57,6 +58,7 @@ pub(crate) type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
 enum ItemOutcome {
     Created,
     Skipped,
+    SkippedDuplicate(String),
     Rejected(Option<String>),
 }
 
@@ -94,11 +96,11 @@ pub(crate) fn import_mem0(
 
     let auth_header = crate::provider_credentials::authorization(args, env, sanctioned)?;
 
-    let policy = gated_write_policy(state, ctx.bank.as_str(), args)?;
+    let policy = admission_policy(state, ctx.bank.as_str());
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
 
     let mut would_create = 0usize;
-    let mut would_skip = 0usize;
+    let (mut would_skip, mut would_skip_duplicate) = (0usize, 0usize);
     let mut would_reject = 0usize;
     let mut rejection_samples = Vec::new();
     let mut notes = Vec::new();
@@ -136,6 +138,12 @@ pub(crate) fn import_mem0(
             )? {
                 ItemOutcome::Created => would_create += 1,
                 ItemOutcome::Skipped => would_skip += 1,
+                ItemOutcome::SkippedDuplicate(reason) => {
+                    would_skip_duplicate += 1;
+                    if notes.len() < 10 {
+                        notes.push(format!("skipped duplicate: {reason}"));
+                    }
+                }
                 ItemOutcome::Rejected(reason) => {
                     would_reject += 1;
                     if let Some(r) = reason
@@ -156,6 +164,7 @@ pub(crate) fn import_mem0(
     let report = ImportReport {
         would_create,
         would_skip,
+        would_skip_duplicate,
         would_reject,
         would_overwrite: 0,
         // Provider rows are scored item by item, so no entity is skipped for
@@ -284,6 +293,14 @@ fn process_mem0_item(
     if decision.pass {
         seen_external_ids.insert(ext_id.to_owned());
         Ok(ItemOutcome::Created)
+    } else if decision
+        .rejection_reason
+        .as_deref()
+        .is_some_and(is_exact_duplicate_reason)
+    {
+        Ok(ItemOutcome::SkippedDuplicate(
+            decision.rejection_reason.unwrap_or_default(),
+        ))
     } else {
         Ok(ItemOutcome::Rejected(decision.rejection_reason))
     }

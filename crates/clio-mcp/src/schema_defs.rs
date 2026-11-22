@@ -174,18 +174,6 @@ pub(crate) fn context_prop() -> (&'static str, Value) {
     )
 }
 
-/// The `allow_duplicate` parameter shared by every gated write except the item
-/// family, which words its own description. It waives the exact-duplicate
-/// rejection and nothing else.
-pub(crate) fn allow_duplicate_prop() -> (&'static str, Value) {
-    (
-        "allow_duplicate",
-        b(
-            "Store even when identical to an item already in this bank; waives the exact-duplicate rejection only.",
-        ),
-    )
-}
-
 /// Required fields of one admission candidate.
 pub(crate) const ADMISSION_REQUIRED: &[&str] = &["item", "epistemic_kind"];
 
@@ -227,16 +215,6 @@ fn admission_candidate_props() -> Vec<(&'static str, Value)> {
             ),
         ),
         context_prop(),
-        // Every tool in this family can hit the unconditional exact-duplicate
-        // rejection, so every tool in this family must be able to waive it.
-        // Naming the argument for what it waives keeps it distinct from
-        // `consolidate`'s unrelated `force`.
-        (
-            "allow_duplicate",
-            b(
-                "Store this item even when identical to one already in this bank; waives the exact-duplicate rejection only.",
-            ),
-        ),
     ]
 }
 
@@ -259,12 +237,7 @@ pub(crate) fn admission_candidate_schema() -> Value {
 pub(crate) fn store_like(name: &'static str, desc: &'static str) -> ToolDef {
     let mut props = admission_candidate_props();
     if name == "store" {
-        // `dry_run` sits between the candidate fields and the duplicate waiver.
-        let waiver = props.pop();
         props.push(("dry_run", b("Validate and score without durable write.")));
-        if let Some(waiver) = waiver {
-            props.push(waiver);
-        }
     }
     props.extend(bank_actor());
     ToolDef {

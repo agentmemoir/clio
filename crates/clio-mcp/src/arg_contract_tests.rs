@@ -126,25 +126,6 @@ fn an_argument_a_handler_reads_is_declared_in_its_schema() {
     // These handlers read the argument, so a client that follows `tools/list` must be able to send it.
     let cases = [
         (
-            "persona_observe_preference",
-            json!({"key": "k", "observed_value": 0.5, "allow_duplicate": true}),
-        ),
-        (
-            "belief_observe",
-            json!({
-                "proposition": "p", "confidence": 0.5, "evidence_ref": "e",
-                "source_type": "user_stated", "allow_duplicate": true
-            }),
-        ),
-        (
-            "import",
-            json!({"source": "bundle.json", "allow_duplicate": true}),
-        ),
-        (
-            "import_provider",
-            json!({"provider": "mem0", "allow_duplicate": true}),
-        ),
-        (
             "canonical_put",
             json!({
                 "key": "k", "value": "v", "category": "persona",
@@ -194,6 +175,29 @@ fn an_argument_no_handler_acts_on_is_still_refused_by_name() {
             "sync_ack_skip",
             "remote",
             json!({"sync_mutation_id": "m", "remote": "host:1"}),
+        ),
+        (
+            "persona_observe_preference",
+            "allow_duplicate",
+            json!({"key": "k", "observed_value": 0.5, "allow_duplicate": true}),
+        ),
+        (
+            "belief_observe",
+            "allow_duplicate",
+            json!({
+                "proposition": "p", "confidence": 0.5, "evidence_ref": "e",
+                "source_type": "user_stated", "allow_duplicate": true
+            }),
+        ),
+        (
+            "import",
+            "allow_duplicate",
+            json!({"source": "bundle.json", "allow_duplicate": true}),
+        ),
+        (
+            "import_provider",
+            "allow_duplicate",
+            json!({"provider": "mem0", "allow_duplicate": true}),
         ),
     ];
     for (tool, key, args) in cases {

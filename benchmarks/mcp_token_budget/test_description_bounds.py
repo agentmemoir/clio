@@ -32,10 +32,10 @@ PACK = REPO / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 SCHEMA_RS = REPO / "crates" / "clio-mcp" / "src" / "schema.rs"
 
 SHORT = "Short sentence."
-SCOPE_SIZE = 186
+SCOPE_SIZE = 174
 NESTED = {"tool": "admit_preview_batch", "path": [
     "inputSchema", "properties", "items", "items", "properties",
-    "allow_duplicate", "description",
+    "context", "description",
 ]}
 
 
@@ -209,7 +209,7 @@ class BoundTests(unittest.TestCase):
         breach = report["breaches"][0]
         self.assertEqual(
             breach["location"],
-            "admit_preview_batch.items.items.allow_duplicate",
+            "admit_preview_batch.items.items.context",
         )
 
     def test_a_description_grown_past_25_tokens_fails(self):
