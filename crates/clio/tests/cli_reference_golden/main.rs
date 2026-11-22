@@ -5,7 +5,7 @@
 //!
 //! This module guards the committed CLI reference against the binary it
 //! documents: it renders the whole manual with `clio help --markdown` and
-//! compares every page's bytes with the committed copy.
+//! compares every page's text with the committed copy.
 //!
 //! ## Owns
 //!
@@ -17,8 +17,8 @@
 //!
 //! - The manual's Markdown (see `cli_help_markdown`)
 //! - The manual's write boundary (see `cli_manual_write`)
-//! - Regenerating the committed copy: the failure prints the command, and the
-//!   reader runs it
+//! - Regenerating the committed copy: the failure prints the commands, and the
+//!   reader runs them
 //!
 //! ## Boundary
 //!
@@ -33,6 +33,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// The committed reference, relative to the repository root.
+const REFERENCE: &str = "crates/clio/tests/fixtures/cli_reference";
 
 /// The one command that regenerates the committed reference.
 const REGENERATE: &str = "cargo run --locked -p clio --bin clio -- help --markdown \
@@ -83,7 +86,7 @@ fn temp_dir(tag: &str) -> common::Scratch {
 ///
 /// The map sorts by name, so a mismatch reports in the same order on every
 /// machine and the directory's own iteration order never reaches an assertion.
-fn pages(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+fn pages(dir: &Path) -> BTreeMap<String, String> {
     let mut pages = BTreeMap::new();
     let entries =
         std::fs::read_dir(dir).unwrap_or_else(|error| panic!("read {}: {error}", dir.display()));
@@ -97,11 +100,57 @@ fn pages(dir: &Path) -> BTreeMap<String, Vec<u8>> {
             .and_then(|name| name.to_str())
             .expect("a page name is UTF-8")
             .to_owned();
-        let bytes =
-            std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-        pages.insert(name, bytes);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        pages.insert(name, text);
     }
     pages
+}
+
+/// The failure lines for one render against the committed reference.
+///
+/// Every rendered page is checked first, so a stale page reports before an
+/// extra one, and both loops walk a `BTreeMap`, so the order is the same on
+/// every machine.
+fn compare(
+    rendered: &BTreeMap<String, String>,
+    committed: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (name, text) in rendered {
+        match committed.get(name) {
+            None => problems.push(format!(
+                "FAIL  {name} is missing from the committed reference"
+            )),
+            Some(golden) if golden != text => problems.push(format!(
+                "FAIL  {name} is stale: it differs from the binary's render"
+            )),
+            Some(_) => {}
+        }
+    }
+    for name in committed.keys() {
+        if !rendered.contains_key(name) {
+            problems.push(format!("FAIL  extra file {name} is not part of the manual"));
+        }
+    }
+    problems
+}
+
+/// The commands that clear a failure, one removal per extra page.
+///
+/// Regeneration writes the pages the binary still has and leaves every other
+/// file alone, so an extra page needs its own `rm`.
+fn remedy(rendered: &BTreeMap<String, String>, committed: &BTreeMap<String, String>) -> String {
+    let mut lines = vec![
+        "Run from the repository root:".to_owned(),
+        format!("  {REGENERATE}"),
+    ];
+    for name in committed.keys() {
+        if !rendered.contains_key(name) {
+            lines.push(format!("  rm {REFERENCE}/{name}"));
+        }
+    }
+    lines.join("\n")
 }
 
 /// The committed reference is the binary's own render, page for page.
@@ -132,26 +181,87 @@ fn the_committed_reference_matches_the_binarys_render() {
     );
     let committed = pages(&reference_dir());
 
-    let mut problems = Vec::new();
-    for (name, bytes) in &rendered {
-        match committed.get(name) {
-            None => problems.push(format!(
-                "FAIL  {name} is missing from the committed reference"
-            )),
-            Some(golden) if golden != bytes => problems.push(format!(
-                "FAIL  {name} is stale: it differs from the binary's render"
-            )),
-            Some(_) => {}
-        }
-    }
-    for name in committed.keys() {
-        if !rendered.contains_key(name) {
-            problems.push(format!("FAIL  extra file {name} is not part of the manual"));
-        }
-    }
+    let problems = compare(&rendered, &committed);
     assert!(
         problems.is_empty(),
-        "{}\n\nRegenerate the committed reference with:\n  {REGENERATE}",
-        problems.join("\n")
+        "{}\n\n{}",
+        problems.join("\n"),
+        remedy(&rendered, &committed)
+    );
+}
+
+/// One changed character in a page is reported as stale, and nothing else.
+#[test]
+fn a_changed_page_is_reported_as_stale() {
+    let rendered = BTreeMap::from([("admit.md".to_owned(), "# Admit\n".to_owned())]);
+    let committed = BTreeMap::from([("admit.md".to_owned(), "# Admit.\n".to_owned())]);
+    assert_eq!(
+        compare(&rendered, &committed),
+        vec!["FAIL  admit.md is stale: it differs from the binary's render".to_owned()],
+        "one changed character"
+    );
+}
+
+/// A page the binary renders and the reference lacks is reported as missing.
+#[test]
+fn a_rendered_page_absent_from_the_reference_is_reported_as_missing() {
+    let rendered = BTreeMap::from([("belief-count.md".to_owned(), "# Belief count\n".to_owned())]);
+    let committed = BTreeMap::new();
+    assert_eq!(
+        compare(&rendered, &committed),
+        vec!["FAIL  belief-count.md is missing from the committed reference".to_owned()]
+    );
+}
+
+/// A page the reference has and the binary no longer renders is reported as
+/// extra.
+#[test]
+fn a_committed_page_outside_the_render_is_reported_as_extra() {
+    let rendered = BTreeMap::new();
+    let committed = BTreeMap::from([("zz-extra.md".to_owned(), "# Gone\n".to_owned())]);
+    assert_eq!(
+        compare(&rendered, &committed),
+        vec!["FAIL  extra file zz-extra.md is not part of the manual".to_owned()]
+    );
+}
+
+/// Two equal maps report nothing, so a green run proves the comparison ran.
+#[test]
+fn identical_pages_report_nothing() {
+    let rendered = BTreeMap::from([
+        ("admit.md".to_owned(), "# Admit\n".to_owned()),
+        ("batch.md".to_owned(), "# Batch\n".to_owned()),
+    ]);
+    let committed = rendered.clone();
+    assert_eq!(compare(&rendered, &committed), Vec::<String>::new());
+}
+
+/// The remedy names the root, the regeneration, and one removal per extra page.
+#[test]
+fn the_remedy_removes_every_extra_page() {
+    let rendered = BTreeMap::from([("admit.md".to_owned(), "# Admit\n".to_owned())]);
+    let committed = BTreeMap::from([
+        ("admit.md".to_owned(), "# Admit\n".to_owned()),
+        ("zz-extra.md".to_owned(), "# Gone\n".to_owned()),
+    ]);
+    assert_eq!(
+        remedy(&rendered, &committed),
+        "Run from the repository root:\n  \
+         cargo run --locked -p clio --bin clio -- help --markdown --out \
+         crates/clio/tests/fixtures/cli_reference\n  \
+         rm crates/clio/tests/fixtures/cli_reference/zz-extra.md"
+    );
+}
+
+/// An identical pair needs no removal, so the remedy prints no `rm` line.
+#[test]
+fn the_remedy_for_an_identical_pair_prints_no_removal() {
+    let rendered = BTreeMap::from([("admit.md".to_owned(), "# Admit\n".to_owned())]);
+    let committed = rendered.clone();
+    assert!(
+        remedy(&rendered, &committed)
+            .lines()
+            .all(|line| !line.trim_start().starts_with("rm ")),
+        "an identical pair needs no removal"
     );
 }
