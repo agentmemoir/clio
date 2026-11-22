@@ -76,6 +76,8 @@ pub use pressure::{
 };
 pub mod protocol;
 pub mod provider_adapter;
+mod provider_credentials;
+mod provider_destination;
 pub mod read_explain;
 mod read_history;
 mod read_read_policy;
