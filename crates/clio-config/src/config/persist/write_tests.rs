@@ -193,3 +193,54 @@ fn planted_symlink_at_temp_name_is_refused() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+// The same guard, but through the function the writer really calls. This pins
+// the call site, so switching it back to the truncating helper fails here.
+#[cfg(unix)]
+#[test]
+fn planted_symlink_at_atomic_temp_name_is_refused() {
+    use std::os::unix::fs::symlink;
+    let dir = tmp("symlink-atomic");
+    fs::create_dir_all(&dir).expect("dir");
+    let victim = dir.join("victim.json");
+    fs::write(&victim, "keep me").expect("victim");
+    let planted = dir.join(".deployment.json.0.0.0.tmp");
+    symlink(&victim, &planted).expect("symlink");
+    let target = dir.join("deployment.json");
+
+    let err = write_private_atomic_to(&target, &planted, "overwrite").expect_err("refused");
+    assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(fs::read_to_string(&victim).expect("victim"), "keep me");
+    assert!(!target.exists(), "the target must not be created");
+    assert!(
+        fs::symlink_metadata(&planted)
+            .expect("meta")
+            .file_type()
+            .is_symlink(),
+        "the planted entry must still be the symlink, not a replaced file"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn failed_rename_removes_the_temp_file() {
+    let dir = tmp("rename-missing-target-dir");
+    fs::create_dir_all(&dir).expect("dir");
+    let temp = dir.join(".deployment.json.tmp");
+    // The target's parent does not exist, so the rename fails after the temp
+    // file has been written.
+    let target = dir.join("missing").join("deployment.json");
+
+    write_private_atomic_to(&target, &temp, "hello").expect_err("rename must fail");
+
+    assert!(
+        !temp.exists(),
+        "a failed rename must remove the temp file the helper created"
+    );
+    assert_eq!(
+        entry_names(&dir),
+        Vec::<String>::new(),
+        "nothing may outlive the failed write"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
