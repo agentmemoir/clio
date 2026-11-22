@@ -80,6 +80,7 @@ mod subject_request_events;
 mod subject_request_frozen;
 mod subject_request_manifest;
 mod subject_request_report;
+mod subject_request_scope_gate;
 pub mod subject_request_service;
 pub mod subject_request_store_wiring;
 mod subject_request_transition;

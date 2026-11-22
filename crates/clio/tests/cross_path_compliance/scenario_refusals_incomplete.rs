@@ -52,6 +52,9 @@ use serde_json::json;
 const DENIED: [(&str, &str, &str); 1] = [(DENIED_ITEM, DENIED_SUBJECT, DENIED_MARKER)];
 const CONTROL: [(&str, &str, &str); 1] = [(CONTROL_ITEM, CONTROL_SUBJECT, CONTROL_MARKER)];
 const DAMAGED: &[u8] = b"{\"schema_version\":1,\"deployment_id\":\"truncated\"}";
+/// The bank a CLI request command binds to when the caller names none, so a
+/// request opened by `request-start` without `--bank` lives here.
+const DEFAULT_CLI_BANK: &str = "default";
 /// The store surface the two-peer arm drives on either backend.
 trait PeerStore: Store + DurableRequestStore + PeerActionStore {}
 impl<T: Store + DurableRequestStore + PeerActionStore> PeerStore for T {}
@@ -78,7 +81,7 @@ fn refuse_scope_copy_close(env: &Env, request: &str, store: &dyn DurableRequestS
     seed_done_path(store, request, "erasure");
     let copy = env.command("request-copy", &copy_rest(request));
     ok(&copy, "request-copy");
-    let close = env.command("request-close", &close_rest(request));
+    let close = env.command("request-close", &close_rest(request, DEFAULT_CLI_BANK));
     assert_forbidden(&close);
     assert_open_copy(&close);
     assert_eq!(env.status(request)["request_outcome"], json!("open"));
@@ -114,8 +117,8 @@ fn copy_rest(request: &str) -> String {
          --owner harness --required-action erase --state pending"
     )
 }
-fn close_rest(request: &str) -> String {
-    format!("--request-id {request} --product-path erasure")
+fn close_rest(request: &str, bank: &str) -> String {
+    format!("--actor harness --bank {bank} --request-id {request} --product-path erasure")
 }
 fn register_required_peers<S: DurableRequestStore + PeerActionStore>(
     store: &S,
@@ -190,7 +193,7 @@ fn two_live_peers<S: PeerStore>(env: &Env, request: &str, open: impl Fn() -> S) 
         let store = open();
         seed_done_path(&store, request, "erasure");
     }
-    let close = env.command("request-close", &close_rest(request));
+    let close = env.command("request-close", &close_rest(request, BANK));
     assert_forbidden(&close);
     assert_open_copy(&close);
     let status = env.status(request);
@@ -295,7 +298,7 @@ fn scenario_refusals_incomplete_offline_peer() {
 
     let store = open_sqlite(env.path(), &env.kms);
     seed_done_path(&store, request, "erasure");
-    let close = env.command("request-close", &close_rest(request));
+    let close = env.command("request-close", &close_rest(request, BANK));
     assert_forbidden(&close);
     assert_open_copy(&close);
 

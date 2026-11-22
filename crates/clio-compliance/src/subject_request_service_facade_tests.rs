@@ -5,7 +5,8 @@
 //!
 //! This module is responsible for testing the request facade's refusal and
 //! operator-term surface: the scope-mismatch refusal on `open`, the closure
-//! refusals on `close`, the privileged-actor gate on `peer_disposition`, the
+//! refusals on `close`, the privileged-actor and scope gate on `close` and
+//! `apply_command`, the privileged-actor gate on `peer_disposition`, the
 //! confirmation gate on `retry_erasure`, and the recording of the operator's
 //! verification decision and deadline.
 //!
@@ -31,9 +32,10 @@
 use crate::erase::EraseVecSink;
 use crate::subject_request::{
     PathOwner, PathSlot, PathState, PeerEnablement, PeerState, RequestAction, RequestActionKind,
-    RequestActionState, RequestKind, RequestScope, RequestState, VerificationResult,
+    RequestActionState, RequestCommand, RequestKind, RequestScope, RequestState,
+    VerificationResult,
 };
-use crate::subject_request_service::{close, open, peer_disposition, retry_erasure};
+use crate::subject_request_service::{apply_command, close, open, peer_disposition, retry_erasure};
 use crate::subject_request_service_fixtures::{
     ctx, env, persist, record, retry_args, scope, store,
 };
@@ -264,4 +266,80 @@ fn retry_erasure_refuses_an_unconfirmed_call_without_writing() {
         store.pending_actions().expect("pending").is_empty(),
         "no action is left pending"
     );
+}
+
+/// A caller outside the request's actor or bank boundary closes nothing, and
+/// the stored request is unchanged by each refusal.
+#[test]
+fn close_refuses_a_caller_outside_the_request_boundary_without_writes() {
+    let store = store();
+    let request_id = unique("req-close-boundary");
+    let mut rec = record(&request_id, RequestState::InProgress);
+    rec.paths.insert(
+        "product-path".into(),
+        PathSlot {
+            owner: PathOwner::Clio,
+            state: PathState::Done,
+        },
+    );
+    persist(&store, &rec);
+    let before = store.load(&request_id).expect("load request");
+    let agent = OpContext::new(Bank::new("bank-a".to_owned()), Actor::Agent);
+    let err = close(&env(&store), &agent, &request_id, "product-path")
+        .expect_err("a non-privileged actor refuses closure");
+    assert_eq!(err.code, ErrorCode::Forbidden, "{err:?}");
+    let foreign = close(&env(&store), &ctx("bank-b"), &request_id, "product-path")
+        .expect_err("another bank refuses closure");
+    assert_eq!(foreign.code, ErrorCode::Forbidden, "{foreign:?}");
+    assert_eq!(foreign.message, "request belongs to another bank");
+    assert_eq!(store.load(&request_id).expect("reload request"), before);
+}
+
+/// A caller outside the request's actor or bank boundary moves no request, and
+/// the stored request is unchanged by each refusal.
+#[test]
+fn apply_command_refuses_a_caller_outside_the_request_boundary_without_writes() {
+    let store = store();
+    let request_id = unique("req-command-boundary");
+    persist(&store, &record(&request_id, RequestState::InProgress));
+    let before = store.load(&request_id).expect("load request");
+    let agent = OpContext::new(Bank::new("bank-a".to_owned()), Actor::Agent);
+    let err = apply_command(
+        &env(&store),
+        &agent,
+        &request_id,
+        &RequestCommand::MarkTechnicalComplete,
+    )
+    .expect_err("a non-privileged actor refuses");
+    assert_eq!(err.code, ErrorCode::Forbidden, "{err:?}");
+    assert_eq!(
+        err.message,
+        "local event review requires a harness or system actor with compliance privilege"
+    );
+    let foreign = apply_command(
+        &env(&store),
+        &ctx("bank-b"),
+        &request_id,
+        &RequestCommand::MarkTechnicalComplete,
+    )
+    .expect_err("another bank refuses");
+    assert_eq!(foreign.code, ErrorCode::Forbidden, "{foreign:?}");
+    assert_eq!(foreign.message, "request belongs to another bank");
+    assert_eq!(store.load(&request_id).expect("reload request"), before);
+}
+
+/// The request's own bank and a privileged actor still move it.
+#[test]
+fn apply_command_accepts_the_requests_own_bank() {
+    let store = store();
+    let request_id = unique("req-command-own-bank");
+    persist(&store, &record(&request_id, RequestState::InProgress));
+    let report = apply_command(
+        &env(&store),
+        &ctx("bank-a"),
+        &request_id,
+        &RequestCommand::MarkTechnicalComplete,
+    )
+    .expect("the owning bank moves the request");
+    assert_eq!(report.state, RequestState::TechnicalComplete);
 }

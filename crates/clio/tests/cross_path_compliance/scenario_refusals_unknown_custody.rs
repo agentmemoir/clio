@@ -115,7 +115,7 @@ fn unknown_custody_refuses_closure<S: CustodyStore>(env: &Env, store: &S, reques
     seed_done_path(store, request, "erasure");
     let close = env.command(
         "request-close",
-        &format!("--request-id {request} --product-path erasure"),
+        &format!("--actor harness --request-id {request} --product-path erasure"),
     );
     assert_forbidden(&close);
     assert_open_copy(&close);
