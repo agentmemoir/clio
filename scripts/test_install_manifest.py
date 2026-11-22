@@ -31,9 +31,13 @@ import hashlib
 import os
 import shutil
 import subprocess
-import tempfile
+import sys
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from exec_tempdir import exec_tempdir  # noqa: E402
 
 INSTALLER = Path(__file__).resolve().parent / "install.sh"
 SH = shutil.which("sh") or "/bin/sh"
@@ -158,8 +162,12 @@ def build_release(base: Path, key: Path) -> Path:
 )
 class ManifestSignatureTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.base = Path(tempfile.mkdtemp(prefix="clio-install-manifest-"))
-        self.addCleanup(shutil.rmtree, self.base, True)
+        # The stub tools must run, so the tree goes in a directory the host
+        # really executes from: CI mounts its temporary storage noexec, and a
+        # stub there is invisible to `command -v` and never runs.
+        tmp = exec_tempdir(purpose="the release manifest installer test")
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name)
         self.workdir = self.base / "work"
         self.workdir.mkdir()
         self.install_dir = self.base / "install"
