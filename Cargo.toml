@@ -50,7 +50,7 @@ clio-mcp = { path = "crates/clio-mcp" }
 base64 = "0.23"
 jiff = "1.0.2"
 unicode-normalization = "0.1"
-chacha20poly1305 = "0.11"
+chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 # X25519 key agreement for the readable-export seal. The operator supplies a
 # 32-byte public key as base64 text, and the matching secret key never enters
 # Clio.
@@ -67,6 +67,10 @@ rand = "0.10"
 # The one signal the CLI sets itself: restoring the default `SIGPIPE` disposition
 # so a closed stdout ends the process quietly rather than panicking.
 libc = "0.2"
+# The effective uid the token store's owner must match. Rustix exposes it as a
+# safe function, which is what a crate forbidding unsafe code can call; only the
+# `process` module is needed, and its default `std` feature stays on.
+rustix = { version = "1.1", features = ["process"] }
 # OS secret store for the Clio encryption key. `keyring-core` owns the entry
 # type, the credential trait, and the error; one platform store crate below
 # supplies the backend, and `clio-config` installs exactly one of them at

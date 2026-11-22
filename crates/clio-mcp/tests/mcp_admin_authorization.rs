@@ -5,7 +5,8 @@
 //!
 //! This module is responsible for the credential-bound conformance of the
 //! administrative MCP mutations: `config_set`, `config_profile_apply`,
-//! `ranking_env_set`, and a deployment-scoped `retention_profile_set`.
+//! `ranking_env_set`, a deployment-scoped `retention_profile_set`, and
+//! `import_provider`.
 //!
 //! ## Owns
 //! - The assertion that an `agent` credential is refused with `forbidden`
@@ -170,5 +171,48 @@ fn a_harness_credential_may_set_a_deployment_retention_profile() {
     assert!(
         tool_ok(&response),
         "a harness credential may set a deployment profile: {response}"
+    );
+}
+
+/// A provider ingest call whose arguments reach the tool: the unimplemented
+/// provider answers from the non-writing stub, which touches no network. It is
+/// therefore validation-free and transport-free, so a refusal is the actor gate.
+fn provider_import() -> String {
+    call("import_provider", json!({"provider": "openai"}))
+}
+
+#[test]
+fn a_non_administrative_credential_may_not_import_from_a_provider() {
+    for actor in [Actor::Agent, Actor::User] {
+        let store = Store::new(&format!("admin-{}-provider", actor.as_str()));
+        let mut secrets = Vec::new();
+        let credentials = store.write(&[("bot", actor, &["demo"])], &mut secrets);
+        let port = bound_server(&credentials, "demo");
+        let auth = bearer(&secrets[0]);
+
+        let (status, response) = post(port, &provider_import(), &auth);
+        assert_eq!(status, 200, "{actor:?}: {response}");
+        assert_eq!(
+            tool_error_code(&response).as_deref(),
+            Some(ErrorCode::Forbidden.as_str()),
+            "a {actor:?} credential must be refused `import_provider`: {response}"
+        );
+    }
+}
+
+#[test]
+fn a_harness_credential_may_import_from_a_provider() {
+    let store = Store::new("admin-harness-provider");
+    let mut secrets = Vec::new();
+    let credentials = store.write(&[("ci", Actor::Harness, &["demo"])], &mut secrets);
+    let port = bound_server(&credentials, "demo");
+    let auth = bearer(&secrets[0]);
+
+    let (status, response) = post(port, &provider_import(), &auth);
+    assert_eq!(status, 200, "{response}");
+    assert_eq!(
+        tool_error_code(&response).as_deref(),
+        Some("PROVIDER_IMPORT_UNSUPPORTED"),
+        "a harness credential must reach `import_provider`: {response}"
     );
 }

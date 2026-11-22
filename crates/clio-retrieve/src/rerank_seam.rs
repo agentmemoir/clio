@@ -14,7 +14,8 @@
 //!   `json_body`, `texts`) those tests assert on
 //!
 //! ## Does not own
-//! - Any test case or assertion (`rerank_batch_tests`, `hybrid_rerank_tests`)
+//! - Any test case or assertion (`rerank_seam_tests`, `rerank_batch_tests`,
+//!   `hybrid_rerank_tests`)
 //! - The single-connection capture server the adapter tests use
 //!   (`fixtures_tests`)
 //!
@@ -31,14 +32,49 @@ use std::time::{Duration, Instant};
 /// fewer requests fails the test instead of hanging it.
 const SERVER_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Read one HTTP request off `stream` up to its `Content-Length` boundary.
-pub(crate) fn read_request_body(stream: &mut std::net::TcpStream) -> String {
+/// Consecutive `Interrupted` reads retried before the helper gives up. The
+/// helper is generic over `Read`, so no socket timeout stands behind it and
+/// the retry loop needs a bound of its own.
+const MAX_INTERRUPTED_RETRIES: usize = 64;
+
+/// Longest head excerpt a failure message carries.
+const HEAD_EXCERPT: usize = 80;
+
+/// Read one HTTP request off `reader` up to its `Content-Length` boundary.
+///
+/// Generic over `Read` so a test can drive it with an in-memory reader that
+/// injects an interrupted read without a socket. An interrupted read is
+/// retried up to [`MAX_INTERRUPTED_RETRIES`] times in a row; every other end
+/// of the read is checked against the header terminator.
+pub(crate) fn read_request_body(reader: &mut impl Read) -> String {
     let mut buf = Vec::new();
     let mut chunk = [0_u8; 16_384];
+    let mut interrupted = 0_usize;
     loop {
-        match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        match reader.read(&mut chunk) {
+            Ok(0) => {
+                require_header_terminator(&buf, std::io::ErrorKind::UnexpectedEof);
+                break;
+            }
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                interrupted = 0;
+            }
+            // An interrupted syscall is not a fault: retry it, bounded.
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                interrupted += 1;
+                assert!(
+                    interrupted <= MAX_INTERRUPTED_RETRIES,
+                    "fake server read stayed interrupted for {interrupted} retries after {} bytes: {:?}",
+                    buf.len(),
+                    e.kind()
+                );
+                continue;
+            }
+            Err(e) => {
+                require_header_terminator(&buf, e.kind());
+                break;
+            }
         }
         if let Some(len) = content_length(&buf) {
             let head = buf
@@ -51,6 +87,30 @@ pub(crate) fn read_request_body(stream: &mut std::net::TcpStream) -> String {
         }
     }
     String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Check a read that ended now against the header terminator.
+///
+/// A read that ends after the terminator is a normal end. A clean EOF with no
+/// bytes reports a connection that closed before sending any bytes. Any other
+/// early end reports the byte count, the error kind, and a head excerpt.
+fn require_header_terminator(buf: &[u8], kind: std::io::ErrorKind) {
+    if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        return;
+    }
+    let failure = if buf.is_empty() && kind == std::io::ErrorKind::UnexpectedEof {
+        format!(
+            "fake server read ended after 0 bytes: the connection closed before sending any bytes ({kind:?})"
+        )
+    } else {
+        let head: String =
+            String::from_utf8_lossy(&buf[..buf.len().min(HEAD_EXCERPT)]).into_owned();
+        format!(
+            "fake server read ended after {} bytes before the header block: {kind:?}; head: {head:?}",
+            buf.len()
+        )
+    };
+    panic!("{failure}");
 }
 
 /// The `Content-Length` of a partially received request, once its header
@@ -111,9 +171,13 @@ pub(crate) fn batch_server(
 
 /// The JSON body of a captured request.
 pub(crate) fn json_body(request: &str) -> Value {
-    let head_end = request
-        .find("\r\n\r\n")
-        .expect("request carries a header terminator");
+    let Some(head_end) = request.find("\r\n\r\n") else {
+        let head: String = request.chars().take(80).collect();
+        panic!(
+            "request is {} bytes and has no header terminator; head: {head:?}",
+            request.len()
+        );
+    };
     serde_json::from_str(&request[head_end + 4..]).expect("request body is JSON")
 }
 
@@ -126,3 +190,7 @@ pub(crate) fn texts(request: &str) -> Vec<String> {
         .map(|t| t.as_str().expect("text is a string").to_owned())
         .collect()
 }
+
+#[cfg(test)]
+#[path = "rerank_seam_tests.rs"]
+mod rerank_seam_tests;

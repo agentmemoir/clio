@@ -127,6 +127,18 @@ impl Runtime {
             self.env_overlay
                 .insert("sync.allow_public_bind".into(), Value::Bool(allow));
         }
+        // A list of hosts cannot stay text in a config document, so it is folded
+        // in as the list of trimmed, non-empty entries that was read; a value
+        // with no entry at all leaves the path alone, so the config default
+        // stands rather than an empty allowlist that refuses every host.
+        if let Some(hosts) = get("CLIO_PROVIDER_ALLOW_HOSTS")
+            .as_deref()
+            .map(parse_host_list)
+            .filter(|hosts| !hosts.is_empty())
+        {
+            self.env_overlay
+                .insert("provider.allow_hosts".into(), Value::from(hosts));
+        }
         // A window of zero is the operator's off switch, so zero is a value and
         // not a bad one; text where a count belongs is dropped here so the
         // config default stands rather than a guessed number.
@@ -159,6 +171,20 @@ fn env_bool(raw: &str) -> Option<bool> {
         "false" | "0" => Some(false),
         _ => None,
     }
+}
+
+/// Read a comma-separated host list, or nothing that was not in it.
+///
+/// A comma-separated variable is the only shape a shell, a service unit, and a
+/// container compose file can all carry a list in, so that is the shape read.
+/// Surrounding whitespace is ignored because an inherited value often carries it,
+/// and an empty entry is dropped rather than kept as a host that names nothing.
+fn parse_host_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Bearer credential for an external service from an effective config document.

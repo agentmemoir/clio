@@ -120,7 +120,7 @@ fn require_stored_slot_rejects_none_and_keeps_some() {
         Some(KeySlot::Active {
             version: 2,
             key: DekMaterial {
-                bytes: [7u8; KEY_LEN],
+                bytes: Zeroizing::new([7u8; KEY_LEN]),
             },
         }),
         "s",
