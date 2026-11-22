@@ -100,7 +100,7 @@ pub(crate) fn import_mem0(
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
 
     let mut would_create = 0usize;
-    let mut would_skip = 0usize;
+    let (mut would_skip, mut would_skip_duplicate) = (0usize, 0usize);
     let mut would_reject = 0usize;
     let mut rejection_samples = Vec::new();
     let mut notes = Vec::new();
@@ -139,7 +139,7 @@ pub(crate) fn import_mem0(
                 ItemOutcome::Created => would_create += 1,
                 ItemOutcome::Skipped => would_skip += 1,
                 ItemOutcome::SkippedDuplicate(reason) => {
-                    would_skip += 1;
+                    would_skip_duplicate += 1;
                     if notes.len() < 10 {
                         notes.push(format!("skipped duplicate: {reason}"));
                     }
@@ -164,6 +164,7 @@ pub(crate) fn import_mem0(
     let report = ImportReport {
         would_create,
         would_skip,
+        would_skip_duplicate,
         would_reject,
         would_overwrite: 0,
         // Provider rows are scored item by item, so no entity is skipped for

@@ -4,9 +4,9 @@
 //! # Responsibility
 //!
 //! This module is responsible for the restore behaviour of a bundle row whose
-//! text matches a stored row but whose identity differs: the row is reported as
-//! a skip with the unconditional exact-duplicate reason, never as a gate
-//! rejection.
+//! text matches a stored row but whose identity differs: the row is reported
+//! under `would_skip_duplicate` with the unconditional exact-duplicate reason,
+//! never as a gate rejection.
 //!
 //! ## Owns
 //! - The matching-text, different-identity restore skip
@@ -88,7 +88,7 @@ fn a_restored_item_matching_stored_text_but_not_identity_is_skipped() {
     let ctx = h.ctx();
     let signals = StoredTexts(&h.store);
     let entities = h.full_entities();
-    import_restoring(
+    let first = import_restoring(
         &h,
         &ctx,
         write_bundle(&entities, ExportContentMode::DsarPlaintext).path(),
@@ -108,7 +108,8 @@ fn a_restored_item_matching_stored_text_but_not_identity_is_skipped() {
         &signals,
     );
 
-    assert_eq!(report.would_skip, 1);
+    assert_eq!(report.would_skip_duplicate, 1);
+    assert_eq!(report.would_skip, 0);
     assert_eq!(report.would_reject, 0);
     assert!(
         report
@@ -118,4 +119,15 @@ fn a_restored_item_matching_stored_text_but_not_identity_is_skipped() {
         "{:?}",
         report.notes
     );
+
+    // A row whose identity already exists is an ordinary idempotent skip, not a
+    // duplicate-text drop, so the two counts stay separate.
+    let same_identity = import_restoring(
+        &h,
+        &ctx,
+        write_bundle(&entities, ExportContentMode::DsarPlaintext).path(),
+        &signals,
+    );
+    assert_eq!(same_identity.would_skip, first.would_create);
+    assert_eq!(same_identity.would_skip_duplicate, 0);
 }

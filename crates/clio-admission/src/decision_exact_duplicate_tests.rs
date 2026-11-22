@@ -8,7 +8,7 @@
 //!
 //! ## Owns
 //! - The unconditional exact-duplicate rejection in `decide_ungated`
-//! - The gates that still reject after the duplicate check
+//! - The novelty floor that still rejects after the duplicate check
 //!
 //! ## Does not own
 //! - Novelty arithmetic (see `factors_tests`)

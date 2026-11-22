@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //! # Responsibility
-//
+//!
 //! Tests that the unconditional exact-duplicate rejection fires on every gated
 //! write surface.
 //!

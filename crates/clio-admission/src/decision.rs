@@ -173,7 +173,7 @@ pub fn decide(
 /// N/A but five-factor admission still MUST run on a new belief identity.
 /// Still uses the same factor formulas and thresholds keyed by `key`.
 ///
-/// An item whose stored text equals a neighbor's is rejected as an exact
+/// A candidate whose text equals a neighbor's is rejected as an exact
 /// duplicate regardless of `novelty_floor()`, so no retention setting switches
 /// the rejection off. The floor, the mission veto, and the score threshold still
 /// apply after it.
