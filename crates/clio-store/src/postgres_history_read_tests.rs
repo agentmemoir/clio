@@ -68,7 +68,20 @@ fn postgres_history_reads_round_trip() {
         store.task_history_impl(&bank, "task-a", 10).unwrap().len(),
         1
     );
-    assert_eq!(store.list_tasks_impl(&bank, 10).unwrap().len(), 1);
+    assert_eq!(store.list_tasks_impl(&bank, None, 10).unwrap().len(), 1);
+    assert_eq!(
+        store
+            .list_tasks_for_subject(&bank, "subject-1", 10)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        store
+            .list_tasks_for_subject(&bank, "subject-2", 10)
+            .unwrap()
+            .is_empty()
+    );
     assert!(store.get_task_impl(&bank, "missing").unwrap().is_none());
 
     let failure_item = unique("pg-read-failure-item");
@@ -92,7 +105,20 @@ fn postgres_history_reads_round_trip() {
             .len(),
         1
     );
-    assert_eq!(store.list_failures_impl(&bank, 10).unwrap().len(), 1);
+    assert_eq!(store.list_failures_impl(&bank, None, 10).unwrap().len(), 1);
+    assert_eq!(
+        store
+            .list_failures_for_subject(&bank, "subject-1", 10)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        store
+            .list_failures_for_subject(&bank, "subject-2", 10)
+            .unwrap()
+            .is_empty()
+    );
     assert!(store.get_failure_impl(&bank, "missing").unwrap().is_none());
 
     let triple_item = unique("pg-read-triple-item");
