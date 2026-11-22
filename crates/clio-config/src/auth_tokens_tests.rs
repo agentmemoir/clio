@@ -319,3 +319,78 @@ fn a_file_group_or_other_can_read_is_refused() {
     }
     let _ = fs::remove_file(&path);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symbolic_link_store_is_refused_without_reading_its_target() {
+    use std::os::unix::fs::symlink;
+    let target = tmp("symlink-target");
+    save_auth_tokens(&target, &[sample_record("a"), sample_record("b")]).expect("save");
+    let link = tmp("symlink-path");
+    symlink(&target, &link).expect("symlink");
+    let err = load_auth_tokens(&link).expect_err("a link is not a store");
+    // `O_NOFOLLOW` fails the open, so the refusal comes from the read path and
+    // no record is ever produced.
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    assert!(err.message.contains("failed to read token store"), "{err}");
+    assert!(!err.message.contains("secret_sha256"), "{err}");
+    // The target is a valid store, so the refusal is the link, not its content.
+    assert_eq!(load_auth_tokens(&target).expect("target store").len(), 2);
+    let _ = fs::remove_file(&link);
+    let _ = fs::remove_file(&target);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dangling_symbolic_link_store_is_refused_not_read_as_empty() {
+    use std::os::unix::fs::symlink;
+    let missing = tmp("dangling-target");
+    let link = tmp("dangling-link");
+    symlink(&missing, &link).expect("symlink");
+    let err = load_auth_tokens(&link).expect_err("a dangling link is not an empty store");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    assert!(err.message.contains("failed to read token store"), "{err}");
+    let _ = fs::remove_file(&link);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_directory_at_the_store_path_is_refused() {
+    let path = tmp("directory");
+    fs::create_dir_all(&path).expect("mkdir");
+    let err = load_auth_tokens(&path).expect_err("a directory is not a store");
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(err.message.contains("not a regular file"), "{err}");
+    let _ = fs::remove_dir(&path);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fifo_at_the_store_path_is_refused_without_hanging() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+    let path = tmp("fifo");
+    let created = std::process::Command::new("mkfifo")
+        .arg(&path)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !created {
+        eprintln!("skipping: mkfifo unavailable for {}", path.display());
+        return;
+    }
+    let load_path = path.clone();
+    let (tx, rx) = mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        let _ = tx.send(load_auth_tokens(&load_path));
+    });
+    // The open is non-blocking, so the verdict arrives at once; the bound only
+    // turns a regression back into a blocking open into a failure.
+    let err = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("load of a FIFO blocked instead of refusing")
+        .expect_err("a FIFO is not a store");
+    handle.join().expect("loader thread");
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(err.message.contains("not a regular file"), "{err}");
+    let _ = fs::remove_file(&path);
+}
