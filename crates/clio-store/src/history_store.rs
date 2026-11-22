@@ -76,6 +76,21 @@ pub trait HistoryStore: Send + Sync {
     /// Crypto or storage failures.
     fn list_tasks(&self, bank_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError>;
 
+    /// Distinct task ids for one data subject with their latest record, newest
+    /// first, capped by `limit`.
+    ///
+    /// The cap applies to the subject's own rows: rows of other subjects in
+    /// the same bank consume no part of it.
+    ///
+    /// # Errors
+    /// Crypto or storage failures.
+    fn list_tasks_for_subject(
+        &self,
+        bank_id: &str,
+        subject_id: &str,
+        limit: usize,
+    ) -> Result<Vec<TaskRecord>, AmError>;
+
     /// Atomically insert a carrier `failure` item and one failure record.
     ///
     /// # Errors
@@ -116,6 +131,20 @@ pub trait HistoryStore: Send + Sync {
     /// # Errors
     /// Crypto or storage failures.
     fn list_failures(&self, bank_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError>;
+
+    /// Failures for one data subject, newest first, capped by `limit`.
+    ///
+    /// The cap applies to the subject's own rows: rows of other subjects in
+    /// the same bank consume no part of it.
+    ///
+    /// # Errors
+    /// Crypto or storage failures.
+    fn list_failures_for_subject(
+        &self,
+        bank_id: &str,
+        subject_id: &str,
+        limit: usize,
+    ) -> Result<Vec<FailureRecord>, AmError>;
 
     /// Every version of a `(subject, predicate)` triple, oldest transaction
     /// time first, capped by `limit` (includes closed/superseded edges).

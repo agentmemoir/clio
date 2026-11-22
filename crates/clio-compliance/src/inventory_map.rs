@@ -16,6 +16,8 @@
 //! ## Does not own
 //! - The fixed row table (`inventory_plan`) and the row schema (`inventory_rows`)
 //! - The scope ledger itself (`inventory`) and the store reads (`clio-store`)
+//! - The subject-scoped store reads a mapping run holds
+//!   (`inventory_link_read`)
 //! - Deciding which records belong to a subject: each store read enforces the
 //!   subject restriction itself
 //!
@@ -30,53 +32,10 @@
 use super::{ROW_PLAN, RowPlan, missing_tables, pattern_matches};
 use crate::export::{HISTORY_LIMIT, hit_history_limit};
 use crate::inventory::{InventoryBackend, InventoryFacts, Readability, RowSource};
-use clio_store::{BeliefStore, ComplianceStore, HistoryStore, ItemIdentity, Store};
+use clio_store::ItemIdentity;
 use clio_types::{AmError, BeliefObject, FailureRecord, TaskRecord, TripleRecord};
-
-/// The store reads one subject-family mapping needs.
-///
-/// Both store backends satisfy the blanket implementation, so the mapping
-/// binds to either one without a change in `clio-store`. A caller that holds
-/// the four repository views separately implements this over an adapter.
-pub(crate) trait FamilyLinkRead {
-    /// The subject's own item identities, selected by its stored `subject_id`.
-    fn list_subject_items(
-        &self,
-        bank_id: &str,
-        subject_id: &str,
-    ) -> Result<Vec<ItemIdentity>, AmError>;
-    /// Every triple in the bank; the mapping keeps those carried by the
-    /// subject's own items.
-    fn list_triples(&self, bank_id: &str) -> Result<Vec<TripleRecord>, AmError>;
-    /// The bank's task history, capped at `limit`.
-    fn list_tasks(&self, bank_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError>;
-    /// The bank's failure history, capped at `limit`.
-    fn list_failures(&self, bank_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError>;
-    /// Every belief object in the bank; the mapping keeps the subject's own.
-    fn list_beliefs(&self, bank_id: &str) -> Result<Vec<BeliefObject>, AmError>;
-}
-
-impl<T: Store + ComplianceStore + HistoryStore + BeliefStore> FamilyLinkRead for T {
-    fn list_subject_items(
-        &self,
-        bank_id: &str,
-        subject_id: &str,
-    ) -> Result<Vec<ItemIdentity>, AmError> {
-        ComplianceStore::list_subject_items(self, bank_id, subject_id)
-    }
-    fn list_triples(&self, bank_id: &str) -> Result<Vec<TripleRecord>, AmError> {
-        Store::list_triples(self, bank_id)
-    }
-    fn list_tasks(&self, bank_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError> {
-        HistoryStore::list_tasks(self, bank_id, limit)
-    }
-    fn list_failures(&self, bank_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError> {
-        HistoryStore::list_failures(self, bank_id, limit)
-    }
-    fn list_beliefs(&self, bank_id: &str) -> Result<Vec<BeliefObject>, AmError> {
-        BeliefStore::list_beliefs(self, bank_id)
-    }
-}
+// Re-exported because the crate's internal path to the read seam runs through this module.
+pub(crate) use crate::inventory_link_read::FamilyLinkRead;
 
 /// How one planned family binds to the mapped subject on this store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,7 +167,9 @@ struct SubjectRecords {
 }
 
 impl SubjectRecords {
-    /// Read every per-subject record this mapping can select.
+    /// Read every per-subject record this mapping can select. The task and
+    /// failure reads are subject-scoped, so their caps count the subject's own
+    /// rows and no other subject's page can truncate this one.
     fn read(store: &dyn FamilyLinkRead, bank_id: &str, subject_id: &str) -> Result<Self, AmError> {
         let items = store.list_subject_items(bank_id, subject_id)?;
         // A triple's subject link runs through its carrier item, never
@@ -219,18 +180,10 @@ impl SubjectRecords {
             .into_iter()
             .filter(|triple| items.iter().any(|item| item.item_id == triple.item_id))
             .collect();
-        let task_rows = store.list_tasks(bank_id, HISTORY_LIMIT)?;
-        let tasks_capped = hit_history_limit(task_rows.len());
-        let tasks = task_rows
-            .into_iter()
-            .filter(|task| task.subject_id == subject_id)
-            .collect();
-        let failure_rows = store.list_failures(bank_id, HISTORY_LIMIT)?;
-        let failures_capped = hit_history_limit(failure_rows.len());
-        let failures = failure_rows
-            .into_iter()
-            .filter(|failure| failure.subject_id == subject_id)
-            .collect();
+        let tasks = store.list_tasks(bank_id, subject_id, HISTORY_LIMIT)?;
+        let tasks_capped = hit_history_limit(tasks.len());
+        let failures = store.list_failures(bank_id, subject_id, HISTORY_LIMIT)?;
+        let failures_capped = hit_history_limit(failures.len());
         let beliefs = store
             .list_beliefs(bank_id)?
             .into_iter()
@@ -248,7 +201,7 @@ impl SubjectRecords {
     }
 
     /// The subject's record ids for one family, or `None` when the store has
-    /// no per-subject read for it. The flag marks a bank-wide read that
+    /// no per-subject read for it. The flag marks a subject-scoped read that
     /// returned its full row cap, so the count may be truncated.
     fn select(&self, family: &str) -> Option<(Vec<String>, bool)> {
         match family {
@@ -357,7 +310,7 @@ fn family_selection(
             }
             if capped {
                 reasons.push(format!(
-                    "bank-wide read capped at {HISTORY_LIMIT} rows: this family's count may be truncated"
+                    "subject history read capped at {HISTORY_LIMIT} rows: this family's count may be truncated"
                 ));
             }
             binding(
