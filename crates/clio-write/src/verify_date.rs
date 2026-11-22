@@ -149,7 +149,10 @@ fn next_date_token(chars: &[char], start: usize) -> Option<(usize, String)> {
 
 /// Build a month-name window using char counts (never byte-index into UTF-8).
 fn month_name_token(chars: &[char], start: usize) -> Option<(usize, String)> {
-    let end = (start + 18).min(chars.len());
+    let run = &chars[start..];
+    let month_len = run.iter().take_while(|c| c.is_alphabetic()).count();
+    let tail = &run[month_len..];
+    let end = start + month_len + tail.iter().take_while(|c| !c.is_alphabetic()).count();
     let window: String = chars[start..end].iter().collect();
     let normalized = localize_months(&window);
     for fmt in ["%b %d, %Y", "%B %d, %Y", "%d %b %Y", "%d %B %Y"] {
@@ -402,11 +405,13 @@ mod tests {
 
     #[test]
     fn spanish_september_month_name_in_source_matches_snapshot() {
-        let value = serde_json::json!("2026-09-03");
-        for (source, span) in [
-            ("on septiembre 3, 2026", "septiembre 3, 2026"),
-            ("on Septiembre 3, 2026", "Septiembre 3, 2026"),
+        for (date, source) in [
+            ("2026-09-03", "on septiembre 3, 2026"),
+            ("2026-09-03", "on Septiembre 3, 2026"),
+            ("2026-09-13", "on septiembre 13, 2026"),
         ] {
+            let value = serde_json::json!(date);
+            let span = &source["on ".len()..];
             let (start, end) = match_date(source, &value, &VerifyConfig::default())
                 .expect("a Spanish month-name span must match");
             assert_eq!(&source[start..end], span);
