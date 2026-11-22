@@ -137,3 +137,7 @@ pub fn restrict_dir(path: &Path) {
 
 #[cfg(not(unix))]
 pub fn restrict_dir(_path: &Path) {}
+
+#[cfg(test)]
+#[path = "write_tests.rs"]
+mod write_tests;
