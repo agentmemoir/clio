@@ -28,7 +28,7 @@
 use crate::read_tools::opt_usize;
 use crate::runtime::{McpState, StderrSinks, StoreSignals};
 use crate::write_tools::{
-    gated_write_policy, opt_bool, opt_str, req_str, strict_opt_str, validate_time_bound,
+    admission_policy, opt_bool, opt_str, req_str, strict_opt_str, validate_time_bound,
 };
 use clio_compliance::{
     BindingControls, DEFAULT_REVIEW_LIMIT, DeliverySpec, ExportContentMode, ExportFilter,
@@ -218,7 +218,7 @@ fn import_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         dry_run: opt_bool(args, "dry_run", false)?,
         force: opt_bool(args, "force", false)?,
         reason: opt_str(args, "reason"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         signals: &signals,
         sink: &StderrSinks,
         belief_signals: &signals,

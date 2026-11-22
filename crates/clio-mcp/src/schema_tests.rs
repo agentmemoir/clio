@@ -265,28 +265,19 @@ fn tool_def(name: &str) -> Value {
 }
 
 #[test]
-fn every_gated_write_tool_can_waive_the_duplicate_rejection() {
-    // The exact-duplicate rejection applies to every gated long-term write, so
-    // every one of these tools must be able to waive it. A tool whose schema
-    // declares `additionalProperties: false` without this property rejects the
-    // call at the client, which makes the escape hatch unusable on the MCP
-    // surface even though the CLI accepts it.
-    for tool in [
-        "store",
-        "admit_preview",
-        "triple_add",
-        "task_upsert",
-        "failure_record",
-        "persona_put_stable",
-        "canonical_put",
-    ] {
-        let def = tool_def(tool);
+fn no_published_tool_accepts_a_duplicate_waiver() {
+    // The exact-duplicate rejection is unconditional. No published tool may
+    // offer a caller argument that turns it off, because a schema that declares
+    // one advertises a waiver the gate no longer honors.
+    let tools = pack()["tools"].as_array().expect("tools").clone();
+    for tool in tools {
+        let name = tool["name"].as_str().unwrap_or("?");
         assert!(
-            def["inputSchema"]["properties"]
+            tool["inputSchema"]["properties"]
                 .get("allow_duplicate")
-                .is_some(),
-            "{tool} cannot waive the exact-duplicate rejection: {}",
-            def["inputSchema"]
+                .is_none(),
+            "{name} still publishes the duplicate waiver: {}",
+            tool["inputSchema"]
         );
     }
 }
@@ -342,9 +333,9 @@ fn context_property_publishes_the_utf8_byte_bound() {
 }
 
 #[test]
-fn the_duplicate_waiver_is_named_for_what_it_waives() {
-    // `consolidate` already owns an unrelated `force`. The duplicate waiver must
-    // not reuse the name, or one flag means two things across the catalog and a
+fn store_does_not_borrow_consolidates_force() {
+    // `consolidate` owns `force` for its full maintenance wave. `store` must not
+    // reuse the name, or one flag means two things across the catalog and a
     // client can pass the wrong intent silently.
     assert!(
         tool_def("consolidate")["inputSchema"]["properties"]

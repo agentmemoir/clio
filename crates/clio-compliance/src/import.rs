@@ -86,6 +86,9 @@ pub struct ImportReport {
     pub would_create: usize,
     /// Entities skipped because they already exist identically.
     pub would_skip: usize,
+    /// Rows dropped because their text already exists under a different
+    /// identity, so the row's id, timestamps, and links were not restored.
+    pub would_skip_duplicate: usize,
     /// Entities rejected by admission or the category gate.
     pub would_reject: usize,
     /// Existing entities overwritten under `force`.
@@ -154,10 +157,16 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
     // A live run that stages nothing created and overwrote nothing only re-walked
     // rows the bank already held; say so instead of reporting a silent success.
     if !args.dry_run && planner.staged.is_empty() && planner.create == 0 && planner.overwrite == 0 {
-        let (skipped, rejected, invalid) = (planner.skip, planner.reject, planner.skip_invalid);
+        let (skipped, duplicate, rejected, invalid) = (
+            planner.skip,
+            planner.skip_duplicate,
+            planner.reject,
+            planner.skip_invalid,
+        );
         planner.note(format!(
             "nothing restored: created 0, overwrote 0, {skipped} skipped, \
-             {rejected} rejected, {invalid} skipped as invalid"
+             {duplicate} skipped as duplicate, {rejected} rejected, \
+             {invalid} skipped as invalid"
         ));
     }
     let staged_len = planner.staged.len();
@@ -179,6 +188,7 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
     Ok(ImportReport {
         would_create: planner.create,
         would_skip: planner.skip,
+        would_skip_duplicate: planner.skip_duplicate,
         would_reject: planner.reject,
         would_overwrite: planner.overwrite,
         would_skip_invalid: planner.skip_invalid,
@@ -335,3 +345,7 @@ mod import_round_trip_tests;
 #[cfg(test)]
 #[path = "import_read_bound_tests.rs"]
 mod import_read_bound_tests;
+
+#[cfg(test)]
+#[path = "import_duplicate_skip_tests.rs"]
+mod import_duplicate_skip_tests;

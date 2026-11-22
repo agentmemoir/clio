@@ -98,6 +98,7 @@ fn payload() -> serde_json::Value {
         "report": {
             "would_create": 2,
             "would_skip": 1,
+            "would_skip_duplicate": 1,
             "would_reject": 1,
             "would_overwrite": 1,
             "would_skip_invalid": 1,
@@ -112,9 +113,9 @@ fn payload() -> serde_json::Value {
 }
 
 /// Every JSON field of the payload is present in the text view. The summary
-/// line renders the four would-counts in its own words (created/skipped/
-/// rejected/overwrote) and the skipped-invalid tail renders the two
-/// skipped-invalid fields; the detail lines name the rest. `ok` is the
+/// line renders the five would-counts in its own words (created/skipped/
+/// duplicate-text/rejected/overwrote) and the skipped-invalid tail renders the
+/// two skipped-invalid fields; the detail lines name the rest. `ok` is the
 /// success envelope the exit code already carries, so it gets no text line.
 #[test]
 fn text_carries_every_field_the_json_payload_carries() {
@@ -124,6 +125,7 @@ fn text_carries_every_field_the_json_payload_carries() {
         ("written", "written: bank-a/itm-1, bank-a/itm-2"),
         ("would_create", "created 2"),
         ("would_skip", "skipped 1"),
+        ("would_skip_duplicate", "skipped duplicate 1"),
         ("would_reject", "rejected 1"),
         ("would_overwrite", "overwrote 1"),
         ("would_skip_invalid", "skipped invalid 1"),
@@ -142,7 +144,8 @@ fn text_carries_every_field_the_json_payload_carries() {
     assert_eq!(
         text,
         "import: created 2, skipped 1, rejected 1, overwrote 1, \
-             skipped invalid 1: itm-x#bank-a (out_of_range: too long)\n\
+             skipped invalid 1: itm-x#bank-a (out_of_range: too long), \
+             skipped duplicate 1\n\
          written: bank-a/itm-1, bank-a/itm-2\n\
          dry_run: false\n\
          applied: true\n\

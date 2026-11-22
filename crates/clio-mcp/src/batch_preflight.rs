@@ -29,7 +29,7 @@
 use crate::batch_tools::Staged;
 use crate::runtime::{BatchSignals, McpState, StderrSinks};
 use crate::write_tools::{
-    build_candidate, build_item, gated_write_policy, opt_context, opt_num, opt_str, req_str,
+    admission_policy, build_candidate, build_item, opt_context, opt_num, opt_str, req_str,
 };
 use clio_admission::gated::SignalSource;
 use clio_store::{AssocEdgeRecord, AssocKind, BatchWrite};
@@ -98,7 +98,7 @@ fn score_item(
         evidence_ref: opt_str(params, "evidence_ref"),
         fields: &fields,
         verify: clio_write::VerifyConfig::default(),
-        policy: gated_write_policy(state, ctx.bank.as_str(), params)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         admit_sink: &StderrSinks,
         verify_sink: &StderrSinks,
         timestamp: ts,
@@ -234,7 +234,7 @@ fn triple_preflight(
         gist_ref: opt_str(params, "gist_ref"),
         update_rule,
         subject_id: opt_str(params, "subject_id").unwrap_or(subject),
-        policy: gated_write_policy(state, ctx.bank.as_str(), params)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         admit_sink: &StderrSinks,
         triple_sink: &StderrSinks,
         timestamp: ts,

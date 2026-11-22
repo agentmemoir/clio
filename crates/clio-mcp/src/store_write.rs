@@ -84,8 +84,7 @@ pub(crate) fn store_path(
     let policy = match retention {
         Some(resolved) => AdmissionPolicy::with_retention(&state.env, resolved),
         None => admission_policy(state, ctx.bank.as_str()),
-    }
-    .with_force(opt_bool(args, "allow_duplicate", false)?);
+    };
     let mut req = VerifiedStoreRequest {
         item,
         ctx: &ctx,

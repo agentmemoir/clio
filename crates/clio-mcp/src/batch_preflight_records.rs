@@ -23,7 +23,7 @@
 
 use crate::batch_tools::Staged;
 use crate::runtime::{McpState, StderrSinks};
-use crate::write_tools::{gated_write_policy, opt_context, opt_num, opt_str, req_str};
+use crate::write_tools::{admission_policy, opt_context, opt_num, opt_str, req_str};
 use clio_admission::gated::SignalSource;
 use clio_store::BatchWrite;
 use clio_types::{AmError, ErrorCode, OpContext};
@@ -80,7 +80,7 @@ fn persona_preflight(
         confidence: opt_num(params, "confidence"),
         source: opt_str(params, "source"),
         evidence_ref: opt_str(params, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), params)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         signal_source: source,
         admission_sink: &StderrSinks,
         persona_sink: &StderrSinks,
@@ -134,7 +134,7 @@ fn task_preflight(
         status: req_str(params, "status")?,
         context: context.as_deref(),
         evidence_ref: opt_str(params, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), params)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         signal_source: source,
         admission_sink: &StderrSinks,
         sink: &StderrSinks,
@@ -188,7 +188,7 @@ fn failure_preflight(
         lesson: req_str(params, "lesson")?,
         context: context.as_deref(),
         evidence_ref: opt_str(params, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), params)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         history_policy: &state.history_policy,
         signal_source: source,
         admission_sink: &StderrSinks,
