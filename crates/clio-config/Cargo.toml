@@ -35,6 +35,9 @@ keyring-core = { workspace = true }
 # without following a link and without blocking on a FIFO. This crate forbids
 # unsafe code, so no `libc` function is called.
 libc = { workspace = true }
+# The effective uid of the process, compared against the token store's owner.
+# A safe wrapper, unlike a direct `libc` call, which this crate cannot make.
+rustix = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

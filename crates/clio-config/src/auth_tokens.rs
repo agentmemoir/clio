@@ -116,9 +116,10 @@ pub fn resolve_token_store_path_with(
 /// state is refused (see the module docs).
 ///
 /// # Errors
-/// [`ErrorCode::Forbidden`] when the file is not a regular file or is not
-/// owner-only, [`ErrorCode::ConfigCorrupt`] when it cannot be opened, read,
-/// parsed, or validated.
+/// [`ErrorCode::Forbidden`] when the store is not a regular file, is owned by a
+/// user other than the one running Clio, or grants any group or other
+/// permission bit; [`ErrorCode::ConfigCorrupt`] when it cannot be opened,
+/// read, parsed, or validated.
 pub fn load_auth_tokens(path: &Path) -> Result<Vec<AuthTokenRecord>, AmError> {
     // One open: the checks below and the bytes they allow are the same file,
     // because none of them is a second lookup by path.
@@ -354,21 +355,39 @@ fn unreadable(path: &Path, error: &std::io::Error) -> AmError {
     )
 }
 
-/// Refuse a store that is not a regular file, or whose mode grants anything to
-/// group or other. `meta` is the descriptor's, so it describes the file the
-/// caller is about to read.
+/// The effective uid of the process, reached through `rustix` because this
+/// crate may not call `geteuid` itself.
+#[cfg(unix)]
+#[must_use]
+fn effective_uid() -> u32 {
+    rustix::process::geteuid().as_raw()
+}
+
+/// Refuse a store that is not a regular file, is owned by another user, or
+/// whose mode grants anything to group or other. `meta` is the descriptor's,
+/// so it describes the file the caller is about to read.
 ///
 /// # Errors
 /// [`ErrorCode::Forbidden`] naming the path and the reason; never the host's
 /// mode value.
 #[cfg(unix)]
 fn owner_only_refusal(path: &Path, meta: &std::fs::Metadata) -> Result<(), AmError> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     if !meta.is_file() {
         return Err(AmError::new(
             ErrorCode::Forbidden,
             format!(
                 "token store {}: refused because it is not a regular file",
+                path.display()
+            ),
+        ));
+    }
+    if meta.uid() != effective_uid() {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            format!(
+                "token store {}: refused because it is owned by a user other than the one \
+                 running Clio; change its owner to the one running Clio and run again",
                 path.display()
             ),
         ));

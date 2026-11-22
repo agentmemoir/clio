@@ -67,6 +67,10 @@ rand = "0.10"
 # The one signal the CLI sets itself: restoring the default `SIGPIPE` disposition
 # so a closed stdout ends the process quietly rather than panicking.
 libc = "0.2"
+# The effective uid the token store's owner must match. Rustix exposes it as a
+# safe function, which is what a crate forbidding unsafe code can call; only the
+# `process` module is needed, and its default `std` feature stays on.
+rustix = { version = "1.1", features = ["process"] }
 # OS secret store for the Clio encryption key. `keyring-core` owns the entry
 # type, the credential trait, and the error; one platform store crate below
 # supplies the backend, and `clio-config` installs exactly one of them at
