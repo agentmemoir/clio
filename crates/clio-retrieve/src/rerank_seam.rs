@@ -32,22 +32,45 @@ use std::time::{Duration, Instant};
 /// fewer requests fails the test instead of hanging it.
 const SERVER_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Consecutive `Interrupted` reads retried before the helper gives up. The
+/// helper is generic over `Read`, so no socket timeout stands behind it and
+/// the retry loop needs a bound of its own.
+const MAX_INTERRUPTED_RETRIES: usize = 64;
+
+/// Longest head excerpt a failure message carries.
+const HEAD_EXCERPT: usize = 80;
+
 /// Read one HTTP request off `reader` up to its `Content-Length` boundary.
 ///
 /// Generic over `Read` so a test can drive it with an in-memory reader that
-/// injects an interrupted read without a socket.
+/// injects an interrupted read without a socket. An interrupted read is
+/// retried up to [`MAX_INTERRUPTED_RETRIES`] times in a row; every other end
+/// of the read is checked against the header terminator.
 pub(crate) fn read_request_body(reader: &mut impl Read) -> String {
     let mut buf = Vec::new();
     let mut chunk = [0_u8; 16_384];
+    let mut interrupted = 0_usize;
     loop {
         match reader.read(&mut chunk) {
             Ok(0) => {
                 require_header_terminator(&buf, std::io::ErrorKind::UnexpectedEof);
                 break;
             }
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
-            // An interrupted syscall is not a fault: retry it.
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                interrupted = 0;
+            }
+            // An interrupted syscall is not a fault: retry it, bounded.
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                interrupted += 1;
+                assert!(
+                    interrupted <= MAX_INTERRUPTED_RETRIES,
+                    "fake server read stayed interrupted for {interrupted} retries after {} bytes: {:?}",
+                    buf.len(),
+                    e.kind()
+                );
+                continue;
+            }
             Err(e) => {
                 require_header_terminator(&buf, e.kind());
                 break;
@@ -66,14 +89,28 @@ pub(crate) fn read_request_body(reader: &mut impl Read) -> String {
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-/// Fail with the byte count and the error kind when a read ended before the
-/// header block. A read that ends after the terminator is a normal end.
+/// Check a read that ended now against the header terminator.
+///
+/// A read that ends after the terminator is a normal end. A clean EOF with no
+/// bytes reports a connection that closed before sending any bytes. Any other
+/// early end reports the byte count, the error kind, and a head excerpt.
 fn require_header_terminator(buf: &[u8], kind: std::io::ErrorKind) {
-    assert!(
-        buf.windows(4).any(|w| w == b"\r\n\r\n"),
-        "fake server read ended after {} bytes before the header block: {kind:?}",
-        buf.len()
-    );
+    if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        return;
+    }
+    let failure = if buf.is_empty() && kind == std::io::ErrorKind::UnexpectedEof {
+        format!(
+            "fake server read ended after 0 bytes: the connection closed before sending any bytes ({kind:?})"
+        )
+    } else {
+        let head: String =
+            String::from_utf8_lossy(&buf[..buf.len().min(HEAD_EXCERPT)]).into_owned();
+        format!(
+            "fake server read ended after {} bytes before the header block: {kind:?}; head: {head:?}",
+            buf.len()
+        )
+    };
+    panic!("{failure}");
 }
 
 /// The `Content-Length` of a partially received request, once its header

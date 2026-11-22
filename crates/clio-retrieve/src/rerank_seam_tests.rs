@@ -7,7 +7,8 @@
 //! HTTP request decoder the batch tests and the end-to-end rerank tests drive.
 //!
 //! ## Owns
-//! - The interrupted-read retry test and the truncated-capture failure test
+//! - The interrupted-read retry test and the retry-cap test
+//! - The truncated-capture failure tests, by clean EOF and by read error
 //! - The end-to-end check that the fake service answers and returns its capture
 //!
 //! ## Does not own
@@ -36,6 +37,31 @@ impl Read for InterruptOnce {
             return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
         }
         self.bytes.read(buf)
+    }
+}
+
+/// A reader that serves `bytes`, then reports `kind` once they are consumed.
+struct FailAfterBytes {
+    bytes: Cursor<Vec<u8>>,
+    kind: std::io::ErrorKind,
+}
+
+impl Read for FailAfterBytes {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.bytes.read(buf)?;
+        if read == 0 {
+            return Err(std::io::Error::from(self.kind));
+        }
+        Ok(read)
+    }
+}
+
+/// A reader that reports `Interrupted` on every read.
+struct AlwaysInterrupted;
+
+impl Read for AlwaysInterrupted {
+    fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::from(std::io::ErrorKind::Interrupted))
     }
 }
 
@@ -88,6 +114,60 @@ fn a_read_that_ends_before_the_header_block_reports_the_byte_count_and_kind() {
         "{message}"
     );
     assert!(message.contains("UnexpectedEof"), "{message}");
+}
+
+#[test]
+fn a_read_that_ends_with_no_bytes_names_a_connection_that_closed_early() {
+    let mut reader = &[][..];
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        read_request_body(&mut reader)
+    }))
+    .expect_err("a read with no bytes must panic");
+
+    let message = panic_text(&*payload);
+    assert!(message.contains("read ended after 0 bytes"), "{message}");
+    assert!(
+        message.contains("closed before sending any bytes"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_read_error_after_a_partial_header_reports_its_kind_and_head() {
+    let partial = b"POST /rerank HTTP/1.1\r\ncontent-length: 2\r\n";
+    let mut reader = FailAfterBytes {
+        bytes: Cursor::new(partial.to_vec()),
+        kind: std::io::ErrorKind::ConnectionReset,
+    };
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        read_request_body(&mut reader)
+    }))
+    .expect_err("a read error before the header block must panic");
+
+    let message = panic_text(&*payload);
+    assert!(
+        message.contains(&format!(
+            "read ended after {} bytes before the header block",
+            partial.len()
+        )),
+        "{message}"
+    );
+    assert!(message.contains("ConnectionReset"), "{message}");
+    assert!(message.contains("POST /rerank HTTP/1.1"), "{message}");
+}
+
+#[test]
+fn an_unbounded_interrupted_read_gives_up_after_the_retry_cap() {
+    let mut reader = AlwaysInterrupted;
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        read_request_body(&mut reader)
+    }))
+    .expect_err("a read that stays interrupted must panic");
+
+    let message = panic_text(&*payload);
+    assert!(message.contains("stayed interrupted"), "{message}");
+    assert!(message.contains("after 0 bytes"), "{message}");
+    assert!(message.contains("Interrupted"), "{message}");
 }
 
 #[test]
