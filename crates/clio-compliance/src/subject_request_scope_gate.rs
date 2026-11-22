@@ -21,8 +21,9 @@
 //!
 //! ## Boundary
 //!
-//! Changes to which bank may read or move a request, or to what a refused
-//! attempt records, should normally require changes here. Changes to a request
+//! Changes to which bank may move a request through a mutating verb, or to
+//! what a refused attempt records, should normally require changes here. A
+//! request read does not pass through this gate. Changes to a request
 //! verb's own sequencing should not.
 //!
 //! Keep this module focused on the cross-bank refusal and its evidence.
@@ -33,7 +34,8 @@ use clio_types::{AmError, ErrorCode, OpContext};
 use serde_json::json;
 
 /// Refuse a record whose frozen scope bank is not the caller's bank, so a
-/// caller in another bank can neither read nor move the record.
+/// caller in another bank cannot move the record through a mutating verb. The
+/// request read verbs do not call this gate.
 ///
 /// The refused attempt is appended to the caller's own bank audit trail, named
 /// by `operation`, so a cross-bank call is evidence instead of silence. The
