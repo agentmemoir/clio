@@ -31,7 +31,9 @@ const MAX_FRAME_BYTES: usize = 10 * 1024 * 1024;
 
 /// Run the newline frame loop, asking `answer` for each non-blank frame.
 ///
-/// A frame the answer leaves unanswered writes no line.
+/// A frame the answer leaves unanswered writes no line. A frame line longer
+/// than `MAX_FRAME_BYTES` ends the session with an `InvalidData` error naming
+/// the cap.
 fn serve_frames<I, O, F>(mut input: I, output: &mut O, mut answer: F) -> std::io::Result<()>
 where
     I: BufRead,
@@ -77,7 +79,9 @@ where
 /// no header read or required.
 ///
 /// # Errors
-/// Propagates I/O failures from the reader or writer.
+/// Propagates I/O failures from the reader or writer. Also refuses any frame
+/// line longer than `MAX_FRAME_BYTES` with an `InvalidData` error naming the
+/// cap, which ends the session.
 pub fn serve<I, O>(state: &McpState, input: I, output: &mut O) -> std::io::Result<()>
 where
     I: BufRead,
