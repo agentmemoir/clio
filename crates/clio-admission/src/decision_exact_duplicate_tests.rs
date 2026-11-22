@@ -4,11 +4,11 @@
 //! # Responsibility
 //!
 //! Tests that an exact duplicate is rejected whatever the retention profile
-//! says, and that only `--force` waives it.
+//! says and whatever the caller forces.
 //!
 //! ## Owns
 //! - The unconditional exact-duplicate rejection in `decide_ungated`
-//! - The force escape hatch and the gates force must not waive
+//! - The force flag's lack of effect, and the gates that still reject
 //!
 //! ## Does not own
 //! - Novelty arithmetic (see `factors_tests`)
@@ -143,7 +143,7 @@ fn case_and_punctuation_variants_are_exact_duplicates() {
 }
 
 #[test]
-fn force_admits_the_duplicate() {
+fn force_does_not_admit_the_duplicate() {
     let env = RankingEnv::system_defaults();
     let policy = default_policy(&env).with_force(true);
 
@@ -154,8 +154,12 @@ fn force_admits_the_duplicate() {
     )
     .expect("score");
 
-    assert!(decision.pass, "--force must waive the duplicate rejection");
-    assert!(decision.rejection_reason.is_none());
+    assert!(
+        !decision.pass,
+        "force must not waive the duplicate rejection"
+    );
+    let reason = decision.rejection_reason.expect("reason");
+    assert!(is_exact_duplicate_reason(&reason), "{reason}");
 }
 
 #[test]
@@ -178,7 +182,7 @@ fn force_does_not_waive_the_floor_or_the_threshold() {
 
     assert!(
         !decision.pass,
-        "force waives the exact-duplicate rejection only, never the floor"
+        "a forced write still meets the novelty floor"
     );
     let reason = decision.rejection_reason.expect("reason");
     assert!(!is_exact_duplicate_reason(&reason), "{reason}");

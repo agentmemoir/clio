@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 /// Machine-readable marker on a rejection caused by an identical stored item.
 ///
 /// This rejection is unconditional: it does not depend on the retention
-/// profile's novelty floor, so no configuration can switch it off. Hosts match
-/// on the prefix to tell it apart from a floor rejection, which stays
+/// profile's novelty floor, and no flag or configuration switches it off. Hosts
+/// match on the prefix to tell it apart from a floor rejection, which stays
 /// tunable.
 pub const EXACT_DUPLICATE_REASON: &str = "exact_duplicate";
 
@@ -173,10 +173,11 @@ pub fn decide(
 /// N/A but five-factor admission still MUST run on a new belief identity.
 /// Still uses the same factor formulas and thresholds keyed by `key`.
 ///
-/// An item whose token set equals a stored neighbor's is rejected as an exact
-/// duplicate regardless of `novelty_floor()`, so no retention setting can
-/// switch the rejection off. Only `AdmissionPolicy::with_force(true)` waives
-/// it; the floor, the mission veto, and the score threshold still apply.
+/// An item whose stored text equals a neighbor's is rejected as an exact
+/// duplicate regardless of `novelty_floor()` and regardless of the caller's
+/// force flag, so no retention setting and no flag can switch the rejection
+/// off. The floor, the mission veto, and the score threshold still apply after
+/// it.
 ///
 /// # Errors
 /// `factor_unavailable` when a required signal backend is down.
@@ -217,7 +218,7 @@ pub fn decide_ungated(
             mission_rule_labels: mission.rule_labels.clone(),
         });
     }
-    if is_exact_duplicate(&signals.text, neighbors) && !policy.force() {
+    if is_exact_duplicate(&signals.text, neighbors) {
         return Ok(Decision {
             pass: false,
             admission_score: score,

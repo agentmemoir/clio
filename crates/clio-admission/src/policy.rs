@@ -58,18 +58,18 @@ impl<'a> AdmissionPolicy<'a> {
 
     /// Set the caller's explicit force flag.
     ///
-    /// Force waives the unconditional exact-duplicate rejection only. Every
-    /// other gate — the category gate, span verification, the mission veto, the
-    /// novelty floor, and the score threshold — still runs, so a forced write
-    /// can never skip validation.
+    /// The flag changes no decision. The exact-duplicate rejection, the
+    /// category gate, span verification, the mission veto, the novelty floor,
+    /// and the score threshold all still run.
     #[must_use]
     pub fn with_force(mut self, force: bool) -> Self {
         self.force = force;
         self
     }
 
-    /// Whether the caller explicitly forced this write past the
-    /// exact-duplicate rejection.
+    /// The caller's explicit force flag, as set by [`Self::with_force`].
+    ///
+    /// It does not change an admission decision.
     #[must_use]
     pub const fn force(&self) -> bool {
         self.force
