@@ -146,7 +146,7 @@ pub trait DekProvider: Send + Sync {
     ///
     /// # Errors
     /// The key store has no usable blind-index key, or cannot be read.
-    fn blind_index_key(&self) -> Result<[u8; 32], AmError>;
+    fn blind_index_key(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, AmError>;
 
     /// The store's blind-index key, creating and persisting it when missing.
     ///
@@ -159,7 +159,7 @@ pub trait DekProvider: Send + Sync {
     ///
     /// # Errors
     /// Provider failures (an unreadable or unwritable key store, for example).
-    fn ensure_blind_index_key(&self) -> Result<[u8; 32], AmError>;
+    fn ensure_blind_index_key(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, AmError>;
 
     /// Seal plaintext under the subject's active DEK, bound to one field of one
     /// row.
@@ -301,7 +301,7 @@ impl DekProvider for LocalDevKms {
         Ok(Self::dek_ref(subject_id, version))
     }
 
-    fn blind_index_key(&self) -> Result<[u8; 32], AmError> {
+    fn blind_index_key(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, AmError> {
         let mut store = lock_store(&self.state);
         match store.lookup(BLIND_INDEX_KEY_SUBJECT)? {
             Some(KeySlot::Active { key, .. }) => Ok(key.bytes),
@@ -313,7 +313,7 @@ impl DekProvider for LocalDevKms {
         }
     }
 
-    fn ensure_blind_index_key(&self) -> Result<[u8; 32], AmError> {
+    fn ensure_blind_index_key(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, AmError> {
         let mut store = lock_store(&self.state);
         let (_, key) = store.ensure(BLIND_INDEX_KEY_SUBJECT)?;
         Ok(key)
@@ -328,7 +328,7 @@ impl DekProvider for LocalDevKms {
     ) -> Result<CiphertextEnvelope, AmError> {
         let mut store = lock_store(&self.state);
         let (version, key_bytes) = store.ensure(subject_id)?;
-        let cipher = XChaCha20Poly1305::new((&key_bytes).into());
+        let cipher = XChaCha20Poly1305::new((&*key_bytes).into());
         let nonce_bytes: [u8; NONCE_LEN] = rand::random();
         let nonce = XNonce::from(nonce_bytes);
         let aad = envelope_aad(field, row_id, subject_id, version);
@@ -403,7 +403,7 @@ impl DekProvider for LocalDevKms {
             &envelope.ciphertext_b64,
         )
         .map_err(|_| AmError::new(ErrorCode::UnreadableContent, "invalid ciphertext encoding"))?;
-        let cipher = XChaCha20Poly1305::new((&key.bytes).into());
+        let cipher = XChaCha20Poly1305::new((&*key.bytes).into());
         let nonce = XNonce::try_from(nonce_bytes.as_slice())
             .map_err(|_| AmError::new(ErrorCode::UnreadableContent, "invalid nonce length"))?;
         let aad = envelope_aad(field, row_id, &envelope.subject_id, envelope.key_version);

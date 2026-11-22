@@ -28,13 +28,15 @@ use clio_types::{AmError, ErrorCode};
 use rand::Rng;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, Zeroizing};
 
 /// Key bytes for one subject; zeroized when the slot is dropped.
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize)]
 pub(crate) struct DekMaterial {
-    pub(crate) bytes: [u8; KEY_LEN],
+    pub(crate) bytes: Zeroizing<[u8; KEY_LEN]>,
 }
+
+impl zeroize::ZeroizeOnDrop for DekMaterial {}
 
 /// One subject's key state.
 pub(crate) enum KeySlot {
@@ -50,7 +52,7 @@ impl KeySlot {
             Some(encoded) => Ok(Self::Active {
                 version: slot.version,
                 key: DekMaterial {
-                    bytes: decode_key(&encoded)?,
+                    bytes: Zeroizing::new(decode_key(&encoded)?),
                 },
             }),
             None => Ok(Self::Destroyed {
@@ -107,7 +109,10 @@ impl SlotStore {
     /// # Errors
     /// The subject was shredded, the key store cannot be read or written, or
     /// the slot vanished after the conflict-safe insert.
-    pub(crate) fn ensure(&mut self, subject_id: &str) -> Result<(u32, [u8; KEY_LEN]), AmError> {
+    pub(crate) fn ensure(
+        &mut self,
+        subject_id: &str,
+    ) -> Result<(u32, Zeroizing<[u8; KEY_LEN]>), AmError> {
         if let Some(slot) = self.lookup(subject_id)? {
             return active_key(slot, subject_id);
         }
@@ -142,7 +147,7 @@ pub(crate) fn lock_store(state: &Mutex<SlotStore>) -> MutexGuard<'_, SlotStore> 
 }
 
 /// The active key of a live slot, or the shredded error.
-fn active_key(slot: KeySlot, subject_id: &str) -> Result<(u32, [u8; KEY_LEN]), AmError> {
+fn active_key(slot: KeySlot, subject_id: &str) -> Result<(u32, Zeroizing<[u8; KEY_LEN]>), AmError> {
     match slot {
         KeySlot::Active { version, key } => Ok((version, key.bytes)),
         KeySlot::Destroyed { .. } => Err(destroyed_error(subject_id)),
