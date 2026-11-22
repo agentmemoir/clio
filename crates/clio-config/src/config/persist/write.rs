@@ -8,6 +8,8 @@
 //!
 //! ## Owns
 //! - Atomic temp-file-plus-rename writes with 0600 permissions
+//! - Temp files that are created new, so an entry already at the temp name is
+//!   refused instead of followed
 //! - The monotonic counter that keeps concurrent temp files distinct
 //! - `restrict_dir`, the owner-only directory rule
 //!
@@ -34,7 +36,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Write `contents` to `path` atomically, owner-only on Unix. The temp file
-/// lives beside the target so the final rename stays on one filesystem.
+/// lives beside the target so the final rename stays on one filesystem. The
+/// temp file is created new: an existing entry at that name, such as a planted
+/// symlink, is refused rather than followed and truncated.
 /// Crate-shared: the token store saves through the same writer.
 ///
 /// # Errors
@@ -42,7 +46,7 @@ static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 /// is removed before returning).
 pub fn write_private_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     let tmp = temp_sibling(path);
-    write_private(&tmp, contents)?;
+    create_new_private(&tmp, contents)?;
     if let Err(e) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
@@ -88,6 +92,41 @@ pub(super) fn write_private(path: &Path, contents: &str) -> std::io::Result<()> 
 #[cfg(not(unix))]
 pub(super) fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
     fs::write(path, contents)
+}
+
+/// Create `path` as a new file and write `contents`, owner-only on Unix.
+///
+/// # Errors
+/// `AlreadyExists` when any entry already sits at `path`, including a symlink.
+/// `create_new` is `O_CREAT|O_EXCL`, so the open fails instead of following the
+/// entry and truncating its target.
+#[cfg(unix)]
+pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    // `mode` only applies to a created file; force 0600 on the handle anyway.
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    file.write_all(contents.as_bytes())?;
+    file.sync_all()
+}
+
+/// Create `path` as a new file and write `contents`.
+///
+/// # Errors
+/// `AlreadyExists` when any entry already sits at `path`, including a symlink.
+#[cfg(not(unix))]
+pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(contents.as_bytes())
 }
 
 #[cfg(unix)]

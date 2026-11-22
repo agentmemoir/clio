@@ -219,3 +219,30 @@ fn backup_copies_owner_only_and_skips_missing() {
         ErrorCode::Internal
     );
 }
+
+// A symlink planted at the temp name is refused, so the file it points at is
+// never truncated. `create_new` is `O_CREAT|O_EXCL`, which fails with
+// `AlreadyExists` on an existing final component, a symlink included.
+#[cfg(unix)]
+#[test]
+fn planted_symlink_at_temp_name_is_refused() {
+    use std::os::unix::fs::symlink;
+    let dir = tmp("symlink-plant");
+    fs::create_dir_all(&dir).expect("dir");
+    let victim = dir.join("victim.json");
+    fs::write(&victim, "keep me").expect("victim");
+    let planted = dir.join(".deployment.json.0.0.0.tmp");
+    symlink(&victim, &planted).expect("symlink");
+
+    let err = super::write::create_new_private(&planted, "overwrite").expect_err("refused");
+    assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(fs::read_to_string(&victim).expect("victim"), "keep me");
+    assert!(
+        fs::symlink_metadata(&planted)
+            .expect("meta")
+            .file_type()
+            .is_symlink(),
+        "the planted entry must still be the symlink, not a replaced file"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
