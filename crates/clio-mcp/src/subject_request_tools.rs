@@ -68,6 +68,7 @@ pub(crate) fn env(state: &McpState) -> SubjectRequestEnv<'_> {
         events: &*state.events,
         peers: &*state.peer_actions,
         copies: &*state.copies,
+        audit: &*state.store,
     }
 }
 
@@ -232,7 +233,11 @@ fn path_complete(state: &McpState, args: &Value) -> Result<Value, AmError> {
 }
 
 /// `subject_request_close`: accept closure, finalize, and report the request.
+///
+/// A bound credential must be an administrator; the verb itself then refuses a
+/// caller outside the request's own bank.
 fn close(state: &McpState, args: &Value) -> Result<Value, AmError> {
+    state.authorize_admin()?;
     let ctx = state.resolve_ctx(args)?;
     let report = svc::close(
         &env(state),
@@ -366,6 +371,10 @@ fn event_state(state: LocalEventState) -> &'static str {
         LocalEventState::Denied => "denied",
     }
 }
+
+#[cfg(test)]
+#[path = "subject_request_tools_admin_tests.rs"]
+mod subject_request_tools_admin_tests;
 
 #[cfg(test)]
 #[path = "subject_request_tools_tests.rs"]

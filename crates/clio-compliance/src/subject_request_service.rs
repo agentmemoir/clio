@@ -16,6 +16,8 @@
 //!
 //! ## Does not own
 //! - The separated status report and its fold (`subject_request_report.rs`)
+//! - The cross-bank scope gate and the refused-attempt audit row it writes
+//!   (`subject_request_scope_gate.rs`)
 //! - The request state table, commands, and ledger contracts
 //!   (`subject_request.rs`)
 //! - The record vocabulary and the record/row mapping
@@ -41,6 +43,7 @@ use crate::subject_request::{
 };
 use crate::subject_request_events::{ClosureBlock, accept_closure};
 use crate::subject_request_report::report_of;
+use crate::subject_request_scope_gate::require_scope_bank;
 use crate::subject_request_store_wiring::{
     closure_inputs, copy_row_closure_facts, erase_from_durable_store, peer_row_closure_facts,
     record_copy_disposition, record_retention_exception, reload_ledger, row_to_record,
@@ -48,7 +51,7 @@ use crate::subject_request_store_wiring::{
 };
 use clio_store::{
     CopyInventoryRow, CopyInventoryStore, DurableRequestStore, LocalEventStore,
-    PeerActionDisposition, PeerActionStore,
+    PeerActionDisposition, PeerActionStore, Store,
 };
 use clio_types::{AmError, ErrorCode, OpContext};
 use serde_json::Value;
@@ -68,6 +71,8 @@ pub struct SubjectRequestEnv<'a> {
     pub peers: &'a dyn PeerActionStore,
     /// The copy-inventory store the copy rows are read from.
     pub copies: &'a dyn CopyInventoryStore,
+    /// The store handle the refused-attempt audit row is written through.
+    pub audit: &'a dyn Store,
 }
 
 /// Open a request, or replay its stored result, then report it.
@@ -122,16 +127,22 @@ pub fn report(
 }
 
 /// Apply one command to the stored request and report it.
+///
+/// Only a harness or system actor in the request's own bank may move a
+/// request; of the mutating verbs, only `complete_path`, `close`, and
+/// `apply_command` enforce that shared scope gate.
 pub fn apply_command(
     env: &SubjectRequestEnv<'_>,
-    _ctx: &OpContext,
+    ctx: &OpContext,
     request_id: &str,
     command: &RequestCommand,
 ) -> Result<RequestStatusReport, AmError> {
+    authorize(ctx.actor)?;
+    let expected = load_record(env, request_id)?;
+    require_scope_bank(env.audit, &expected, ctx, "subject_request_apply_command")?;
     let mut ledger = reload_ledger(env.durable)?;
-    let expected = ledger.record(request_id).cloned();
     ledger.apply(request_id, command)?;
-    save_record(env, &ledger, request_id, expected.as_ref())?;
+    save_record(env, &ledger, request_id, Some(&expected))?;
     report_of(env, &load_record(env, request_id)?)
 }
 
@@ -151,13 +162,7 @@ pub fn complete_path(
     }
     let expected = load_record(env, request_id)?;
     let mut record = expected.clone();
-    let (RequestScope::Bank { bank_id } | RequestScope::Subject { bank_id, .. }) = &record.scope;
-    if bank_id != ctx.bank.as_str() {
-        return Err(AmError::new(
-            ErrorCode::Forbidden,
-            "request belongs to another bank",
-        ));
-    }
+    require_scope_bank(env.audit, &record, ctx, "subject_request_path_complete")?;
     if matches!(
         record.state,
         RequestState::Final(_) | RequestState::Refused { .. }
@@ -189,13 +194,19 @@ pub fn complete_path(
 }
 
 /// Close one request: accept the closure, move it to final, and report it.
+///
+/// Only a harness or system actor in the request's own bank may close it; of
+/// the mutating verbs, only `complete_path`, `close`, and `apply_command`
+/// enforce that shared scope gate.
 pub fn close(
     env: &SubjectRequestEnv<'_>,
-    _ctx: &OpContext,
+    ctx: &OpContext,
     request_id: &str,
     product_path: &str,
 ) -> Result<RequestStatusReport, AmError> {
+    authorize(ctx.actor)?;
     let record = load_record(env, request_id)?;
+    require_scope_bank(env.audit, &record, ctx, "subject_request_close")?;
     if record.paths.is_empty() {
         return Err(AmError::new(
             ErrorCode::Forbidden,

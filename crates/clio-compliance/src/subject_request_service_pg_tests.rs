@@ -108,6 +108,7 @@ fn postgres_retry_names_the_pending_action_and_repeats_no_protected_effect() {
         events: &events,
         peers: &*store,
         copies: &*store,
+        audit: &*store,
     };
     let err = retry_erasure(&first_env, &ctx, &request_id, &args, &["bank-a".to_owned()])
         .expect_err("the failed outcome write is reported");
@@ -177,6 +178,7 @@ fn env(store: &PostgresStore) -> SubjectRequestEnv<'_> {
         events: store,
         peers: store,
         copies: store,
+        audit: store,
     }
 }
 
