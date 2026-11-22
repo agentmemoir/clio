@@ -241,3 +241,7 @@ pub fn additive_defs() -> Vec<ToolDef> {
         },
     ]
 }
+
+#[cfg(test)]
+#[path = "schema_additive_defs_tests.rs"]
+mod schema_additive_defs_tests;

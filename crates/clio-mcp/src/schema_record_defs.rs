@@ -202,3 +202,7 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
         },
     ]
 }
+
+#[cfg(test)]
+#[path = "schema_record_defs_tests.rs"]
+mod schema_record_defs_tests;
