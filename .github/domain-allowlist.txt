@@ -9,6 +9,8 @@
 agentmemoir.com
 agentmemour.com
 api
+# percent-escaped host in a strict-parser refusal test, not a real destination
+api%2emem0%2eai
 api.cohere.com
 api.mem0.ai
 api.mem0.ai.
