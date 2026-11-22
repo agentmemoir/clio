@@ -218,7 +218,11 @@ release is wrong or the transfer was altered."
     log "checksum ok"
 
     tar -C "$workdir" -xzf "$workdir/$asset.tar.gz"
-    [ -x "$workdir/$BIN_NAME-$target/$BIN_NAME" ] || die "the archive did not contain the expected binary"
+    # A regular file, not an executable one: the temporary directory may be
+    # mounted noexec, and there `-x` fails on a file whose mode is right. The
+    # installed copy gets its mode set below.
+    [ -f "$workdir/$BIN_NAME-$target/$BIN_NAME" ] \
+        || die "the archive did not contain the expected binary at $BIN_NAME-$target/$BIN_NAME"
 
     mkdir -p "$INSTALL_DIR"
     # Install to a temporary name in the destination directory and rename, so a
