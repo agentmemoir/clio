@@ -376,8 +376,8 @@ impl BeliefSink for StderrSinks {
 mod runtime_sinks_tests;
 
 #[cfg(test)]
-#[path = "runtime_sinks_duplicate_waiver_tests.rs"]
-mod runtime_sinks_duplicate_waiver_tests;
+#[path = "runtime_sinks_duplicate_rejection_tests.rs"]
+mod runtime_sinks_duplicate_rejection_tests;
 
 #[cfg(test)]
 #[path = "runtime_sinks_content_tests.rs"]

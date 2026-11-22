@@ -27,7 +27,7 @@
 //! Keep this module focused on additive tool dispatch.
 
 use crate::runtime::{McpState, SHARED_BANK, StderrSinks, StoreSignals};
-use crate::write_tools::{gated_write_policy, opt_bool, opt_context, opt_num, opt_str, req_str};
+use crate::write_tools::{admission_policy, opt_bool, opt_context, opt_num, opt_str, req_str};
 use clio_compliance::{ValidateAction, canonical_get, canonical_subject};
 use clio_types::{AmError, ErrorCode, ItemKind, MemoryItem};
 use serde_json::{Map, Value};
@@ -195,7 +195,7 @@ fn canonical_put(state: &McpState, args: &Value) -> Result<Value, AmError> {
         evidence_ref: opt_str(args, "evidence_ref"),
         fields: &fields,
         verify: clio_write::VerifyConfig::default(),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         admit_sink: &StderrSinks,
         verify_sink: &StderrSinks,
         timestamp: &ts,

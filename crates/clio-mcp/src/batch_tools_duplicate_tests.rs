@@ -5,10 +5,11 @@
 //!
 //! This module is responsible for MCP-surface coverage of the `batch` tool's
 //! in-batch duplicate gate: two operations that store the same text abort the
-//! whole batch unless the later one sets `allow_duplicate`.
+//! whole batch.
 //!
 //! ## Owns
-//! - In-batch exact-duplicate abort and waiver assertions for `batch`
+//! - In-batch exact-duplicate abort assertions for `batch`
+//! - The retired duplicate-waiver argument being refused by the contract
 //!
 //! ## Does not own
 //! - Command-level bank/actor defaults (see `batch_tools_command_context_tests`)
@@ -41,13 +42,20 @@ fn a_duplicate_of_an_earlier_store_op_aborts_the_batch() {
 }
 
 #[test]
-fn allow_duplicate_waives_the_in_batch_duplicate_gate() {
+fn the_retired_duplicate_waiver_argument_is_refused() {
     let s = state();
     let mut second = store_op("itm-dup-b", "dupe");
     second["params"]["allow_duplicate"] = json!(true);
     let out = batch(&s, json!([store_op("itm-dup-a", "dupe"), second]), false);
-    assert_eq!(out["ok"], json!(true), "{out}");
-    assert_eq!(count_bank(&s, "bank-a"), 2);
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert!(
+        out["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unknown argument `allow_duplicate`"),
+        "{out}"
+    );
+    assert_eq!(count_bank(&s, "bank-a"), 0);
 }
 
 #[test]

@@ -335,3 +335,7 @@ mod import_round_trip_tests;
 #[cfg(test)]
 #[path = "import_read_bound_tests.rs"]
 mod import_read_bound_tests;
+
+#[cfg(test)]
+#[path = "import_duplicate_skip_tests.rs"]
+mod import_duplicate_skip_tests;

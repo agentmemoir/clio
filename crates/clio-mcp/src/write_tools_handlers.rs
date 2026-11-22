@@ -26,7 +26,7 @@
 
 use crate::runtime::{McpState, StderrSinks, StoreSignals};
 use crate::write_tools::{
-    end_outcome_json, gated_write_policy, opt_context, opt_num, opt_str, req_str,
+    admission_policy, end_outcome_json, opt_context, opt_num, opt_str, req_str,
 };
 use clio_types::{AmError, ErrorCode};
 use serde_json::{Map, Value};
@@ -66,7 +66,7 @@ pub(crate) fn triple_add(state: &McpState, args: &Value) -> Result<Value, AmErro
         gist_ref: opt_str(args, "gist_ref"),
         update_rule,
         subject_id: opt_str(args, "subject_id").unwrap_or(subject),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         admit_sink: &sink,
         triple_sink: &sink,
         timestamp: &ts,
@@ -131,7 +131,7 @@ pub(crate) fn belief_observe(state: &McpState, args: &Value) -> Result<Value, Am
         evidence_ref: req_str(args, "evidence_ref")?,
         source_type: req_str(args, "source_type")?,
         as_of: opt_str(args, "as_of"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         sink: &StderrSinks,
         timestamp: &ts,
     };

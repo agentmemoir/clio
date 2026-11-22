@@ -23,8 +23,8 @@
 //! Keep this module focused on record-write tool declarations.
 
 use crate::schema_defs::{
-    EPISTEMIC_KINDS, SOURCE_TYPES, ToolDef, UPDATE_RULES, allow_duplicate_prop, arr, b, bank_actor,
-    context_prop, en, num, s,
+    EPISTEMIC_KINDS, SOURCE_TYPES, ToolDef, UPDATE_RULES, arr, b, bank_actor, context_prop, en, num,
+    s,
 };
 
 /// Persona, history, triple, and belief record-write tool declarations.
@@ -52,7 +52,6 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
                 ),
                 ("evidence_ref", s("Evidence reference.")),
                 context_prop(),
-                allow_duplicate_prop(),
                 ("dry_run", b("Validate and score without a durable write.")),
             ]
             .into_iter()
@@ -76,7 +75,6 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
                 ),
                 ("evidence_ref", s("Evidence reference.")),
                 context_prop(),
-                allow_duplicate_prop(),
             ]
             .into_iter()
             .chain(bank_actor())
@@ -93,7 +91,6 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
                 ("status", s("Free-form status label (required).")),
                 ("evidence_ref", s("Optional evidence reference.")),
                 context_prop(),
-                allow_duplicate_prop(),
                 ("dry_run", b("Validate and score without a durable write.")),
             ]
             .into_iter()
@@ -114,7 +111,6 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
                 ),
                 ("evidence_ref", s("Optional evidence reference.")),
                 context_prop(),
-                allow_duplicate_prop(),
                 ("dry_run", b("Validate and score without a durable write.")),
             ]
             .into_iter()
@@ -152,7 +148,6 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
                     en("Must be `discrete` when present.", &UPDATE_RULES),
                 ),
                 context_prop(),
-                allow_duplicate_prop(),
             ]
             .into_iter()
             .chain(bank_actor())
@@ -200,7 +195,6 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
                     s("Data-subject id for DEK selection; defaults to a proposition-derived id."),
                 ),
                 context_prop(),
-                allow_duplicate_prop(),
             ]
             .into_iter()
             .chain(bank_actor())

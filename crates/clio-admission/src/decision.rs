@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 /// Machine-readable marker on a rejection caused by an identical stored item.
 ///
 /// This rejection is unconditional: it does not depend on the retention
-/// profile's novelty floor, and no flag or configuration switches it off. Hosts
-/// match on the prefix to tell it apart from a floor rejection, which stays
+/// profile's novelty floor, and no configuration switches it off. Hosts match
+/// on the prefix to tell it apart from a floor rejection, which stays
 /// tunable.
 pub const EXACT_DUPLICATE_REASON: &str = "exact_duplicate";
 
@@ -174,10 +174,9 @@ pub fn decide(
 /// Still uses the same factor formulas and thresholds keyed by `key`.
 ///
 /// An item whose stored text equals a neighbor's is rejected as an exact
-/// duplicate regardless of `novelty_floor()` and regardless of the caller's
-/// force flag, so no retention setting and no flag can switch the rejection
-/// off. The floor, the mission veto, and the score threshold still apply after
-/// it.
+/// duplicate regardless of `novelty_floor()`, so no retention setting switches
+/// the rejection off. The floor, the mission veto, and the score threshold still
+/// apply after it.
 ///
 /// # Errors
 /// `factor_unavailable` when a required signal backend is down.

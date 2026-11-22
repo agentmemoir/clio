@@ -29,6 +29,7 @@
 use std::collections::{HashMap, HashSet};
 
 use clio_admission::gated::{GateRequest, gated_create_raw};
+use clio_admission::is_exact_duplicate_reason;
 use clio_config::secret::scrub_inline_secrets;
 use clio_store::BatchWrite;
 use clio_types::{AmError, MemoryItem, TaskRecord};
@@ -303,6 +304,16 @@ impl<'a> Planner<'a> {
         )?;
         if decision.pass {
             self.create += 1;
+        } else if let Some(reason) = decision
+            .rejection_reason
+            .as_deref()
+            .filter(|reason| is_exact_duplicate_reason(reason))
+        {
+            self.skip += 1;
+            self.note(format!(
+                "item {} restore skipped: {reason}",
+                it.id.as_str()
+            ));
         } else {
             self.reject_reason(decision.rejection_reason.as_deref());
         }
@@ -334,6 +345,18 @@ impl<'a> Planner<'a> {
         )?;
         if decision.pass {
             self.create += 1;
+        } else if let Some(reason) = decision
+            .rejection_reason
+            .as_deref()
+            .filter(|reason| is_exact_duplicate_reason(reason))
+        {
+            self.skip += 1;
+            self.note(format!(
+                "carrier item {} restore skipped: {reason}",
+                it.id.as_str()
+            ));
+            self.blocked_carriers
+                .insert(it.id.clone(), CarrierBlock::Rejected(reason.to_owned()));
         } else {
             self.blocked_carriers.insert(
                 it.id.clone(),

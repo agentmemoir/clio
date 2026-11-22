@@ -231,20 +231,6 @@ pub(crate) fn admission_policy<'a>(state: &'a McpState, bank: &str) -> Admission
     AdmissionPolicy::with_retention(&state.env, state.resolved_retention(bank))
 }
 
-/// The policy for a gated write, with the caller's duplicate waiver applied.
-///
-/// Every gated long-term write can hit the unconditional exact-duplicate
-/// rejection, so every one of them must read the same `allow_duplicate`
-/// argument. Routing them all through this helper is what keeps a new surface
-/// from silently shipping without an escape hatch.
-pub(crate) fn gated_write_policy<'a>(
-    state: &'a McpState,
-    bank: &str,
-    args: &Value,
-) -> Result<AdmissionPolicy<'a>, AmError> {
-    Ok(admission_policy(state, bank).with_force(opt_bool(args, "allow_duplicate", false)?))
-}
-
 /// Build the candidate item shell for `store` / `admit_preview`.
 #[inline(never)]
 pub(crate) fn build_item(

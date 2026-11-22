@@ -24,7 +24,7 @@
 //! Keep this module focused on MCP persona/history record dispatch.
 
 use crate::runtime::{McpState, StderrSinks, StoreSignals};
-use crate::write_tools::{gated_write_policy, opt_bool, opt_context, opt_num, opt_str, req_str};
+use crate::write_tools::{admission_policy, opt_bool, opt_context, opt_num, opt_str, req_str};
 use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -46,7 +46,7 @@ pub(crate) fn persona_put_stable(state: &McpState, args: &Value) -> Result<Value
         confidence: opt_num(args, "confidence"),
         source: opt_str(args, "source"),
         evidence_ref: opt_str(args, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         signal_source: &signals,
         admission_sink: &StderrSinks,
         persona_sink: &StderrSinks,
@@ -97,7 +97,7 @@ pub(crate) fn persona_observe(state: &McpState, args: &Value) -> Result<Value, A
         confidence: opt_num(args, "confidence"),
         source: opt_str(args, "source"),
         evidence_ref: opt_str(args, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         signal_source: &signals,
         admission_sink: &StderrSinks,
         continuous_sink: &StderrSinks,
@@ -153,7 +153,7 @@ pub(crate) fn task_upsert(state: &McpState, args: &Value) -> Result<Value, AmErr
         status: req_str(args, "status")?,
         context: context.as_deref(),
         evidence_ref: opt_str(args, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         signal_source: &signals,
         admission_sink: &StderrSinks,
         sink: &StderrSinks,
@@ -205,7 +205,7 @@ pub(crate) fn failure_record(state: &McpState, args: &Value) -> Result<Value, Am
         lesson: req_str(args, "lesson")?,
         context: context.as_deref(),
         evidence_ref: opt_str(args, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         history_policy: &state.history_policy,
         signal_source: &signals,
         admission_sink: &StderrSinks,
