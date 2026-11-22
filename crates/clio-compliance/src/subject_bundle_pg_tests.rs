@@ -282,7 +282,8 @@ fn subject_bundle_pg_a_capped_history_read_names_the_cap_and_stays_incomplete() 
     let Some((_guard, fixture)) = bundle_fixture_or_skip() else {
         return;
     };
-    // Fill the task history to its cap so the bank-wide read is truncated.
+    // Fill the subject's own task history to its cap so its scoped read is
+    // truncated.
     for index in 0..HISTORY_LIMIT {
         let item_id = format!("{}-cap-item-{index}", fixture_id(SELECTED, "cap"));
         let item = carrier(&item_id, &fixture.bank, SELECTED, EpisodicType::Task);

@@ -188,5 +188,9 @@ fn class_label(class: FamilyClass) -> &'static str {
 mod subject_bundle_tests;
 
 #[cfg(test)]
+#[path = "subject_bundle_scope_tests.rs"]
+mod subject_bundle_scope_tests;
+
+#[cfg(test)]
 #[path = "subject_bundle_pg_tests.rs"]
 mod subject_bundle_pg_tests;

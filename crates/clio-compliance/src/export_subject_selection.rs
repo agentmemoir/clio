@@ -69,12 +69,24 @@ impl FamilyLinkRead for SplitFamilyLinkRead<'_> {
         self.store.list_triples(bank_id)
     }
 
-    fn list_tasks(&self, bank_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError> {
-        self.history.list_tasks(bank_id, limit)
+    fn list_tasks(
+        &self,
+        bank_id: &str,
+        subject_id: &str,
+        limit: usize,
+    ) -> Result<Vec<TaskRecord>, AmError> {
+        self.history
+            .list_tasks_for_subject(bank_id, subject_id, limit)
     }
 
-    fn list_failures(&self, bank_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError> {
-        self.history.list_failures(bank_id, limit)
+    fn list_failures(
+        &self,
+        bank_id: &str,
+        subject_id: &str,
+        limit: usize,
+    ) -> Result<Vec<FailureRecord>, AmError> {
+        self.history
+            .list_failures_for_subject(bank_id, subject_id, limit)
     }
 
     fn list_beliefs(&self, bank_id: &str) -> Result<Vec<BeliefObject>, AmError> {

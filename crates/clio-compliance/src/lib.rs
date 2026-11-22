@@ -63,6 +63,7 @@ mod export_seal_test_support;
 mod export_subject;
 mod import;
 mod inventory;
+mod inventory_link_read;
 mod journal_denial;
 #[cfg(test)]
 mod local_action_probe;
