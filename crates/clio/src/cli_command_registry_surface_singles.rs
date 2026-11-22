@@ -153,7 +153,7 @@ pub(crate) const HEALTH: CommandSpec = CommandSpec {
     aliases: &[],
     summary: "Machine-readable health/version JSON",
     notes: &[
-        "Prints the machine-readable health JSON: name and version only.\nIt opens no database and checks no service.",
+        "Prints the machine-readable health JSON: name and version only. It opens no database and checks no service.",
     ],
     positionals: &[],
     documented: &[],
