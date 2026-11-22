@@ -105,11 +105,13 @@ fn exported_context_round_trips_into_a_fresh_bank() {
         facts: None,
         backend: None,
         delivery: None,
+        readable_export_opt_in: true,
+        recipient: Some(crate::export_tests::test_recipient()),
     })
     .expect("export succeeds");
 
     // The exported bundle carries the exact context before any import runs.
-    let text = std::fs::read_to_string(&dest).expect("bundle readable");
+    let text = crate::export_tests::read_sealed(&dest);
     let envelope: BundleEnvelope = serde_json::from_str(&text).expect("bundle parses");
     assert_eq!(envelope.entities.items.len(), 1);
     assert_eq!(
@@ -122,7 +124,7 @@ fn exported_context_round_trips_into_a_fresh_bank() {
     let report = import(&h.args(
         &h.ctx(),
         h.policy(),
-        dest.to_str().expect("utf-8 temp path"),
+        crate::export_tests::unseal_file(&dest, "context-plain").as_str(),
         false,
         false,
         None,

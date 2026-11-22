@@ -43,6 +43,7 @@ use clio_admission::policy::AdmissionPolicy;
 use clio_config::retention::ResolvedRetention;
 use clio_store::{AssocPolicy, DistilledUnitRecord, STALE_REVISION_REJECTED};
 use clio_types::{AmError, ErrorCode, MemoryItem, OpContext};
+use std::str::FromStr;
 
 use hub_distill_reconcile_outcomes::{
     failed_outcome, no_neighbors_outcome, purged_outcome, stale_hub_outcome, superseded_outcome,
@@ -205,12 +206,12 @@ impl HubDistillEngine {
             // documents for this outcome.
             return Ok(no_neighbors_outcome(&record));
         }
-        let ts = chrono::DateTime::parse_from_rfc3339(&record.distilled_at).map_or_else(
+        let ts = jiff::Timestamp::from_str(&record.distilled_at).map_or_else(
             |_| self.now_canonical(),
             |prior| {
                 clio_store::millis_to_rfc3339(
                     self.now_millis()
-                        .max(prior.timestamp_millis().saturating_add(1000)),
+                        .max(prior.as_millisecond().saturating_add(1000)),
                 )
             },
         );

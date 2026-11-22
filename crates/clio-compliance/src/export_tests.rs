@@ -23,6 +23,14 @@
 
 use crate::bundle::ExportContentMode;
 use crate::export::{ExportArgs, ExportFilter, export};
+pub(crate) use crate::export_seal_test_support::{open_sealed, read_sealed, test_recipient};
+
+/// Follows the documented unseal step, so `import` consumes the opened bundle.
+pub(crate) fn unseal_file(source: &Path, name: &str) -> DestPath {
+    let dest = dest_path(name);
+    std::fs::write(dest.as_path(), read_sealed(source)).expect("write the decrypted bundle copy");
+    dest
+}
 use clio_store::{
     AssocEdgeRecord, AssocKind, BeliefStore, ComplianceStore, DekProvider, DestinationCustodyRow,
     DestinationCustodyStore, HistoryStore, LocalDevKms, LocalEventIntent, LocalEventStore,
@@ -335,6 +343,8 @@ pub(crate) fn args<'a>(
         facts: None,
         backend: None,
         delivery: None,
+        readable_export_opt_in: true,
+        recipient: Some(test_recipient()),
     }
 }
 
@@ -356,7 +366,7 @@ pub(crate) fn export_at(
 }
 
 pub(crate) fn read(f: &Fixture) -> String {
-    std::fs::read_to_string(f.path.as_path()).unwrap()
+    read_sealed(f.path.as_path())
 }
 
 /// A scratch root holding a staging directory and a destination path.

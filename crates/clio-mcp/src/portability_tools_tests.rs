@@ -72,11 +72,11 @@ impl Drop for Scratch {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn call(state: &crate::runtime::McpState, name: &str, args: Value) -> Value {
+pub(crate) fn call(state: &crate::runtime::McpState, name: &str, args: Value) -> Value {
     crate::write_tools::dispatch(state, name, &args)
 }
 
-fn temp_path(label: &str) -> String {
+pub(crate) fn temp_path(label: &str) -> String {
     let mut path = std::env::temp_dir();
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -90,7 +90,7 @@ fn temp_path(label: &str) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn store_probe(state: &crate::runtime::McpState, id: &str) -> Value {
+pub(crate) fn store_probe(state: &crate::runtime::McpState, id: &str) -> Value {
     call(
         state,
         "store",
@@ -127,11 +127,12 @@ fn export_writes_bundle_manifest_for_privileged_actor() {
         }),
     );
     assert_eq!(out["ok"], Value::Bool(true), "{out}");
-    assert_eq!(out["content_mode"], "dsar_plaintext");
+    assert_eq!(out["content_mode"], "ciphertext_backup");
     let manifest = &out["manifest"];
     assert_eq!(manifest["complete"], Value::Bool(true));
     let text = fs::read_to_string(&dest).expect("bundle file");
     assert!(text.contains("clio.memory_export"));
+    assert!(!text.contains("zzqxj"), "no readable body");
     fs::remove_file(&dest).ok();
 }
 

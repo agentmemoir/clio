@@ -27,7 +27,6 @@
 
 use crate::runtime::McpState;
 use crate::write_tools_handlers::{belief_observe, graph_link, triple_add, triple_end};
-use chrono::{DateTime, NaiveDate};
 use clio_admission::decision::Candidate;
 use clio_admission::policy::AdmissionPolicy;
 use clio_types::{
@@ -36,6 +35,7 @@ use clio_types::{
 };
 use clio_write::MaintenanceSignal;
 use clio_write::memtree::AttachLeaf;
+use jiff::civil::Date;
 use serde_json::{Map, Value};
 
 /// Tools whose in-process mutator implements a real no-write `dry_run` path.
@@ -178,9 +178,7 @@ pub(crate) fn strict_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, 
 
 /// Accept an RFC 3339 timestamp or an ISO calendar date as a time bound.
 pub(crate) fn validate_time_bound(key: &str, value: &str) -> Result<(), AmError> {
-    if DateTime::parse_from_rfc3339(value).is_ok()
-        || NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
-    {
+    if value.parse::<jiff::Timestamp>().is_ok() || Date::strptime("%Y-%m-%d", value).is_ok() {
         Ok(())
     } else {
         Err(AmError::new(
@@ -385,3 +383,22 @@ mod write_tools_context_write_tests;
 #[cfg(test)]
 #[path = "write_tools_bool_arg_tests.rs"]
 mod write_tools_bool_arg_tests;
+
+#[cfg(test)]
+mod timestamp_bound_format_tests {
+    use crate::read_tools::normalize_time_bound;
+
+    #[test]
+    fn utc_bound_keeps_auto_si_fraction_groups() {
+        for (input, want) in [
+            ("2024-01-02T03:04:05+00:00", "2024-01-02T03:04:05Z"),
+            ("2024-01-02T03:04:05.120+00:00", "2024-01-02T03:04:05.120Z"),
+            (
+                "2024-01-02T03:04:05.123456+00:00",
+                "2024-01-02T03:04:05.123456Z",
+            ),
+        ] {
+            assert_eq!(normalize_time_bound("time", input).unwrap(), want);
+        }
+    }
+}

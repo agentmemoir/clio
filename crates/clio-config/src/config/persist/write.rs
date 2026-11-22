@@ -8,6 +8,8 @@
 //!
 //! ## Owns
 //! - Atomic temp-file-plus-rename writes with 0600 permissions
+//! - Temp files that are created new, so an entry already at the temp name is
+//!   refused instead of followed
 //! - The monotonic counter that keeps concurrent temp files distinct
 //! - `restrict_dir`, the owner-only directory rule
 //!
@@ -34,17 +36,29 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Write `contents` to `path` atomically, owner-only on Unix. The temp file
-/// lives beside the target so the final rename stays on one filesystem.
+/// lives beside the target so the final rename stays on one filesystem. The
+/// temp file is created new: an existing entry at that name, such as a planted
+/// symlink, is refused rather than followed and truncated.
 /// Crate-shared: the token store saves through the same writer.
 ///
 /// # Errors
-/// The temp file cannot be written, or the final rename fails (the temp file
-/// is removed before returning).
+/// The temp file cannot be created, written, or synced, or the final rename
+/// fails (the temp file is removed before returning).
 pub fn write_private_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     let tmp = temp_sibling(path);
-    write_private(&tmp, contents)?;
-    if let Err(e) = fs::rename(&tmp, path) {
-        let _ = fs::remove_file(&tmp);
+    write_private_atomic_to(path, &tmp, contents)
+}
+
+/// Write `contents` to `path` through the temp path `tmp`: create `tmp` new,
+/// then rename it onto `path`. `tmp` is removed only when the rename fails.
+///
+/// # Errors
+/// `AlreadyExists` when any entry already sits at `tmp`, including a symlink;
+/// any create, write, or sync error on the temp file; or the rename error.
+fn write_private_atomic_to(path: &Path, tmp: &Path, contents: &str) -> std::io::Result<()> {
+    create_new_private(tmp, contents)?;
+    if let Err(e) = fs::rename(tmp, path) {
+        let _ = fs::remove_file(tmp);
         return Err(e);
     }
     Ok(())
@@ -90,6 +104,57 @@ pub(super) fn write_private(path: &Path, contents: &str) -> std::io::Result<()> 
     fs::write(path, contents)
 }
 
+/// Create `path` as a new file and write `contents`, owner-only on Unix.
+///
+/// # Errors
+/// `AlreadyExists` when any entry already sits at `path`, including a symlink.
+/// `create_new` is `O_CREAT|O_EXCL`, so the open fails instead of following the
+/// entry and truncating its target. A write or sync error removes the new file.
+#[cfg(unix)]
+pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    let result = (|| -> std::io::Result<()> {
+        // `mode` only applies to a created file; force 0600 on the handle anyway.
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()
+    })();
+    if let Err(e) = result {
+        // Only this call can have created `path`, so only this call removes it.
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Create `path` as a new file and write `contents`.
+///
+/// # Errors
+/// `AlreadyExists` when any entry already sits at `path`, including a symlink.
+/// A write error removes the new file.
+#[cfg(not(unix))]
+pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    if let Err(e) = file.write_all(contents.as_bytes()) {
+        // Only this call can have created `path`, so only this call removes it.
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(e);
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 pub fn restrict_dir(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
@@ -98,3 +163,7 @@ pub fn restrict_dir(path: &Path) {
 
 #[cfg(not(unix))]
 pub fn restrict_dir(_path: &Path) {}
+
+#[cfg(test)]
+#[path = "write_tests.rs"]
+mod write_tests;

@@ -199,7 +199,7 @@ pub(crate) fn encode_lexical_document(
 ) -> Result<String, AmError> {
     Ok(crate::lexical_digest::keyed_terms(
         // Write path: creating the key here is expected, like any DEK ensure.
-        &kms.ensure_blind_index_key()?,
+        &*kms.ensure_blind_index_key()?,
         text,
     ))
 }
@@ -222,7 +222,7 @@ pub(crate) fn encode_lexical_query(
     query: &str,
 ) -> Result<String, AmError> {
     Ok(crate::lexical_digest::keyed_terms(
-        &kms.blind_index_key()?,
+        &*kms.blind_index_key()?,
         query,
     ))
 }
