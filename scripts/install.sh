@@ -14,6 +14,13 @@
 #
 #   CLIO_VERSION=v0.1.0 sh install.sh
 #
+# Signature: each release publishes checksums.txt and a detached RSA signature
+# over it, and this installer carries the public key in this same file. The
+# signature defeats a swapped asset or a swapped manifest. It does not defeat an
+# attacker who can also replace this installer, because the install command
+# fetches the installer from the same release channel and the key travels with
+# it.
+#
 # POSIX sh only: this runs under dash, busybox ash, and bash alike.
 
 set -eu
@@ -130,8 +137,11 @@ verify_manifest() {
 
     command -v openssl >/dev/null 2>&1 \
         || die "openssl is required to check the release signature, and it was not found. Install openssl and re-run."
+    if [ ! -f "$signature" ]; then
+        die "checksums.txt.sig is missing or is not a regular file, so this release cannot be verified. Nothing was installed."
+    fi
     [ -s "$signature" ] \
-        || die "the release signature for checksums.txt is missing or empty. The release is incomplete, so nothing was installed."
+        || die "checksums.txt.sig is empty, so this release cannot be verified. Nothing was installed."
 
     keyfile="$workdir/release-signing-key.pub.pem"
     printf '%s\n' "$CLIO_RELEASE_PUBKEY" > "$keyfile"
@@ -183,7 +193,7 @@ main() {
 
     log "downloading checksums signature"
     download "$release_url/checksums.txt.sig" "$workdir/checksums.txt.sig" \
-        || die "could not fetch the signature for checksums.txt for $VERSION"
+        || die "could not fetch checksums.txt.sig for $VERSION. This release may predate signed manifests, so nothing was installed."
 
     verify_manifest "$workdir/checksums.txt" "$workdir/checksums.txt.sig"
     log "signature ok"
@@ -235,6 +245,11 @@ release is wrong or the transfer was altered."
 }
 
 # The last line is the entry point. A test sources this file with
-# CLIO_INSTALL_LIB_ONLY=1 to call one function on its own, so the guard is the
-# only thing that may be conditional.
-[ "${CLIO_INSTALL_LIB_ONLY:-0}" = "1" ] || main "$@"
+# CLIO_INSTALL_LIB_ONLY=1 to call one function on its own, and that mode says so
+# on stderr so a wrapper that sets the variable cannot turn an install into a
+# silent no-op.
+if [ "${CLIO_INSTALL_LIB_ONLY:-0}" = "1" ]; then
+    log "CLIO_INSTALL_LIB_ONLY=1: library mode, so nothing was installed"
+else
+    main "$@"
+fi

@@ -61,7 +61,7 @@ scripts-check-coverage-policy:
 	python3 scripts/coverage_policy_check.py --self-test
 	python3 scripts/coverage_policy_check.py
 
-# Whether the gate installer tells the truth about a shim it just linked. A symlink that comes after the real tool on PATH never runs, and the installer used to print a success line for it. This pins the NOT ACTIVE message and the non-zero exit, with a controlled PATH so the answer is the same on any host. The third command covers the release installer: it refuses a `checksums.txt` whose RSA signature does not verify against the key built into `scripts/install.sh`, and refuses a missing or empty signature.
+# Whether the gate installer tells the truth about a shim it just linked. A symlink that comes after the real tool on PATH never runs, and the installer used to print a success line for it. This pins the NOT ACTIVE message and the non-zero exit, with a controlled PATH so the answer is the same on any host. The third command covers the release installer with a generated keypair swapped into a copy of the script: it drives `main` end to end against a fixture release, installs only when the signature verifies, and refuses a signature over other bytes or a missing, empty, or non-regular signature file. That key is not the tree key; the release job is what compares the signing secret with the key built into `scripts/install.sh`.
 scripts-check-gate-install:
 	python3 scripts/test_gate_install.py
 	python3 scripts/test_gate_install_profiles.py
