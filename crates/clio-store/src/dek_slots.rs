@@ -116,8 +116,8 @@ impl SlotStore {
         if let Some(slot) = self.lookup(subject_id)? {
             return active_key(slot, subject_id);
         }
-        let mut bytes = [0u8; KEY_LEN];
-        rand::rng().fill_bytes(&mut bytes);
+        let mut bytes = zeroize::Zeroizing::new([0u8; KEY_LEN]);
+        rand::rng().fill_bytes(&mut *bytes);
         self.db
             .insert_if_absent(subject_id, 1, &encode_key(&bytes))?;
         // The insert is conflict-safe, so a row always exists now: either ours
