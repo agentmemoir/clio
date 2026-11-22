@@ -22,6 +22,23 @@ REPO="${CLIO_REPO:-agentmemoir/clio}"
 VERSION="${CLIO_VERSION:-latest}"
 BIN_NAME="clio"
 
+# The release job signs checksums.txt with the matching private key, and this
+# key is the trust root for every install: the manifest and the asset come from
+# one download location, so the manifest's hashes alone prove only that both
+# files arrived intact, not that the release job wrote them. The key is public
+# and ships here on purpose.
+CLIO_RELEASE_PUBKEY='-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA3sDFW6I7yzZD9akixmkB
+Iy45Jjx+uRujk/6pAW5yylZ1L5touxNl86OEOV0HGwzoVTQxgyC3LGuNmTl1+rVg
+XxxpDEBHt2QocL4tIFVEOcF2vHtr6voQQU/o1lPTx4C3FwM5Z+coQtvGPxNwjsM4
+BXPNbmM7CmHYIrwhDoJXlgnG4nFf+dy0cl9baYZ4yb/nce5SOpQotZY7vStYezm/
+5hSD7t/MS40YSLpRAnNQ2Msb8onOfuyu+NXDRVVCEN45zVJlJrGnyKt9lLfAWf+x
+JlredGKqkmQYd2Iu7EczBFl14MDYUVd7GpCdYWokAnNt8mrZfTJEkVjVv9HmH4fi
+wMKWhZW2o7rpO7XwASbnZgn/6VYzdDsa5Of9Xdg4LCQaRQb57st7cHV/KMO1HNhv
+ZMFbLPYEQPe2d5Q0oM2B4Tp35HNqB5aYvdpkor9RJ2Ety1Ix53vdxttn2HfhIlD3
+kLJC3lmz0AgQ+w+852Jav1RoFDAsTgLjLWfQABhTIpz7AgMBAAE=
+-----END PUBLIC KEY-----'
+
 # Written to stderr so that `curl ... | sh` leaves nothing on stdout for a
 # caller who is redirecting it.
 log() { printf '%s\n' "$*" >&2; }
@@ -100,6 +117,28 @@ sha256_of() {
     fi
 }
 
+# --- signature ---------------------------------------------------------------
+
+# The manifest is fetched from the same place as the asset, so its hashes cannot
+# vouch for themselves. This verifies the detached RSA signature that the
+# release job makes over checksums.txt, using the key built into this file.
+# A failed or impossible verification stops the install: a release that cannot
+# be checked is not installed.
+verify_manifest() {
+    manifest="$1"
+    signature="$2"
+
+    command -v openssl >/dev/null 2>&1 \
+        || die "openssl is required to check the release signature, and it was not found. Install openssl and re-run."
+    [ -s "$signature" ] \
+        || die "the release signature for checksums.txt is missing or empty. The release is incomplete, so nothing was installed."
+
+    keyfile="$workdir/release-signing-key.pub.pem"
+    printf '%s\n' "$CLIO_RELEASE_PUBKEY" > "$keyfile"
+    openssl dgst -sha256 -verify "$keyfile" -signature "$signature" "$manifest" >/dev/null 2>&1 \
+        || die "the signature on checksums.txt does not match the key built into this installer. The manifest was changed, or it came from somewhere other than this release. Nothing was installed."
+}
+
 # --- main --------------------------------------------------------------------
 
 main() {
@@ -141,6 +180,13 @@ main() {
     log "downloading checksums"
     download "$release_url/checksums.txt" "$workdir/checksums.txt" \
         || die "could not fetch the checksums for $VERSION. Is there a release for this version?"
+
+    log "downloading checksums signature"
+    download "$release_url/checksums.txt.sig" "$workdir/checksums.txt.sig" \
+        || die "could not fetch the signature for checksums.txt for $VERSION"
+
+    verify_manifest "$workdir/checksums.txt" "$workdir/checksums.txt.sig"
+    log "signature ok"
 
     log "downloading $asset"
     download "$release_url/$asset.tar.gz" "$workdir/$asset.tar.gz" \
@@ -188,4 +234,7 @@ release is wrong or the transfer was altered."
     log "Next: $BIN_NAME setup"
 }
 
-main "$@"
+# The last line is the entry point. A test sources this file with
+# CLIO_INSTALL_LIB_ONLY=1 to call one function on its own, so the guard is the
+# only thing that may be conditional.
+[ "${CLIO_INSTALL_LIB_ONLY:-0}" = "1" ] || main "$@"

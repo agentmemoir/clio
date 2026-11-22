@@ -241,8 +241,10 @@ jobs:
       # The installer fetches this file over HTTPS and refuses a download whose
       # hash is absent from it. That catches a truncated transfer, a corrupted
       # proxy response, and an asset swapped for another target. It does not
-      # protect against someone who can publish to this repository: the trust
-      # root is GitHub plus TLS, and the hash file is signed by nobody.
+      # prove who wrote the file, so the next step signs it with the release
+      # key and the installer verifies that signature against the key it
+      # carries. The trust root is the key in install.sh, not GitHub plus TLS
+      # alone.
       - name: Checksum the archives
         run: |
           cd dist
@@ -251,11 +253,42 @@ jobs:
           chmod +x install.sh
           cat checksums.txt
 
+      # An unsigned release must not ship. The secret holds the private key that
+      # matches the public key in scripts/install.sh, and an empty secret stops
+      # the job here rather than publishing a manifest nobody can verify.
+      - name: Sign the checksum manifest
+        env:
+          # The key reaches the shell through the environment, so no expansion
+          # of its text can form a command.
+          SIGNING_KEY: ${{ secrets.CLIO_RELEASE_SIGNING_KEY }}
+        run: |
+          umask 077
+          keyfile="$(mktemp)"
+          trap 'rm -f "$keyfile"' EXIT
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::CLIO_RELEASE_SIGNING_KEY is not set, so checksums.txt cannot be signed. Add the release signing key to the repository secrets before tagging."
+            exit 1
+          fi
+          printf '%s\n' "$SIGNING_KEY" > "$keyfile"
+          openssl dgst -sha256 -sign "$keyfile" -out dist/checksums.txt.sig dist/checksums.txt
+          # Verify with the key the installer carries, read back from the
+          # published copy rather than from source, so a mismatch between the
+          # two fails here and not on a user's machine. The key sits inside a
+          # shell assignment, so the quote around it is trimmed here.
+          awk '/BEGIN PUBLIC KEY/,/END PUBLIC KEY/ {
+            sub(/^.*-----BEGIN PUBLIC KEY-----/, "-----BEGIN PUBLIC KEY-----")
+            sub(/-----END PUBLIC KEY-----.*$/, "-----END PUBLIC KEY-----")
+            print
+          }' dist/install.sh > dist/install-key.pub
+          openssl dgst -sha256 -verify dist/install-key.pub -signature dist/checksums.txt.sig dist/checksums.txt
+          rm -f dist/install-key.pub
+
       # A set missing one target would leave the installer unable to serve a
       # supported platform, and the failure would surface on a user's machine
       # rather than here.
       - name: Assert the asset set is complete
         run: |
+          test -s dist/checksums.txt.sig || { echo "::error::missing checksums.txt.sig"; exit 1; }
           for asset in \
             clio-aarch64-apple-darwin \
             clio-x86_64-unknown-linux-musl \
@@ -325,4 +358,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --notes-file release-notes.md \
-            dist/*.tar.gz dist/checksums.txt dist/install.sh
+            dist/*.tar.gz dist/checksums.txt dist/checksums.txt.sig dist/install.sh
