@@ -394,3 +394,39 @@ fn a_fifo_at_the_store_path_is_refused_without_hanging() {
     assert!(err.message.contains("not a regular file"), "{err}");
     let _ = fs::remove_file(&path);
 }
+
+#[cfg(unix)]
+#[test]
+fn the_owner_check_accepts_a_store_the_running_user_owns() {
+    let path = tmp("owner-match");
+    save_auth_tokens(&path, &[sample_record("a")]).expect("save");
+    let meta = fs::metadata(&path).expect("meta");
+    super::owner_only_refusal(&path, &meta, effective_uid()).expect("the store's owner is us");
+    let _ = fs::remove_file(&path);
+}
+
+/// A uid the process does not have, so the refusal is reachable without a
+/// second account.
+#[cfg(unix)]
+#[test]
+fn the_owner_check_refuses_a_store_owned_by_another_user() {
+    let path = tmp("owner-foreign");
+    save_auth_tokens(&path, &[sample_record("a")]).expect("save");
+    let meta = fs::metadata(&path).expect("meta");
+    let err = super::owner_only_refusal(&path, &meta, effective_uid().wrapping_add(1))
+        .expect_err("a foreign owner must be refused");
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(err.message.contains(&path.display().to_string()), "{err}");
+    assert!(err.message.contains("owned by a user other than"), "{err}");
+    let _ = fs::remove_file(&path);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_store_path_under_a_regular_file_is_refused_not_read_as_empty() {
+    let parent = tmp("regular-parent");
+    fs::write(&parent, "x").expect("write");
+    let err = load_auth_tokens(&parent.join(AUTH_TOKEN_FILE_NAME)).expect_err("ENOTDIR");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    let _ = fs::remove_file(&parent);
+}

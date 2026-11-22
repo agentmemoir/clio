@@ -18,7 +18,7 @@
 //!
 //! ## Does not own
 //! - The writer lock itself (see `auth_tokens_lock`)
-//! - Any runtime reader: no transport loads the store in this phase
+//! - Any runtime reader: the transports load the store through this module
 //! - The deployment overlay or its sealing (see `config::persist`)
 //! - The CLI rendering of these records (see the `clio` auth surface)
 //!
@@ -138,7 +138,8 @@ pub fn load_auth_tokens(path: &Path) -> Result<Vec<AuthTokenRecord>, AmError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(unreadable(path, &e)),
     };
-    owner_only_refusal(path, &file.metadata().map_err(|e| unreadable(path, &e))?)?;
+    let meta = file.metadata().map_err(|e| unreadable(path, &e))?;
+    owner_only_refusal(path, &meta, effective_uid())?;
     let mut text = String::new();
     file.read_to_string(&mut text)
         .map_err(|e| unreadable(path, &e))?;
@@ -355,12 +356,14 @@ fn unreadable(path: &Path, error: &std::io::Error) -> AmError {
     )
 }
 
-/// The effective uid of the process, reached through `rustix` because this
-/// crate may not call `geteuid` itself.
+/// The effective uid of the process, reached through `rustix`; zero off Unix.
 #[cfg(unix)]
-#[must_use]
 fn effective_uid() -> u32 {
     rustix::process::geteuid().as_raw()
+}
+#[cfg(not(unix))]
+fn effective_uid() -> u32 {
+    0
 }
 
 /// Refuse a store that is not a regular file, is owned by another user, or
@@ -371,7 +374,7 @@ fn effective_uid() -> u32 {
 /// [`ErrorCode::Forbidden`] naming the path and the reason; never the host's
 /// mode value.
 #[cfg(unix)]
-fn owner_only_refusal(path: &Path, meta: &std::fs::Metadata) -> Result<(), AmError> {
+fn owner_only_refusal(path: &Path, meta: &std::fs::Metadata, euid: u32) -> Result<(), AmError> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     if !meta.is_file() {
         return Err(AmError::new(
@@ -382,7 +385,7 @@ fn owner_only_refusal(path: &Path, meta: &std::fs::Metadata) -> Result<(), AmErr
             ),
         ));
     }
-    if meta.uid() != effective_uid() {
+    if meta.uid() != euid {
         return Err(AmError::new(
             ErrorCode::Forbidden,
             format!(
@@ -408,7 +411,7 @@ fn owner_only_refusal(path: &Path, meta: &std::fs::Metadata) -> Result<(), AmErr
 /// Non-Unix platforms have no mode bits to check; the owner-only rule is a
 /// no-op there, matching `persist::restrict_dir`.
 #[cfg(not(unix))]
-fn owner_only_refusal(_path: &Path, _meta: &std::fs::Metadata) -> Result<(), AmError> {
+fn owner_only_refusal(_path: &Path, _meta: &std::fs::Metadata, _euid: u32) -> Result<(), AmError> {
     Ok(())
 }
 
