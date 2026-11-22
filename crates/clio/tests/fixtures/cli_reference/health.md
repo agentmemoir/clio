@@ -11,8 +11,7 @@ clio health
 
 ## Description
 
-Prints the machine-readable health JSON: name and version only.
-It opens no database and checks no service.
+Prints the machine-readable health JSON: name and version only. It opens no database and checks no service.
 
 ## Global options
 
