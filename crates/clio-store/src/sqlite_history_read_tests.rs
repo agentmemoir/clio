@@ -52,8 +52,18 @@ fn task_and_failure_reads_round_trip() {
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].id, task.id);
 
-    let listed = store.list_tasks_impl(&bank, 10).unwrap();
+    let listed = store.list_tasks_impl(&bank, None, 10).unwrap();
     assert_eq!(listed.len(), 1);
+    let scoped = store
+        .list_tasks_for_subject(&bank, "subject-1", 10)
+        .unwrap();
+    assert_eq!(scoped.len(), 1);
+    assert!(
+        store
+            .list_tasks_for_subject(&bank, "subject-2", 10)
+            .unwrap()
+            .is_empty()
+    );
     assert!(store.get_task_impl(&bank, "missing").unwrap().is_none());
     assert!(
         store
@@ -86,12 +96,22 @@ fn task_and_failure_reads_round_trip() {
     assert_eq!(for_task.len(), 1);
     assert_eq!(for_task[0].id, failure.id);
 
-    let all = store.list_failures_impl(&bank, 10).unwrap();
+    let all = store.list_failures_impl(&bank, None, 10).unwrap();
     assert_eq!(all.len(), 1);
+    let scoped = store
+        .list_failures_for_subject(&bank, "subject-1", 10)
+        .unwrap();
+    assert_eq!(scoped.len(), 1);
+    assert!(
+        store
+            .list_failures_for_subject(&bank, "subject-2", 10)
+            .unwrap()
+            .is_empty()
+    );
     assert!(store.get_failure_impl(&bank, "missing").unwrap().is_none());
     assert!(
         store
-            .list_failures_impl(&unique("other-bank"), 10)
+            .list_failures_impl(&unique("other-bank"), None, 10)
             .unwrap()
             .is_empty()
     );

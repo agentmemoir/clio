@@ -69,12 +69,24 @@ impl FamilyLinkRead for SplitFamilyLinkRead<'_> {
         self.store.list_triples(bank_id)
     }
 
-    fn list_tasks(&self, bank_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError> {
-        self.history.list_tasks(bank_id, limit)
+    fn list_tasks(
+        &self,
+        bank_id: &str,
+        subject_id: &str,
+        limit: usize,
+    ) -> Result<Vec<TaskRecord>, AmError> {
+        self.history
+            .list_tasks_for_subject(bank_id, subject_id, limit)
     }
 
-    fn list_failures(&self, bank_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError> {
-        self.history.list_failures(bank_id, limit)
+    fn list_failures(
+        &self,
+        bank_id: &str,
+        subject_id: &str,
+        limit: usize,
+    ) -> Result<Vec<FailureRecord>, AmError> {
+        self.history
+            .list_failures_for_subject(bank_id, subject_id, limit)
     }
 
     fn list_beliefs(&self, bank_id: &str) -> Result<Vec<BeliefObject>, AmError> {
@@ -148,10 +160,7 @@ pub(crate) fn build_subject_selection(
     })
 }
 
-/// The subject's linked records: triples carried by the subject's own items,
-/// plus the task, failure, and belief rows whose subject column names the
-/// subject. Bank-wide reads are filtered before masking, so no other
-/// subject's record enters the payload.
+/// The subject's linked records: triples carried by the subject's own items, plus the task, failure, and belief rows whose subject column names the subject. Each history read is scoped to the subject, so its cap counts the subject's own rows.
 fn collect_subject_links(
     args: &ExportArgs<'_>,
     bank: &str,
@@ -167,14 +176,13 @@ fn collect_subject_links(
         .filter(|triple| subject_items.contains(&triple.item_id))
         .collect();
     mask_triples(&mut entities.triples, mode);
-    let mut task_rows = args.history.list_tasks(bank, HISTORY_LIMIT)?;
+    let history = args.history;
+    let mut task_rows = history.list_tasks_for_subject(bank, subject_id, HISTORY_LIMIT)?;
     let tasks = hit_history_limit(task_rows.len());
-    task_rows.retain(|task| task.subject_id == subject_id);
     mask_tasks(&mut task_rows, mode);
     entities.tasks = task_rows;
-    let mut failure_rows = args.history.list_failures(bank, HISTORY_LIMIT)?;
+    let mut failure_rows = history.list_failures_for_subject(bank, subject_id, HISTORY_LIMIT)?;
     let failures = hit_history_limit(failure_rows.len());
-    failure_rows.retain(|failure| failure.subject_id == subject_id);
     mask_failures(&mut failure_rows, mode);
     entities.failures = failure_rows;
     let mut beliefs: Vec<BeliefObject> = args

@@ -39,7 +39,7 @@ use clio_store::{DestinationCustodyStore, LocalEventStore};
 use clio_types::{Actor, AmError, ErrorCode, OpContext};
 use std::path::Path;
 
-/// Upper bound for bank-wide history reads.
+/// Upper bound for one bounded history read, whether it spans a whole bank or one subject.
 pub(crate) const HISTORY_LIMIT: usize = 10_000;
 
 /// Which bounded history reads returned their full row cap (may be truncated).
