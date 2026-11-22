@@ -23,8 +23,8 @@
 //! Keep this module focused on record-write tool declarations.
 
 use crate::schema_defs::{
-    EPISTEMIC_KINDS, SOURCE_TYPES, ToolDef, UPDATE_RULES, arr, b, bank_actor, context_prop, en, num,
-    s,
+    EPISTEMIC_KINDS, SOURCE_TYPES, ToolDef, UPDATE_RULES, arr, b, bank_actor, context_prop, en,
+    num, s,
 };
 
 /// Persona, history, triple, and belief record-write tool declarations.

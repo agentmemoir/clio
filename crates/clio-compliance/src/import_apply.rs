@@ -310,10 +310,7 @@ impl<'a> Planner<'a> {
             .filter(|reason| is_exact_duplicate_reason(reason))
         {
             self.skip += 1;
-            self.note(format!(
-                "item {} restore skipped: {reason}",
-                it.id.as_str()
-            ));
+            self.note(format!("item {} restore skipped: {reason}", it.id.as_str()));
         } else {
             self.reject_reason(decision.rejection_reason.as_deref());
         }

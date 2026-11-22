@@ -319,7 +319,13 @@ fn the_removed_allow_duplicate_flag_is_an_unknown_flag() {
     let (_dir, db) = scenario("removed-flag");
     let output = run(
         &db,
-        &["remember", FACT, "--category", "persona", "--allow-duplicate"],
+        &[
+            "remember",
+            FACT,
+            "--category",
+            "persona",
+            "--allow-duplicate",
+        ],
     );
 
     assert_eq!(
