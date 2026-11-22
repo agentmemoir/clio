@@ -1,0 +1,1 @@
+A Spanish September date written "septiembre" or "Septiembre" now grounds: the month-name span lookup uses the whole original window, so every alias in the month table maps back to its full source token. [Issue #683](https://github.com/agentmemoir/clio/issues/683)

@@ -161,7 +161,9 @@ fn month_name_token(chars: &[char], start: usize) -> Option<(usize, String)> {
                 continue;
             }
             // Map localized prefix length back onto the original UTF-8 window.
-            let max_orig = (end - start).min(take + 6);
+            // An alias can shrink the text, so the original prefix may be
+            // longer than the normalized one by more than any fixed slack.
+            let max_orig = end - start;
             for orig_take in take..=max_orig {
                 let orig: String = chars[start..start + orig_take].iter().collect();
                 let loc = localize_months(orig.trim_end());
@@ -395,6 +397,28 @@ mod tests {
         let value = serde_json::json!("2026-03-04");
         let err = match_date("on 99/99/2026", &value, &VerifyConfig::default())
             .expect_err("out-of-range numeric parts must not locate a span");
+        assert_eq!(err, "no locatable date span parses to snapshot value");
+    }
+
+    #[test]
+    fn spanish_september_month_name_in_source_matches_snapshot() {
+        let value = serde_json::json!("2026-09-03");
+        for (source, span) in [
+            ("on septiembre 3, 2026", "septiembre 3, 2026"),
+            ("on Septiembre 3, 2026", "Septiembre 3, 2026"),
+        ] {
+            let (start, end) = match_date(source, &value, &VerifyConfig::default())
+                .expect("a Spanish month-name span must match");
+            assert_eq!(&source[start..end], span);
+            assert_eq!(&source[start..start + 10], &span[..10]);
+        }
+    }
+
+    #[test]
+    fn spanish_september_span_does_not_match_another_month() {
+        let value = serde_json::json!("2026-10-03");
+        let err = match_date("on septiembre 3, 2026", &value, &VerifyConfig::default())
+            .expect_err("a September span must not satisfy an October snapshot");
         assert_eq!(err, "no locatable date span parses to snapshot value");
     }
 
