@@ -1,0 +1,1 @@
+A Spanish September date written "septiembre" or "Septiembre" now grounds, and the month-name span lookup maps those aliases to their full source span, so a month token followed by a two-digit day is no longer cut short. [Issue #683](https://github.com/agentmemoir/clio/issues/683)
