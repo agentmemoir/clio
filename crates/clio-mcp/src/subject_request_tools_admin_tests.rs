@@ -97,7 +97,11 @@ fn a_non_administrative_credential_may_not_close_a_request() {
             "{actor:?}: {denied}"
         );
     }
-    assert_eq!(status(&s, request), before, "the stored request is unchanged");
+    assert_eq!(
+        status(&s, request),
+        before,
+        "the stored request is unchanged"
+    );
 }
 
 #[test]
