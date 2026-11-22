@@ -12,7 +12,8 @@
 //!   `created_at`) and its serialization
 //! - Label, actor, and bank validation; duplicate-label and unknown-label rules
 //! - Secret generation (32 CSPRNG bytes, base64url) and the SHA-256 digest rule
-//! - The owner-only permission check on load and the owner-only atomic save
+//! - The owner-only permission check on load, made on the descriptor the load
+//!   reads from, and the owner-only atomic save
 //! - The store-file path resolution (override env, then the XDG default)
 //!
 //! ## Does not own
@@ -32,10 +33,10 @@
 //! # Fail-closed reads
 //!
 //! A missing file is an empty store for the management verbs; everything else
-//! that is not a valid store is refused: a file another user could read, an
-//! empty or truncated file, malformed JSON, an unknown field, an invalid
-//! record, or a repeated label. A refusal names the path and the reason and
-//! never persists anything.
+//! that is not a valid store is refused: a file another user could read, a
+//! symlink, a file that is not a regular file, an empty or truncated file,
+//! malformed JSON, an unknown field, an invalid record, or a repeated label. A
+//! refusal names the path and the reason and never persists anything.
 //!
 //! # Concurrent writers
 //!
@@ -52,6 +53,7 @@ use base64::Engine;
 use clio_types::civil_from_days;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub use crate::auth_tokens_lock::{ExclusiveHold, lock_file_path};
@@ -114,19 +116,31 @@ pub fn resolve_token_store_path_with(
 /// state is refused (see the module docs).
 ///
 /// # Errors
-/// [`ErrorCode::Forbidden`] when the file is not owner-only,
-/// [`ErrorCode::ConfigCorrupt`] when it cannot be read, parsed, or validated.
+/// [`ErrorCode::Forbidden`] when the file is not a regular file or is not
+/// owner-only, [`ErrorCode::ConfigCorrupt`] when it cannot be opened, read,
+/// parsed, or validated.
 pub fn load_auth_tokens(path: &Path) -> Result<Vec<AuthTokenRecord>, AmError> {
-    if !path.exists() {
-        return Ok(Vec::new());
+    // One open: the checks below and the bytes they allow are the same file,
+    // because none of them is a second lookup by path.
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // `O_NOFOLLOW` refuses a store that is a link instead of reading what it
+        // points at; `O_NONBLOCK` keeps the open from waiting forever on a FIFO,
+        // which is then refused by the file-type check on the descriptor.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    owner_only_refusal(path)?;
-    let text = std::fs::read_to_string(path).map_err(|e| {
-        AmError::new(
-            ErrorCode::ConfigCorrupt,
-            format!("failed to read token store {}: {e}", path.display()),
-        )
-    })?;
+    let mut file = match options.open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(unreadable(path, &e)),
+    };
+    owner_only_refusal(path, &file.metadata().map_err(|e| unreadable(path, &e))?)?;
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .map_err(|e| unreadable(path, &e))?;
     let records: Vec<AuthTokenRecord> = serde_json::from_str(&text).map_err(|e| {
         AmError::new(
             ErrorCode::ConfigCorrupt,
@@ -331,39 +345,51 @@ pub fn digest_hex(secret: &str) -> String {
     out
 }
 
-/// Refuse a store file whose mode grants anything to group or other.
+/// The [`ErrorCode::ConfigCorrupt`] refusal for a store that exists but cannot
+/// be opened or read, naming the path and the host's reason.
+fn unreadable(path: &Path, error: &std::io::Error) -> AmError {
+    AmError::new(
+        ErrorCode::ConfigCorrupt,
+        format!("failed to read token store {}: {error}", path.display()),
+    )
+}
+
+/// Refuse a store that is not a regular file, or whose mode grants anything to
+/// group or other. `meta` is the descriptor's, so it describes the file the
+/// caller is about to read.
 ///
 /// # Errors
-/// [`ErrorCode::Forbidden`] naming the path; never the host's mode value.
+/// [`ErrorCode::Forbidden`] naming the path and the reason; never the host's
+/// mode value.
 #[cfg(unix)]
-fn owner_only_refusal(path: &Path) -> Result<(), AmError> {
+fn owner_only_refusal(path: &Path, meta: &std::fs::Metadata) -> Result<(), AmError> {
     use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(path)
-        .map_err(|e| {
-            AmError::new(
-                ErrorCode::ConfigCorrupt,
-                format!("failed to read token store {}: {e}", path.display()),
-            )
-        })?
-        .permissions()
-        .mode();
-    if mode.trailing_zeros() >= 6 {
-        return Ok(());
+    if !meta.is_file() {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            format!(
+                "token store {}: refused because it is not a regular file",
+                path.display()
+            ),
+        ));
     }
-    Err(AmError::new(
-        ErrorCode::Forbidden,
-        format!(
-            "token store {}: refused because it is not owner-only; \
-             restrict it to the owner (0600) and run again",
-            path.display()
-        ),
-    ))
+    if meta.permissions().mode() & 0o077 != 0 {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            format!(
+                "token store {}: refused because it is not owner-only; \
+                 restrict it to the owner (0600) and run again",
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Non-Unix platforms have no mode bits to check; the owner-only rule is a
 /// no-op there, matching `persist::restrict_dir`.
 #[cfg(not(unix))]
-fn owner_only_refusal(_path: &Path) -> Result<(), AmError> {
+fn owner_only_refusal(_path: &Path, _meta: &std::fs::Metadata) -> Result<(), AmError> {
     Ok(())
 }
 
