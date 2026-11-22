@@ -30,7 +30,7 @@
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
 use crate::cli_read::{base_args, no_positionals, one_positional, parse_unit_f64, validate_choice};
-use crate::cli_write_duplicate::{allow_duplicate_arg, remember_refusal};
+use crate::cli_write_duplicate::remember_refusal;
 use crate::cli_write_group::{Refusal, WriteCall, WriteGroup, batch_preview_refusal};
 use crate::cli_write_source_type::source_type_arg;
 use clio_types::{CONTEXT_MAX_BYTES, ErrorCode, SemanticCategory, validate_context};
@@ -103,14 +103,6 @@ fn remember_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     } else {
         "store"
     };
-    let mut args = args;
-    // `--allow-duplicate` waives the exact-duplicate rejection only; every other
-    // gate still runs. A dry run has nothing to waive, so it is dropped there.
-    if tool == "store"
-        && let Some(allow) = allow_duplicate_arg(parsed)
-    {
-        args.insert("allow_duplicate".into(), allow);
-    }
     Ok(WriteCall::Tool {
         tool,
         args: Value::Object(args),

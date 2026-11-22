@@ -102,12 +102,12 @@ fn remember_matches_the_registered_usage_and_parser() {
     let spec = record("remember");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--allow-duplicate] [--dry-run] [--output json|text]\n       --context records where the memory came from, such as a conversation type or workflow stage; it is not searchable and recall does not match on it, so put anything you want to find later in TEXT. It is at most 4096 UTF-8 bytes, rejected when empty or oversized, never truncated\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
+        "usage: clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--dry-run] [--output json|text]\n       --context records where the memory came from, such as a conversation type or workflow stage; it is not searchable and recall does not match on it, so put anything you want to find later in TEXT. It is at most 4096 UTF-8 bytes, rejected when empty or oversized, never truncated\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
         "remember full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--allow-duplicate] [--dry-run] [--output json|text]",
+        "clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--dry-run] [--output json|text]",
         "remember usage line"
     );
     assert_eq!(
@@ -128,7 +128,7 @@ fn remember_matches_the_registered_usage_and_parser() {
     );
     assert_eq!(
         spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "allow-duplicate", "dry-run"]
+        ["no-input", "yes", "dry-run"]
     );
     assert_eq!(spec.required_flags(), ["category"]);
     assert_eq!(spec.summary, "", "the catalog row rendered no description");
