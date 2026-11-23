@@ -14,7 +14,7 @@
 //! - The positive control: the same tree without the swap still delivers
 //!
 //! ## Does not own
-//! - The delivery sequence under test (`export_custody` owns it)
+//! - The delivery sequence that reaches this module (`export_custody` owns it)
 //! - The scratch fixture (`export_custody_tests` owns it, shared here)
 //!
 //! ## Boundary
@@ -26,8 +26,9 @@
 
 #![cfg(unix)]
 
-use super::DeliveryFailure;
-use super::export_custody_tests::Scratch;
+use crate::export_custody::DeliveryFailure;
+use crate::export_custody::attempt_delivery;
+use crate::export_custody::export_custody_tests::Scratch;
 
 /// The scratch root, its real `nested` directory, and the outside directory the
 /// swap would redirect a re-resolved link into.
@@ -47,11 +48,14 @@ impl Tree {
         let outside = scratch.root.join("outside");
         std::fs::create_dir_all(&outside).expect("create outside");
         let destination = root.join("nested").join("out.bin");
-        (scratch, Self {
-            root,
-            outside,
-            destination,
-        })
+        (
+            scratch,
+            Self {
+                root,
+                outside,
+                destination,
+            },
+        )
     }
 
     /// Swap the real `nested` directory for a link to `outside`: exactly the
@@ -77,7 +81,7 @@ impl Tree {
 fn an_ancestor_swap_is_refused_and_the_outside_directory_stays_empty() {
     let (_scratch, tree) = Tree::new();
     tree.swap_nested_for_a_link();
-    let result = super::attempt_delivery(&tree.destination, "act-swap", b"payload", Some(&tree.root));
+    let result = attempt_delivery(&tree.destination, "act-swap", b"payload", Some(&tree.root));
     assert!(
         matches!(result, Err(DeliveryFailure::BeforeWrite(_))),
         "the walk fails closed on the swapped ancestor"
@@ -94,7 +98,12 @@ fn an_ancestor_swap_is_refused_and_the_outside_directory_stays_empty() {
 #[test]
 fn a_nested_destination_with_a_trusted_root_lands_inside_it() {
     let (_scratch, tree) = Tree::new();
-    let result = super::attempt_delivery(&tree.destination, "act-nested", b"payload", Some(&tree.root));
+    let result = attempt_delivery(
+        &tree.destination,
+        "act-nested",
+        b"payload",
+        Some(&tree.root),
+    );
     assert!(result.is_ok(), "the nested destination is written");
     assert_eq!(
         std::fs::read(&tree.destination).expect("read the destination"),

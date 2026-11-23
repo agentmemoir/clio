@@ -416,10 +416,6 @@ fn attempt_delivery(
 mod export_custody_tests;
 
 #[cfg(test)]
-#[path = "export_custody_swap_tests.rs"]
-mod export_custody_swap_tests;
-
-#[cfg(test)]
 #[path = "export_custody_manifest_tests.rs"]
 mod export_custody_manifest_tests;
 

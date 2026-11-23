@@ -131,9 +131,7 @@ fn confined_dir(root: &Path, destination: &Path) -> Result<OwnedFd, DeliveryFail
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
     )
-    .map_err(|err| {
-        DeliveryFailure::BeforeWrite(errno_error("open the export root", root, err))
-    })?;
+    .map_err(|err| DeliveryFailure::BeforeWrite(errno_error("open the export root", root, err)))?;
     for name in names {
         dir = openat(
             &dir,
@@ -183,3 +181,7 @@ fn relative_parent(root: &Path, destination: &Path) -> Result<Vec<OsString>, Del
 fn before_write(code: ErrorCode, message: &str) -> DeliveryFailure {
     DeliveryFailure::BeforeWrite(AmError::new(code, message))
 }
+
+#[cfg(test)]
+#[path = "export_custody_link_tests.rs"]
+mod export_custody_link_tests;
