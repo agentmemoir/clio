@@ -54,7 +54,7 @@ chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 # X25519 key agreement for the readable-export seal. The operator supplies a
 # 32-byte public key as base64 text, and the matching secret key never enters
 # Clio.
-x25519-dalek = "2"
+x25519-dalek = "3"
 # Stretches the export seal key out of an X25519 shared secret. HKDF-SHA256
 # binds the ephemeral and recipient public keys through the salt.
 hkdf = "0.13"
