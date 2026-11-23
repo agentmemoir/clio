@@ -126,7 +126,7 @@ fn a_recorded_store_disagreeing_with_the_flag_is_refused() {
 
     let err = generate(&get, Some(KeySource::Keystore)).expect_err("a disagreement is refused");
 
-    assert!(err.message.contains("already recorded"), "{}", err.message);
+    assert!(err.message.contains("already recorded"), "the recorded store must be reported");
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn a_refused_rotation_records_no_store_choice() {
     let err = generate(&get, Some(KeySource::Keystore))
         .expect_err("a second copy of the same secret is refused");
 
-    assert!(err.message.contains("already exists"), "{}", err.message);
+    assert!(err.message.contains("already exists"), "the refusal must report an existing key");
     assert!(dir.key().exists(), "a refused rotation touches nothing");
     assert_eq!(
         recorded_source(&get).expect("read"),

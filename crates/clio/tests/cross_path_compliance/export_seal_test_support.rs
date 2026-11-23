@@ -49,7 +49,7 @@ pub(crate) fn export_seal_public() -> [u8; 32] {
 /// A body without the seal magic, or one too short to hold its header, returns
 /// a clear error instead of panicking on a slice.
 pub(crate) fn open_export_seal(sealed: &[u8]) -> Result<Vec<u8>, String> {
-    use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+    use chacha20poly1305::aead::{Aead, Key, KeyInit, Payload};
     use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 
     let Some(body) = sealed.strip_prefix(EXPORT_SEAL_MAGIC) else {
@@ -68,7 +68,7 @@ pub(crate) fn open_export_seal(sealed: &[u8]) -> Result<Vec<u8>, String> {
     salt[..EPHEMERAL_LEN].copy_from_slice(&ephemeral);
     salt[EPHEMERAL_LEN..].copy_from_slice(&recipient);
     let shared = x25519_dalek::x25519(export_seal_secret(), ephemeral);
-    let mut key = [0u8; 32];
+    let mut key = Key::<XChaCha20Poly1305>::default();
     hkdf::Hkdf::<sha2::Sha256>::new(Some(&salt), &shared)
         .expand(b"clio-subject-export-seal-v1", &mut key)
         .map_err(|_| "sealed export key length".to_owned())?;
@@ -78,7 +78,7 @@ pub(crate) fn open_export_seal(sealed: &[u8]) -> Result<Vec<u8>, String> {
     aad.extend_from_slice(&ephemeral);
     aad.extend_from_slice(&recipient);
 
-    XChaCha20Poly1305::new((&key).into())
+    XChaCha20Poly1305::new(&key)
         .decrypt(
             &XNonce::from(nonce),
             Payload {

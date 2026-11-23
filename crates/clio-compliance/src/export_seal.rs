@@ -37,7 +37,7 @@
 //! recipient's X25519 secret key opens it, and Clio keeps no part of that key.
 
 use base64::Engine as _;
-use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::aead::{Aead, Key, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use clio_types::{AmError, ErrorCode};
 use hkdf::Hkdf;
@@ -74,9 +74,7 @@ pub(crate) fn seal_to_recipient(bytes: &[u8], recipient: &str) -> Result<Vec<u8>
         return Err(low_order_recipient());
     }
 
-    let mut salt = [0u8; PUBLIC_KEY_LEN * 2];
-    salt[..PUBLIC_KEY_LEN].copy_from_slice(&ephemeral_public);
-    salt[PUBLIC_KEY_LEN..].copy_from_slice(&recipient_public);
+    let salt = [ephemeral_public, recipient_public].concat();
     let key = derive_key(&shared, &salt);
 
     let mut aad = Vec::with_capacity(MAGIC.len() + PUBLIC_KEY_LEN * 2);
@@ -85,7 +83,7 @@ pub(crate) fn seal_to_recipient(bytes: &[u8], recipient: &str) -> Result<Vec<u8>
     aad.extend_from_slice(&recipient_public);
 
     let nonce: [u8; NONCE_LEN] = rand::random();
-    let cipher = XChaCha20Poly1305::new((&key).into());
+    let cipher = XChaCha20Poly1305::new(&key);
     // XChaCha20Poly1305 encryption cannot fail for a valid key and nonce; the
     // only documented failure is a plaintext over 256 GiB.
     let ciphertext = cipher
@@ -132,8 +130,8 @@ fn low_order_recipient() -> AmError {
 }
 
 /// Derive the 32-byte seal key with HKDF-SHA256.
-fn derive_key(shared: &[u8; PUBLIC_KEY_LEN], salt: &[u8]) -> [u8; PUBLIC_KEY_LEN] {
-    let mut key = [0u8; PUBLIC_KEY_LEN];
+fn derive_key(shared: &[u8; PUBLIC_KEY_LEN], salt: &[u8]) -> Key<XChaCha20Poly1305> {
+    let mut key = Key::<XChaCha20Poly1305>::default();
     Hkdf::<Sha256>::new(Some(salt), shared)
         .expand(KEY_INFO, &mut key)
         .expect("32 bytes is a valid HKDF-SHA256 output length");
