@@ -19,7 +19,7 @@
 use std::path::Path;
 
 use base64::Engine as _;
-use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::aead::{Aead, Key, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -65,7 +65,7 @@ pub(crate) fn open_sealed(sealed: &[u8]) -> Result<Vec<u8>, String> {
     let mut salt = [0u8; 64];
     salt[..32].copy_from_slice(&ephemeral);
     salt[32..].copy_from_slice(&x25519(test_secret(), X25519_BASEPOINT_BYTES));
-    let mut key = [0u8; 32];
+    let mut key = Key::<XChaCha20Poly1305>::default();
     let shared = x25519(test_secret(), ephemeral);
     Hkdf::<Sha256>::new(Some(&salt), &shared)
         .expand(b"clio-subject-export-seal-v1", &mut key)
@@ -76,7 +76,7 @@ pub(crate) fn open_sealed(sealed: &[u8]) -> Result<Vec<u8>, String> {
     aad.extend_from_slice(&ephemeral);
     aad.extend_from_slice(&salt[32..]);
 
-    XChaCha20Poly1305::new((&key).into())
+    XChaCha20Poly1305::new(&key)
         .decrypt(
             &XNonce::from(nonce),
             Payload {
