@@ -133,6 +133,7 @@ pub(crate) fn spec<'a>(id: &'a str, destination: &'a Path, staging: &'a Path) ->
         action_id: id,
         destination,
         staging_dir: staging,
+        root: None,
         custody_owner: "clio",
         required_action: "delivery",
         now: NOW,

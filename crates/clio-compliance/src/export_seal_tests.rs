@@ -218,6 +218,7 @@ fn readable_export_records_the_opt_in_event() {
             controls: &controls,
             action_id: "act-seal",
             staging_dir: &staging,
+            root: None,
             custody_owner: "clio",
             required_action: "delivery",
         }),

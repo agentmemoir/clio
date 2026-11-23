@@ -96,6 +96,7 @@ pub(super) fn spec<'a>(
         action_id,
         destination,
         staging_dir,
+        root: None,
         custody_owner: "clio",
         required_action: "delivery",
         now: NOW,
