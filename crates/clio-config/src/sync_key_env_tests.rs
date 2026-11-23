@@ -177,8 +177,14 @@ fn a_refused_keystore_generation_leaves_the_key_file_and_the_record_alone() {
     // builds is never read or written.
     let err = generate(&env, Some(KeySource::Keystore)).expect_err("a file key exists");
 
-    assert!(err.message.contains("already exists"), "the refusal must report an existing key");
-    assert!(err.message.contains("key file"), "the refusal must name the key file");
+    assert!(
+        err.message.contains("already exists"),
+        "the refusal must report an existing key"
+    );
+    assert!(
+        err.message.contains("key file"),
+        "the refusal must name the key file"
+    );
     assert!(
         recorded_source(&env)
             .expect("read the record back")

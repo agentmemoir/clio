@@ -139,8 +139,14 @@ fn a_missing_host_is_a_configuration_failure_and_is_not_retried() {
     // The driver's own wording, and the reason under it: an operator reading
     // "invalid configuration: both host and hostaddr are missing" knows what to
     // type next, and reading only the first half would not tell them.
-    assert!(reason.contains("invalid configuration"), "the driver must name the invalid configuration");
-    assert!(reason.contains("missing"), "the reason must name what is missing");
+    assert!(
+        reason.contains("invalid configuration"),
+        "the driver must name the invalid configuration"
+    );
+    assert!(
+        reason.contains("missing"),
+        "the reason must name what is missing"
+    );
     assert_eq!(report.made, 1, "a bad address must not be retried");
 }
 
@@ -181,7 +187,10 @@ fn a_refused_socket_is_retried_and_the_last_reason_is_reported() {
     assert_eq!(report.made, 3, "a refused socket must be retried");
     assert_eq!(report.last, reason, "the last reason is the one reported");
     // The reason is the one an operator can act on: the server is not there.
-    assert!(reason.contains("postgres connect"), "the reason must name the postgres connect failure");
+    assert!(
+        reason.contains("postgres connect"),
+        "the reason must name the postgres connect failure"
+    );
 }
 
 #[test]
@@ -224,7 +233,10 @@ fn a_refused_socket_reaches_the_operator_with_the_attempt_count() {
         reason.contains("gave up after 3 attempts"),
         "the wait must say how hard the probe tried: {reason}"
     );
-    assert!(reason.contains("postgres connect"), "the reason must name the postgres connect failure");
+    assert!(
+        reason.contains("postgres connect"),
+        "the reason must name the postgres connect failure"
+    );
 }
 
 #[test]
@@ -239,7 +251,10 @@ fn a_settled_failure_is_reported_without_an_attempt_count() {
         !reason.contains("gave up after"),
         "a first-attempt failure has no wait to report: {reason}"
     );
-    assert!(reason.contains("invalid configuration"), "the driver must name the invalid configuration");
+    assert!(
+        reason.contains("invalid configuration"),
+        "the driver must name the invalid configuration"
+    );
 }
 
 #[test]
