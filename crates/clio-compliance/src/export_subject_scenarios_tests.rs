@@ -195,6 +195,7 @@ impl SubjectExport<'_> {
                 controls: self.controls,
                 action_id: self.action_id,
                 staging_dir: self.staging_dir,
+                root: None,
                 custody_owner: "clio",
                 required_action: "delivery",
             }),

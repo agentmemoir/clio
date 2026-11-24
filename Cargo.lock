@@ -380,6 +380,7 @@ dependencies = [
  "clio-write",
  "hkdf 0.13.0",
  "rand",
+ "rustix",
  "serde",
  "serde_json",
  "sha2 0.11.1",

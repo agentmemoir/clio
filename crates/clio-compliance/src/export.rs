@@ -106,6 +106,9 @@ pub struct ExportDelivery<'a> {
     pub action_id: &'a str,
     /// The product-controlled directory the bytes are staged in.
     pub staging_dir: &'a Path,
+    /// The trusted export root the destination is confined to, when the caller
+    /// has one; `None` keeps the path-based delivery.
+    pub root: Option<&'a Path>,
     /// The owner of the destination copy.
     pub custody_owner: &'a str,
     /// The action the destination requires before it is settled.
@@ -229,6 +232,7 @@ fn write_payload(args: &ExportArgs<'_>, bytes: &[u8]) -> Result<(), AmError> {
         action_id: delivery.action_id,
         destination: Path::new(args.destination),
         staging_dir: delivery.staging_dir,
+        root: delivery.root,
         custody_owner: delivery.custody_owner,
         required_action: delivery.required_action,
         now: args.timestamp,

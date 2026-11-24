@@ -1,0 +1,1 @@
+The export destination was checked on canonical paths and then linked on the raw path, so an ancestor directory swapped between the check and the link could place the bundle outside the export root; the link is now made relative to a held directory descriptor, so the check and the write share one inode and a swapped ancestor refuses the delivery instead of redirecting it.

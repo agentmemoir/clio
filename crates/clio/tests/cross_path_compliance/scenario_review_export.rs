@@ -133,6 +133,7 @@ fn spec<'a>(action_id: &'a str, destination: &'a Path, staging: &'a Path) -> Del
         action_id,
         destination,
         staging_dir: staging,
+        root: None,
         custody_owner: "clio",
         required_action: "delivery",
         now: NOW,

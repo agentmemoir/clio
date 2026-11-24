@@ -40,6 +40,10 @@
 #[path = "export_custody_files.rs"]
 pub(crate) mod export_custody_files;
 
+#[cfg(unix)]
+#[path = "export_custody_link.rs"]
+pub(crate) mod export_custody_link;
+
 use self::export_custody_files::{
     destination_present, fsync_dir, io_error, remove_staged, stage_staging, sweep_leftovers,
     write_destination_temp,
@@ -119,6 +123,11 @@ pub struct DeliverySpec<'a> {
     pub destination: &'a std::path::Path,
     /// The product-controlled directory the bytes are staged in.
     pub staging_dir: &'a std::path::Path,
+    /// The trusted export root the destination is confined to, when the caller
+    /// has one. `Some` delivers through a held directory descriptor, so the
+    /// path the caller supplied is never re-walked at link time; `None` keeps
+    /// the path-based delivery.
+    pub root: Option<&'a std::path::Path>,
     /// The owner of the destination copy.
     pub custody_owner: &'a str,
     /// The action the destination requires before it is settled.
@@ -232,7 +241,7 @@ pub fn deliver_export(
             return DeliveryResult::Failed(reason);
         }
     };
-    match attempt_delivery(spec.destination, spec.action_id, bytes) {
+    match attempt_delivery(spec.destination, spec.action_id, bytes, spec.root) {
         Ok(()) => {
             let recorded = custody
                 .mark_delivered(spec.action_id, spec.now)
@@ -331,16 +340,31 @@ fn refusal_reason(refusal: DeliveryRefusal) -> &'static str {
 
 /// Write `bytes` to `destination` without overwriting an existing file.
 ///
-/// The pre-check classifies a symlink or a directory as a non-regular target
-/// with a clear message. Existence itself is decided by the hard link: a link
-/// cannot replace an existing name, so a file that appears between the
-/// pre-check and the link makes the link fail with `AlreadyExists` and the
-/// delivery is refused, never silently overwritten.
+/// When a trusted `root` is supplied, the delivery is made relative to a held
+/// descriptor for the destination's parent directory: the root is opened once,
+/// its components are walked without following a link, and the temp and the
+/// destination are linked as bare names inside that descriptor. The check and
+/// the use then share one inode, so swapping an ancestor between them cannot
+/// redirect the link outside the root.
+///
+/// Without a root the delivery is path-based. The pre-check classifies a
+/// symlink or a directory as a non-regular target with a clear message.
+/// Existence itself is decided by the hard link: a link cannot replace an
+/// existing name, so a file that appears between the pre-check and the link
+/// makes the link fail with `AlreadyExists` and the delivery is refused, never
+/// silently overwritten.
 fn attempt_delivery(
     destination: &Path,
     action_id: &str,
     bytes: &[u8],
+    root: Option<&Path>,
 ) -> Result<(), DeliveryFailure> {
+    #[cfg(unix)]
+    if let Some(root) = root {
+        return self::export_custody_link::deliver_relative(root, destination, action_id, bytes);
+    }
+    #[cfg(not(unix))]
+    let _ = root;
     match fs::symlink_metadata(destination) {
         Ok(meta) if !meta.file_type().is_file() => {
             return Err(DeliveryFailure::Refused(

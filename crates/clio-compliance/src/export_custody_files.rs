@@ -313,6 +313,56 @@ pub(crate) fn open_owner_only(path: &Path) -> std::io::Result<fs::File> {
     options.open(path)
 }
 
+/// Write `bytes` to the destination temp of `destination` for `action_id`,
+/// relative to the held directory descriptor `dir`.
+///
+/// The temp is the same managed name [`destination_temp_path`] gives, so the
+/// leftover sweep still finds it after a crash; only the walk differs. It is
+/// opened with create-new, no-follow, and owner-only `0o600`, so a name already
+/// there is never followed and never widened. The bare name is returned,
+/// because the caller links it in `dir` and never through a path.
+#[cfg(unix)]
+pub(crate) fn write_destination_temp_at(
+    dir: &std::os::fd::OwnedFd,
+    destination: &Path,
+    action_id: &str,
+    bytes: &[u8],
+) -> Result<std::ffi::OsString, DeliveryFailure> {
+    use rustix::fs::{AtFlags, FileType, Mode, OFlags, RawMode, openat, statat};
+    use std::io::Write;
+
+    let tmp = destination_temp_path(destination, action_id);
+    let Some(name) = tmp.file_name() else {
+        return Err(DeliveryFailure::BeforeWrite(AmError::new(
+            ErrorCode::InvalidArgument,
+            "the destination temp names no file",
+        )));
+    };
+    let name = name.to_os_string();
+    let shown = Path::new(&name);
+    // A readable leftover temp from a crashed delivery of the same action is
+    // removed first; a link or a directory at that name is never followed or
+    // removed, so the create-new below fails closed instead.
+    if let Ok(stat) = statat(dir, name.as_os_str(), AtFlags::SYMLINK_NOFOLLOW)
+        && FileType::from_raw_mode(stat.st_mode as RawMode) == FileType::RegularFile
+    {
+        let _ = rustix::fs::unlinkat(dir, name.as_os_str(), AtFlags::empty());
+    }
+    let fd = openat(
+        dir,
+        name.as_os_str(),
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::RUSR | Mode::WUSR,
+    )
+    .map_err(|err| DeliveryFailure::BeforeWrite(errno_error("create", shown, err)))?;
+    let mut file = fs::File::from(fd);
+    if let Err(err) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+        let _ = rustix::fs::unlinkat(dir, name.as_os_str(), AtFlags::empty());
+        return Err(DeliveryFailure::BeforeWrite(io_error("write", shown, &err)));
+    }
+    Ok(name)
+}
+
 /// Flush a directory entry so a link into it survives a crash.
 pub(crate) fn fsync_dir(dir: &Path) -> Result<(), AmError> {
     let file = fs::File::open(dir).map_err(|err| io_error("open", dir, &err))?;
@@ -339,6 +389,13 @@ pub(crate) fn io_error(action: &str, path: &Path, err: &std::io::Error) -> AmErr
         ErrorCode::Internal,
         format!("failed to {action} {}: {err}", path.display()),
     )
+}
+
+/// Map a descriptor-relative operation's errno at `path` to the crate error
+/// type, with the same shape [`io_error`] gives a path-based operation.
+#[cfg(unix)]
+pub(crate) fn errno_error(action: &str, path: &Path, err: rustix::io::Errno) -> AmError {
+    io_error(action, path, &std::io::Error::from(err))
 }
 
 #[cfg(test)]
