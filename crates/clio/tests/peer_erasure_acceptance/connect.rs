@@ -204,6 +204,7 @@ fn client<T: AcceptanceStore + 'static>(
         cipher: sync_cipher(),
         allow_plaintext: false,
         max_envelope_skew_secs: clio_sync::ENVELOPE_SKEW_DEFAULT_SECS,
+        trust_erasure_carriers: true,
     }
 }
 

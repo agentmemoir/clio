@@ -145,6 +145,7 @@ fn invalidated_feed_packages_non_upsert_ops_and_errors_are_honest() {
         cipher: Vec::new(),
         allow_plaintext: false,
         max_envelope_skew_secs: crate::ENVELOPE_SKEW_DEFAULT_SECS,
+        trust_erasure_carriers: false,
     };
     assert!(push(&cfg_nr, &["b1".to_owned()]).is_err());
     assert!(pull(&cfg_nr, &["b1".to_owned()]).is_err());

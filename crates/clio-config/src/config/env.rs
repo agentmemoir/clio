@@ -120,13 +120,7 @@ impl Runtime {
             self.env_overlay
                 .insert("bank.fixed".into(), Value::String(bank));
         }
-        if let Some(allow) = get("CLIO_SYNC_ALLOW_PUBLIC_BIND")
-            .as_deref()
-            .and_then(env_bool)
-        {
-            self.env_overlay
-                .insert("sync.allow_public_bind".into(), Value::Bool(allow));
-        }
+        self.sync_bools_from_env(get);
         // A list of hosts cannot stay text in a config document, so it is folded
         // in as the list of trimmed, non-empty entries that was read; a value
         // with no entry at all leaves the path alone, so the config default
@@ -150,6 +144,25 @@ impl Runtime {
         }
         if let Some(root) = get("CLIO_REPO_ROOT") {
             self.repo_root = Some(root);
+        }
+    }
+
+    /// Fold the sync boolean spellings from the environment into the overlay
+    /// when each is a recognized boolean.
+    fn sync_bools_from_env(&mut self, get: &mut dyn FnMut(&str) -> Option<String>) {
+        if let Some(allow) = get("CLIO_SYNC_ALLOW_PUBLIC_BIND")
+            .as_deref()
+            .and_then(env_bool)
+        {
+            self.env_overlay
+                .insert("sync.allow_public_bind".into(), Value::Bool(allow));
+        }
+        if let Some(trust) = get("CLIO_SYNC_TRUST_ERASURE_CARRIERS")
+            .as_deref()
+            .and_then(env_bool)
+        {
+            self.env_overlay
+                .insert("sync.trust_erasure_carriers".into(), Value::Bool(trust));
         }
     }
 

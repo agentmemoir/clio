@@ -50,6 +50,7 @@ const ALLOWED_SET_PATHS: &[&str] = &[
     "sync.omit",
     "sync.allow_public_bind",
     "sync.max_envelope_skew_secs",
+    "sync.trust_erasure_carriers",
     "store.database_url",
     "store.sqlite_path",
     "extract.provider",
@@ -262,6 +263,17 @@ pub(crate) fn validate_set_value(path: &str, value: &Value) -> Result<(), AmErro
                 return Err(AmError::new(
                     ErrorCode::InvalidType,
                     "sync.allow_public_bind must be a boolean",
+                ));
+            }
+        },
+        // The trust decision is a boolean and nothing else: a text value is
+        // refused rather than guessed, so a typo cannot turn trust on.
+        "sync.trust_erasure_carriers" => match value {
+            Value::Bool(_) => {}
+            _ => {
+                return Err(AmError::new(
+                    ErrorCode::InvalidType,
+                    "sync.trust_erasure_carriers must be a boolean",
                 ));
             }
         },

@@ -290,8 +290,14 @@ fn guarded(
     // mutation falls through to the ordinary matrix below, exactly as it did
     // before the guards existed.
     if let Some(denial) = denial
-        && let Some(result) =
-            crate::denial_guard::apply_carrier(engine, denial, authority, m, envelope_json)?
+        && let Some(result) = crate::denial_guard::apply_carrier(
+            engine,
+            denial,
+            authority,
+            m,
+            envelope_json,
+            journal_as,
+        )?
     {
         return Ok(result);
     }

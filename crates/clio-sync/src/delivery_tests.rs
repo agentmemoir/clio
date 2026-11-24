@@ -91,6 +91,7 @@ fn client(remote: &str, token: &str) -> SyncClientConfig {
         cipher: Vec::new(),
         allow_plaintext: false,
         max_envelope_skew_secs: crate::ENVELOPE_SKEW_DEFAULT_SECS,
+        trust_erasure_carriers: false,
     }
 }
 
@@ -139,6 +140,7 @@ fn a_delivery_without_a_remote_endpoint_is_input_refused() {
         cipher: Vec::new(),
         allow_plaintext: false,
         max_envelope_skew_secs: crate::ENVELOPE_SKEW_DEFAULT_SECS,
+        trust_erasure_carriers: false,
     };
     let err = deliver_denial(&cfg, &target("fp-1")).expect_err("no remote is the caller's input");
     assert_eq!(err.code, ErrorCode::InvalidArgument);

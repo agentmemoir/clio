@@ -399,6 +399,7 @@ fn client<T: Store + SyncStore + 'static>(
         cipher: crate::sync_wire_support::sync_cipher(),
         allow_plaintext: false,
         max_envelope_skew_secs: clio_sync::ENVELOPE_SKEW_DEFAULT_SECS,
+        trust_erasure_carriers: false,
     }
 }
 

@@ -287,6 +287,7 @@ pub(crate) fn client_cfg(
         cipher: Vec::new(),
         allow_plaintext: false,
         max_envelope_skew_secs: state.sync_max_envelope_skew_secs(),
+        trust_erasure_carriers: state.sync_trust_erasure_carriers(),
     }
 }
 

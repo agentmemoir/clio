@@ -83,6 +83,7 @@ pub(crate) fn cfg(
         cipher,
         allow_plaintext: false,
         max_envelope_skew_secs: crate::ENVELOPE_SKEW_DEFAULT_SECS,
+        trust_erasure_carriers: false,
     }
 }
 
