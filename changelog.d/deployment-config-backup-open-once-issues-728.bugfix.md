@@ -1,0 +1,1 @@
+Clio now reads a deployment config backup from the same descriptor it opened, once, without following a symbolic link, and refuses a source that is a symlink or not a regular file with the path and the reason instead of saving whatever sat there at read time.

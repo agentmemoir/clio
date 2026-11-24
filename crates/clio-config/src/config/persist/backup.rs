@@ -26,6 +26,7 @@ use super::path::DEPLOYMENT_CONFIG_FILE_NAME;
 use super::write::{restrict_dir, write_private};
 use crate::error::{AmError, ErrorCode};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Directory holding timestamped backups of replaced deployment configs.
@@ -36,10 +37,56 @@ pub(crate) const BACKUP_DIR_NAME: &str = "backups";
 /// (nothing to protect).
 ///
 /// # Errors
-/// I/O failures reading the source or writing the backup.
+/// [`ErrorCode::Forbidden`] when the source is a symbolic link or is not a
+/// regular file; I/O failures reading the source or writing the backup.
 pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
-    if !path.exists() {
-        return Ok(None);
+    // One open: the bytes the backup holds are read from the same descriptor
+    // the type check accepted, never from a second lookup by path.
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // `O_NOFOLLOW` refuses a link at the source instead of backing up what
+        // it points at; `O_NONBLOCK` keeps the open from waiting on a FIFO,
+        // which the file-type check below then refuses.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let mut file = match options.open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        #[cfg(unix)]
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(AmError::new(
+                ErrorCode::Forbidden,
+                format!(
+                    "backup source {}: refused because it is a symbolic link; replace it with \
+                     the file itself and run again",
+                    path.display()
+                ),
+            ));
+        }
+        Err(e) => {
+            return Err(AmError::new(
+                ErrorCode::Internal,
+                format!("failed to read {} for backup: {e}", path.display()),
+            ));
+        }
+    };
+    let meta = file.metadata().map_err(|e| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!("failed to read {} for backup: {e}", path.display()),
+        )
+    })?;
+    if !meta.is_file() {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            format!(
+                "backup source {}: refused because it is not a regular file",
+                path.display()
+            ),
+        ));
     }
     let dir = path
         .parent()
@@ -61,7 +108,8 @@ pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
         .and_then(|n| n.to_str())
         .unwrap_or(DEPLOYMENT_CONFIG_FILE_NAME);
     let target = dir.join(format!("{name}.{stamp}"));
-    let text = fs::read_to_string(path).map_err(|e| {
+    let mut text = String::new();
+    file.read_to_string(&mut text).map_err(|e| {
         AmError::new(
             ErrorCode::Internal,
             format!("failed to read {} for backup: {e}", path.display()),
@@ -75,3 +123,7 @@ pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
     })?;
     Ok(Some(target))
 }
+
+#[cfg(test)]
+#[path = "backup_tests.rs"]
+mod backup_tests;
