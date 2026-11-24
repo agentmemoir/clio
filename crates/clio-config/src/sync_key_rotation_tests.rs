@@ -193,13 +193,29 @@ fn an_archive_that_cannot_be_opened_for_writing_is_refused() {
     )
     .expect_err("the archive refuses the write");
 
-    assert_eq!(err.code, clio_types::ErrorCode::Internal);
-    assert!(
-        err.message
-            .contains("cannot write the Clio sync key archive"),
-        "the archive reports under its own name, not the key file's: {}",
-        err.message
-    );
+    // `EISDIR` arrives before any descriptor exists to judge, and it is the same
+    // refusal a FIFO gets: the path holds a shape that cannot hold a key, so it
+    // is `Forbidden` and not an internal failure.
+    #[cfg(unix)]
+    {
+        assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+        let expected = format!(
+            "sync key archive {}: refused because it is not a regular file; a directory is not a \
+             file that holds a key, so replace it with the file itself and run again",
+            dir.path().join(ARCHIVE_NAME).display()
+        );
+        assert_eq!(err.message, expected);
+    }
+    #[cfg(not(unix))]
+    {
+        assert_eq!(err.code, clio_types::ErrorCode::Internal);
+        assert!(
+            err.message
+                .contains("cannot write the Clio sync key archive"),
+            "the archive reports under its own name, not the key file's: {}",
+            err.message
+        );
+    }
 }
 
 #[cfg(unix)]

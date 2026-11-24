@@ -301,7 +301,15 @@ fn rotation_refuses_to_let_go_when_the_archive_cannot_be_written() {
     let err = rotate_existing(&NoKeystore, KeySource::File, Some(&dir.key()))
         .expect_err("the archive refused the entry");
 
-    assert_eq!(err.code, clio_types::ErrorCode::Internal);
+    // The archive path is a directory, which the gate refuses as the wrong
+    // shape before any descriptor exists, so the code is `Forbidden`; what this
+    // test guards is that the failure stops the rotation, whatever its code.
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+    assert!(
+        err.message.contains("sync key archive"),
+        "the refusal names the archive: {}",
+        err.message
+    );
     assert!(
         dir.key().exists(),
         "the current key is never deleted when the archive write failed"

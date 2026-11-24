@@ -224,23 +224,28 @@ fn a_symlinked_key_directory_is_refused_for_the_key_and_the_sidecar() {
 #[test]
 fn a_key_directory_that_is_a_regular_file_is_refused() {
     // A parent that exists but is not a directory is the other half of the same
-    // rule, and it must be refused by the shape check rather than by a `chmod`
-    // that happened to fail.
+    // rule, and the gate must refuse it by its own shape check rather than by a
+    // `chmod` that happened to fail. The gate is called directly here, because a
+    // call through `write_created` or `append_entry` reaches `create_dir_all`
+    // first, and that fails before the gate's non-directory arm is ever asked.
     let dir = TempDir::new("gate-parent-file");
     let blocker = dir.join("blocker");
     std::fs::write(&blocker, b"not a directory").expect("blocker");
 
-    let err = crate::sync_key_file::write_created(
-        Some(&blocker.join(crate::sync_key_file::SYNC_KEY_FILE_NAME)),
-        "2026-10-01T00:00:00Z",
-    )
-    .expect_err("a file is not a directory");
+    let err = super::ensure_owner_only_dir(&blocker)
+        .expect_err("a regular file is not a directory to keep key material in");
 
-    assert_eq!(err.code, clio_types::ErrorCode::Internal);
-    assert!(
-        err.message.contains("create the directory for"),
-        "the step that failed is named: {}",
-        err.message
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+    let expected = format!(
+        "sync key directory {}: refused because it is not a directory; replace it with a real \
+         directory only the owner can enter and run again",
+        blocker.display()
+    );
+    assert_eq!(err.message, expected);
+    assert_eq!(
+        std::fs::read_to_string(&blocker).expect("the blocker is untouched"),
+        "not a directory",
+        "the refusal neither chmodded nor wrote through the path it refused"
     );
 }
 

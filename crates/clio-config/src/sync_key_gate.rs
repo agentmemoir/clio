@@ -162,9 +162,10 @@ fn link_refusal(path: &Path, subject: &str) -> AmError {
 /// be restored.
 ///
 /// # Errors
-/// [`ErrorCode::Forbidden`] for a link at the final name or a descriptor
-/// [`descriptor_refusal`] refused; the caller's own message for an open that
-/// failed for any other reason.
+/// [`ErrorCode::Forbidden`] for a link at the final name, for a path holding a
+/// shape that cannot hold a key (a FIFO or a directory, both refused before any
+/// descriptor exists), or a descriptor [`descriptor_refusal`] refused; the
+/// caller's own message for an open that failed for any other reason.
 #[cfg(unix)]
 pub(crate) fn open_append_no_follow<F>(
     path: &Path,
@@ -235,14 +236,20 @@ where
         // `O_WRONLY` with `O_NONBLOCK` on a FIFO nobody is reading reports
         // `ENXIO` instead of blocking, so a FIFO planted at the path is refused
         // here rather than waited on. A read open of the same FIFO succeeds and
-        // is refused by [`descriptor_refusal`] instead.
-        Err(err) if err.raw_os_error() == Some(libc::ENXIO) => {
+        // is refused by [`descriptor_refusal`] instead. A directory planted at
+        // the path reports `EISDIR` before any descriptor exists to judge, and
+        // that is the same refusal: the path holds a shape that cannot hold a key.
+        Err(err) if matches!(err.raw_os_error(), Some(libc::ENXIO | libc::EISDIR)) => {
+            let shape = if err.raw_os_error() == Some(libc::EISDIR) {
+                "a directory is not a file that holds a key"
+            } else {
+                "a FIFO is a pipe and not a file that holds a key"
+            };
             return Err(AmError::new(
                 ErrorCode::Forbidden,
                 format!(
-                    "{subject} {}: refused because it is not a regular file; a FIFO is a pipe \
-                     and not a file that holds a key, so replace it with the file itself and run \
-                     again",
+                    "{subject} {}: refused because it is not a regular file; {shape}, so replace \
+                     it with the file itself and run again",
                     path.display()
                 ),
             ));
