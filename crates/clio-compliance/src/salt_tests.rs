@@ -26,53 +26,11 @@
 use super::{
     create_salt, resolve_salt, tombstone_salt_fingerprint_at, tombstone_salt_fingerprint_of,
 };
-use crate::test_unique::unique;
+#[cfg(unix)]
+use crate::salt_test_support::set_mode;
+use crate::salt_test_support::{Scratch, salt_of, seed_owner_only, sidecar};
 use clio_types::ErrorCode;
-use std::path::{Path, PathBuf};
-
-/// A unique scratch directory removed on drop.
-struct Scratch {
-    root: PathBuf,
-}
-
-impl Scratch {
-    fn new() -> Self {
-        let root = std::env::temp_dir().join(unique("clio-compliance-salt"));
-        std::fs::create_dir_all(&root).expect("create the scratch root");
-        Self { root }
-    }
-
-    fn journal(&self) -> PathBuf {
-        self.root.join("erasure-journal.json")
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
-    }
-}
-
-/// The owner-only sibling a salt is persisted at for `journal`.
-fn sidecar(journal: &Path) -> PathBuf {
-    let mut name = journal.as_os_str().to_os_string();
-    name.push(".salt");
-    PathBuf::from(name)
-}
-
-/// Seed a raw file restricted to the owner, so a length assertion is not
-/// pre-empted by whatever the platform's default mode happens to be.
-fn seed_owner_only(path: &Path, bytes: &[u8]) {
-    std::fs::write(path, bytes).expect("seed the raw file");
-    #[cfg(unix)]
-    set_mode(path, 0o600);
-}
-
-/// A byte string of `len` copies of `byte`, derived rather than written out, so
-/// a seeded deployment salt is computed on every run and reproducible.
-fn salt_of(byte: u8, len: usize) -> Vec<u8> {
-    (0..len).map(|_| byte).collect()
-}
+use std::path::Path;
 
 #[test]
 fn a_configured_value_wins_and_creates_no_file() {
@@ -381,15 +339,6 @@ fn a_directory_that_denies_writes_yields_a_create_refusal() {
         let salt = outcome.expect("a DAC-bypassing process writes into the directory");
         assert_eq!(salt.len(), 32, "the salt it wrote is a generated salt");
     }
-}
-
-/// Restrict `path` to `mode`, so a length or refusal assertion is not pre-empted
-/// by whatever the platform's default mode happens to be.
-#[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-        .unwrap_or_else(|err| panic!("set mode {mode:o} on {}: {err}", path.display()));
 }
 
 /// Whether this process is actually refused a write into `dir`.

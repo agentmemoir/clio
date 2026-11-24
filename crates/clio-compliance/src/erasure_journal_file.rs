@@ -181,7 +181,7 @@ fn trusted(meta: &fs::Metadata) -> bool {
 
 /// Whether the opened descriptor still names the file the path observation saw.
 #[cfg(unix)]
-fn same_file(observed: &fs::Metadata, opened: &fs::Metadata) -> bool {
+pub(crate) fn same_file(observed: &fs::Metadata, opened: &fs::Metadata) -> bool {
     use std::os::unix::fs::MetadataExt;
     observed.dev() == opened.dev() && observed.ino() == opened.ino()
 }
@@ -189,7 +189,7 @@ fn same_file(observed: &fs::Metadata, opened: &fs::Metadata) -> bool {
 /// Non-Unix platforms have no inode identity to compare; the descriptor's own
 /// type, mode, and length checks are what remain.
 #[cfg(not(unix))]
-fn same_file(_observed: &fs::Metadata, _opened: &fs::Metadata) -> bool {
+pub(crate) fn same_file(_observed: &fs::Metadata, _opened: &fs::Metadata) -> bool {
     true
 }
 

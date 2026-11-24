@@ -71,6 +71,8 @@ mod local_review;
 mod local_review_export;
 mod restore_guard;
 mod salt;
+#[cfg(test)]
+mod salt_test_support;
 mod scratchpad;
 mod stats;
 pub mod subject_bank_coordination;
