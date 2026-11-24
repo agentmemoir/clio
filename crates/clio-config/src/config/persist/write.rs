@@ -11,6 +11,8 @@
 //! - Temp files that are created new, so an entry already at the temp name is
 //!   refused instead of followed
 //! - The monotonic counter that keeps concurrent temp files distinct
+//! - The pre-rename check that refuses to replace a different entry at the
+//!   target path
 //! - `restrict_dir`, the owner-only directory rule
 //!
 //! ## Does not own

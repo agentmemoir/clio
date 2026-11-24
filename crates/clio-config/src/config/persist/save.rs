@@ -10,6 +10,8 @@
 //! - The one serialization point, where a secret becomes unreadable on the way out
 //! - Refusing to write a sealed value in plaintext
 //! - The stable flat-file shape a reload expects
+//! - The checked save, which asks the guard to confirm the judged file just
+//!   before the rename replaces the path
 //!
 //! ## Does not own
 //! - Opening sealed values on the way in (see `load`)

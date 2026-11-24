@@ -9,7 +9,9 @@
 //! ## Owns
 //! - Reading flat or nested JSON into an overlay, with missing files empty
 //! - The seal gate: an unsealed string at a sealed path is refused
-//! - The overwrite guard that refuses to replace a file that no longer loads
+//! - The overwrite guard that reads the file once, holds it open, refuses a
+//!   file that no longer loads, and refuses to replace a different entry or a
+//!   symbolic link at the path
 //!
 //! ## Does not own
 //! - Sealing values on the way out (see `save`)
