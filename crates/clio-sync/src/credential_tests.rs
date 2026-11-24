@@ -20,8 +20,37 @@
 //! Keep this module focused on behavior coverage for `credential`.
 
 use super::*;
-use crate::credential_fixtures::{Scratch, record, secret};
-use clio_types::ErrorCode;
+use crate::credential_fixtures::{Scratch, record, record_as, secret};
+use clio_types::{Actor, ErrorCode};
+
+/// Only a harness or system actor may durably record a denial; a dev-mode
+/// unbound request carries no credential and keeps the node's full trust.
+#[test]
+fn only_an_erasure_actor_may_record_a_denial() {
+    for (actor, allowed) in [
+        (Actor::Harness, true),
+        (Actor::System, true),
+        (Actor::Agent, false),
+        (Actor::User, false),
+    ] {
+        let presented = secret("actor");
+        let store =
+            CredentialStore::from_records(vec![record_as("ci", &presented, actor, &["demo"])]);
+        let bound = authorize_request(Some(&store), false, Some(&format!("Bearer {presented}")))
+            .expect("record bound");
+        assert_eq!(
+            bound.may_record_denial(),
+            allowed,
+            "actor {actor} must {} record a denial",
+            if allowed { "" } else { "not" }
+        );
+    }
+    let unbound = authorize_request(None, true, None).expect("dev mode is unbound");
+    assert!(
+        unbound.may_record_denial(),
+        "a dev-mode node has no credential to gate"
+    );
+}
 
 #[test]
 fn a_loaded_record_resolves_to_its_own_peer() {

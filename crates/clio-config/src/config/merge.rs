@@ -80,7 +80,8 @@ where
         "sync": {
             "omit": true,
             "allow_public_bind": false,
-            "max_envelope_skew_secs": 0
+            "max_envelope_skew_secs": 0,
+            "trust_erasure_carriers": false
         },
         "mcp": {
             "revision": "2026-07-28",

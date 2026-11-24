@@ -41,6 +41,7 @@
 use crate::apply_records;
 use crate::clock::now_utc;
 use crate::denial::DenialProof;
+use crate::denial_guard::CarrierAuthority;
 use crate::journal_row::journal_row as build_journal_row;
 use crate::protocol::{
     ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM, ENTITY_KIND_PERSONA,
@@ -193,7 +194,7 @@ pub fn apply_mutation_guarded(
     m: &SyncMutation,
     envelope_json: &str,
 ) -> Result<ApplyResult, AmError> {
-    guarded(engine, denial, m, envelope_json, m)
+    guarded(engine, denial, None, m, envelope_json, m)
 }
 
 /// [`apply_mutation_guarded`] for a row this node opened: the effects run on
@@ -202,21 +203,27 @@ pub fn apply_mutation_guarded(
 /// keeps relaying the row the writer sealed: a reader downstream opens that row
 /// under the same key and refuses the plaintext one this node would write.
 ///
+/// `authority` is the presenting credential's authority over a denial carrier.
+/// It gates the carrier before any marker, denial, or journal row is written,
+/// whether the carrier arrived plaintext or sealed.
+///
 /// # Errors
 /// The same failures [`apply_mutation_guarded`] reports.
-pub fn apply_mutation_guarded_relaying(
+pub(crate) fn apply_mutation_guarded_relaying(
     engine: &ApplyEngine<'_>,
     denial: Option<&dyn ErasureDenial>,
+    authority: Option<&dyn CarrierAuthority>,
     m: &SyncMutation,
     envelope_json: &str,
     journal_as: &SyncMutation,
 ) -> Result<ApplyResult, AmError> {
-    guarded(engine, denial, m, envelope_json, journal_as)
+    guarded(engine, denial, authority, m, envelope_json, journal_as)
 }
 
 fn guarded(
     engine: &ApplyEngine<'_>,
     denial: Option<&dyn ErasureDenial>,
+    authority: Option<&dyn CarrierAuthority>,
     m: &SyncMutation,
     envelope_json: &str,
     journal_as: &SyncMutation,
@@ -233,12 +240,19 @@ fn guarded(
         // record is already in place, so the redelivery re-proves it — which
         // repeats no effect — instead of reporting a bare duplicate. A
         // redelivery the authority cannot bind refuses rather than
-        // acknowledges.
-        if let Some(denial) = denial
-            && let Some(proof) =
+        // acknowledges, and a presenting credential that may not record the
+        // carrier is refused before its proof rebuilds any marker.
+        if let Some(denial) = denial {
+            if let Some(refused) =
+                crate::denial_guard::guard_redelivery(engine, authority, m, envelope_json)?
+            {
+                return Ok(ApplyResult::plain(refused));
+            }
+            if let Some(proof) =
                 crate::denial_guard::redelivery_proof(denial, &engine.device_id, m)?
-        {
-            return Ok(ApplyResult::proven(ApplyOutcome::Duplicate, proof));
+            {
+                return Ok(ApplyResult::proven(ApplyOutcome::Duplicate, proof));
+            }
         }
         return Ok(ApplyResult::plain(ApplyOutcome::Duplicate));
     }
@@ -276,7 +290,14 @@ fn guarded(
     // mutation falls through to the ordinary matrix below, exactly as it did
     // before the guards existed.
     if let Some(denial) = denial
-        && let Some(result) = crate::denial_guard::apply_carrier(engine, denial, m, envelope_json)?
+        && let Some(result) = crate::denial_guard::apply_carrier(
+            engine,
+            denial,
+            authority,
+            m,
+            envelope_json,
+            journal_as,
+        )?
     {
         return Ok(result);
     }

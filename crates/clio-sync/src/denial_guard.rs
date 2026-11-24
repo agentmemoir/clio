@@ -35,19 +35,75 @@
 //!
 //! Keep this module focused on the denial guards over the sync paths.
 
-use crate::apply::{ApplyEngine, ApplyOutcome, ApplyResult, dead_letter};
+use crate::apply::{ApplyEngine, ApplyOutcome, ApplyResult, dead_letter, quarantine};
 use crate::crypto::SyncCipherKey;
 use crate::denial::{
     DenialCarrier, DenialProof, DenialProofBinding, bank_verdict, denial_carrier,
     denial_subject_hash, denied_bank_marker,
 };
 use crate::protocol::{
-    ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM, ENTITY_KIND_TASK, SyncContent,
-    SyncMutation,
+    ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM, ENTITY_KIND_TASK,
+    REASON_UNAUTHORIZED_ACTOR, REASON_UNAUTHORIZED_BANK, SyncContent, SyncMutation,
 };
 use clio_store::{DenialVerdict, ErasureDenial};
 use clio_types::{AmError, ErrorCode};
 use serde_json::Value;
+
+/// The refusal a denial carrier from a credential whose actor carries no
+/// erasure privilege gets.
+const DENIAL_ACTOR_REFUSAL: &str = "refused denial carrier: this credential's actor may not record a denial. An \
+     erasure denial refuses a subject for every bank on this node and cannot be undone, so it requires a harness \
+     or system actor";
+
+/// What the presenting credential may do with a denial carrier.
+///
+/// A carrier records one serve marker per covered bank before its proof exists,
+/// so every covered bank must be authorized; and it durably refuses its subject
+/// on this whole node, so its actor must carry the erasure privilege. A call
+/// site passes `None` only when the mutation arrived without a credential to
+/// check.
+pub(crate) trait CarrierAuthority {
+    /// Whether the presenting token's actor may durably record a denial.
+    fn may_record_denial(&self) -> bool;
+
+    /// Whether the presenting credential may reach `bank` on this node.
+    fn bank_authorized(&self, bank: &str) -> bool;
+
+    /// The refusal this authority earns when it may not record at all. The
+    /// default names an actor without the erasure privilege; a route whose
+    /// authority is a local peer trust decision names that instead.
+    fn actor_refusal(&self) -> (&'static str, String) {
+        (REASON_UNAUTHORIZED_ACTOR, DENIAL_ACTOR_REFUSAL.to_owned())
+    }
+}
+
+/// The refusal a pulled denial carrier from an untrusted peer is quarantined
+/// under. The serving peer presents no credential on a pull, so the local
+/// operator's trust decision for that peer is the only authority there.
+pub(crate) const REASON_UNAUTHORIZED_PEER: &str = "unauthorized_peer";
+
+/// The refusal the presenting credential earns for `carrier`, if any: the
+/// reason code and detail for an actor without erasure privilege, or for a
+/// covered bank the credential cannot reach.
+fn carrier_refusal(
+    authority: Option<&dyn CarrierAuthority>,
+    carrier: &DenialCarrier,
+) -> Option<(&'static str, String)> {
+    let authority = authority?;
+    if !authority.may_record_denial() {
+        return Some(authority.actor_refusal());
+    }
+    carrier
+        .covered_banks()
+        .into_iter()
+        .find(|bank| !authority.bank_authorized(bank))
+        .map(|bank| {
+            (
+                REASON_UNAUTHORIZED_BANK,
+                format!("denial carrier covers unauthorized bank {bank}"),
+            )
+        })
+}
 
 /// The subject id one payload carries, for the record kinds that are
 /// subject-keyed: an item or belief record carries it at the top level, a task
@@ -210,16 +266,23 @@ pub(crate) fn record_carrier_proof(
 /// with its durable proof.
 ///
 /// `Ok(None)` when the mutation is not a denial operation, so the caller keeps
-/// its ordinary apply behavior. A malformed carrier is a permanent reject; an
-/// authority failure propagates, so no acknowledgement is written.
+/// its ordinary apply behavior. The presenting credential answers here before
+/// any marker, denial, or journal row is written: a token whose actor carries
+/// no erasure privilege, or that cannot reach every covered bank, is refused
+/// and quarantined. A sealed carrier is opened by the push route and reaches
+/// this gate as plaintext, so the same check covers both carriers. A malformed
+/// carrier is a permanent reject; an authority failure propagates, so no
+/// acknowledgement is written.
 ///
 /// # Errors
 /// Authority or storage failures (retryable).
 pub(crate) fn apply_carrier(
     engine: &ApplyEngine<'_>,
     denial: &dyn ErasureDenial,
+    authority: Option<&dyn CarrierAuthority>,
     m: &SyncMutation,
     envelope_json: &str,
+    journal_as: &SyncMutation,
 ) -> Result<Option<ApplyResult>, AmError> {
     let carrier = match denial_carrier(m) {
         Ok(Some(carrier)) => carrier,
@@ -229,14 +292,19 @@ pub(crate) fn apply_carrier(
                 .map(|outcome| Some(ApplyResult::plain(outcome)));
         }
     };
+    if let Some((reason_code, detail)) = carrier_refusal(authority, &carrier) {
+        return quarantine(engine, &m.bank, m, envelope_json, reason_code, &detail)
+            .map(|outcome| Some(ApplyResult::plain(outcome)));
+    }
     let proof = record_carrier_proof(denial, &engine.device_id, m, &carrier)?;
     // The journal row is what relays the denial onward, so the record that was
-    // just written stays reachable by pull. A concurrent redelivery that
+    // just written stays reachable by pull. It relays the sealed form when the
+    // carrier arrived sealed, so a downstream keyed reader can open it. A concurrent redelivery that
     // journaled first leaves this append uninserted and still receives the
     // same proof: the authority write above repeated no effect.
     let _ = engine
         .sync
-        .journal_append(&crate::journal_row::journal_row(engine, m)?)?;
+        .journal_append(&crate::journal_row::journal_row(engine, journal_as)?)?;
     Ok(Some(ApplyResult::proven(ApplyOutcome::Applied, proof)))
 }
 
@@ -257,6 +325,96 @@ pub(crate) fn redelivery_proof(
         Some(carrier) => record_carrier_proof(denial, peer_id, m, &carrier).map(Some),
         None => Ok(None),
     }
+}
+
+/// The refusal a redelivery of an already-journaled denial carrier earns when
+/// the presenting credential may not record it.
+///
+/// A journaled id answers a redelivery with a fresh proof, and that proof
+/// re-records every covered bank's marker. The credential gate therefore runs
+/// before the proof is rebuilt. `Ok(None)` means the carrier may re-prove.
+///
+/// # Errors
+/// The quarantine write.
+pub(crate) fn guard_redelivery(
+    engine: &ApplyEngine<'_>,
+    authority: Option<&dyn CarrierAuthority>,
+    m: &SyncMutation,
+    envelope_json: &str,
+) -> Result<Option<ApplyOutcome>, AmError> {
+    let Ok(Some(carrier)) = denial_carrier(m) else {
+        return Ok(None);
+    };
+    let Some((reason_code, detail)) = carrier_refusal(authority, &carrier) else {
+        return Ok(None);
+    };
+    quarantine(engine, &m.bank, m, envelope_json, reason_code, &detail).map(Some)
+}
+
+/// The authority a pulled denial carrier is recorded under: the operator's
+/// trust decision for the configured peer.
+pub(crate) struct PullCarrierAuthority {
+    trusted: bool,
+}
+
+impl PullCarrierAuthority {
+    /// The authority for a peer the operator has, or has not, trusted with
+    /// erasure denials.
+    #[must_use]
+    pub(crate) fn new(trusted: bool) -> Self {
+        Self { trusted }
+    }
+}
+
+impl CarrierAuthority for PullCarrierAuthority {
+    fn may_record_denial(&self) -> bool {
+        self.trusted
+    }
+
+    fn bank_authorized(&self, _bank: &str) -> bool {
+        // The row's bank is checked against the requested bank before apply.
+        // A covered bank outside it only widens the denial on this node, which
+        // is the effect the operator trusted the peer for.
+        true
+    }
+
+    fn actor_refusal(&self) -> (&'static str, String) {
+        (
+            REASON_UNAUTHORIZED_PEER,
+            "refused denial carrier: the configured sync peer is not trusted to record erasure \
+             denials on this node. A denial refuses a subject for every bank here and cannot be \
+             undone. Set `sync.trust_erasure_carriers` to true only for a peer you trust with \
+             destructive operations"
+                .to_owned(),
+        )
+    }
+}
+
+/// Apply one opened pull row; `Ok(true)` means the pull must freeze.
+pub(crate) fn apply_pulled_row(
+    engine: &ApplyEngine<'_>,
+    denial: Option<&dyn ErasureDenial>,
+    authority: &PullCarrierAuthority,
+    bank: &str,
+    m: &SyncMutation,
+    envelope_json: &str,
+) -> Result<bool, AmError> {
+    let result = crate::apply::apply_mutation_guarded_relaying(
+        engine,
+        denial,
+        Some(authority),
+        m,
+        envelope_json,
+        m,
+    )?;
+    match result.outcome {
+        ApplyOutcome::Stale => {
+            crate::apply::quarantine_stale(engine, bank, m, envelope_json)?;
+        }
+        ApplyOutcome::DeadLettered { .. } => return Ok(true),
+        _ => {}
+    }
+    Ok(false)
 }
 
 /// The refusal for a pull whose bank a recorded denial covers, or whose

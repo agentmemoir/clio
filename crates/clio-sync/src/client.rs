@@ -28,8 +28,9 @@
 //!
 //! Keep this module focused on the sync client.
 
-use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation_guarded};
+use crate::apply::ApplyEngine;
 use crate::client_feed::push_bank;
+use crate::denial_guard::PullCarrierAuthority;
 use crate::http::post_json;
 use crate::protocol::{BankSyncStatus, PullRequest, PullResponse, SyncStatusReport};
 use clio_store::{DeadLetterStatus, ErasureDenial, Store, SyncStore};
@@ -65,6 +66,12 @@ pub struct SyncClientConfig {
     /// node's clock, in seconds. `0` is the shipped default and disables the age
     /// bound, so an old backlog still applies.
     pub max_envelope_skew_secs: u64,
+    /// Whether this configured peer may record an erasure denial on this node
+    /// through a pulled carrier. A pull presents no credential from the serving
+    /// peer, so without this local decision a carrier has no authority to check.
+    /// `false` by default: a carrier from a peer not marked here records
+    /// nothing and is quarantined for the operator.
+    pub trust_erasure_carriers: bool,
 }
 
 /// One sync operation mode.
@@ -245,6 +252,12 @@ fn oversized_cursor(bank: &str, cursor: &str) -> AmError {
     )
 }
 
+/// The authority a pulled denial carrier is recorded under.
+///
+/// A pull has no presenting credential, so the operator's trust decision for
+/// the configured peer is the only authority there (see
+/// [`SyncClientConfig::trust_erasure_carriers`]). The pulled bank's own scope is
+/// already checked on the row before apply.
 fn pull_bank(
     cfg: &SyncClientConfig,
     remote: &str,
@@ -262,6 +275,7 @@ fn pull_bank(
     };
     let mut pages = 0usize;
     let mut seen = vec![cursor_digest(&cursor)];
+    let authority = PullCarrierAuthority::new(cfg.trust_erasure_carriers);
     loop {
         // Bounded first: a peer that always answers `has_more` must not keep
         // this loop fetching. The cursor is durable page by page, so a
@@ -332,19 +346,12 @@ fn pull_bank(
                 // its rows may not land in the store.
                 continue;
             }
-            let result = apply_mutation_guarded(&engine, denial, &m, &envelope)?;
-            match result.outcome {
-                // A refused envelope is never applied and never journaled, but
-                // it is recorded where an operator can see it, then the cursor
-                // keeps moving: a refusal never wedges the loop.
-                ApplyOutcome::Stale => {
-                    crate::apply::quarantine_stale(&engine, bank, &m, &envelope)?;
-                }
-                ApplyOutcome::DeadLettered { .. } => {
-                    frozen = true;
-                    break;
-                }
-                ApplyOutcome::Applied | ApplyOutcome::Duplicate | ApplyOutcome::ConflictLoser => {}
+            let result = crate::denial_guard::apply_pulled_row(
+                &engine, denial, &authority, bank, &m, &envelope,
+            )?;
+            if result {
+                frozen = true;
+                break;
             }
         }
         if frozen {
@@ -398,6 +405,9 @@ mod client_pull_bound_tests;
 #[cfg(test)]
 #[path = "client_pull_size_tests.rs"]
 mod client_pull_size_tests;
+#[cfg(test)]
+#[path = "client_pull_trust_tests.rs"]
+mod client_pull_trust_tests;
 #[cfg(test)]
 #[path = "client_receipt_tests.rs"]
 mod client_receipt_tests;

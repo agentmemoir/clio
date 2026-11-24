@@ -301,6 +301,24 @@ impl McpState {
             .unwrap_or(clio_sync::ENVELOPE_SKEW_DEFAULT_SECS)
     }
 
+    /// Whether the configured sync peer may record erasure denials on this node
+    /// through a pulled carrier.
+    ///
+    /// A pull carries no credential from the serving peer, so the operator's
+    /// trust decision is the only authority. A missing key, a non-boolean value,
+    /// or a poisoned config lock denies; trust must be stated explicitly.
+    #[must_use]
+    pub fn sync_trust_erasure_carriers(&self) -> bool {
+        let Ok(runtime) = self.config.lock() else {
+            return false;
+        };
+        runtime
+            .effective_raw()
+            .pointer("/sync/trust_erasure_carriers")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
     /// Resolve the effective timestamp: a non-empty `args.timestamp` wins over now.
     ///
     /// The value is returned in the store's canonical form — UTC RFC 3339 at

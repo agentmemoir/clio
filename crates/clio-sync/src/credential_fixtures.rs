@@ -9,8 +9,10 @@
 //!
 //! ## Owns
 //! - `Scratch`: one unique store path per call, removed on drop
-//! - `record` / `secret`: the one record shape and the one secret generator
+//! - `record`: the one record shape and the one secret generator
 //!   the credential tests build from
+//! - `record_as`: the same record under an explicit actor, for the suites that
+//!   exercise an actor-gated path
 //! - `scoped_store`: one scratch store holding one record, the shape the
 //!   server test helpers hand to `sync_serve`
 //!
@@ -97,15 +99,27 @@ impl Drop for Scratch {
     }
 }
 
-/// One valid record binding a secret to a bank list.
-pub(crate) fn record(label: &str, secret: &str, banks: &[&str]) -> AuthTokenRecord {
+/// One valid record binding a secret to a bank list, under an explicit actor.
+/// `record` keeps the least-privileged actor; a suite that records a denial
+/// names the erasure actor it needs.
+pub(crate) fn record_as(
+    label: &str,
+    secret: &str,
+    actor: Actor,
+    banks: &[&str],
+) -> AuthTokenRecord {
     AuthTokenRecord {
         label: label.to_owned(),
         secret_sha256: digest_hex(secret),
-        actor: Actor::Agent,
+        actor,
         banks: banks.iter().map(|b| (*b).to_owned()).collect(),
         created_at: "2026-10-01T00:00:00Z".into(),
     }
+}
+
+/// One valid record binding a secret to a bank list.
+pub(crate) fn record(label: &str, secret: &str, banks: &[&str]) -> AuthTokenRecord {
+    record_as(label, secret, Actor::Agent, banks)
 }
 
 /// A scratch store holding one record that binds `secret` to `banks`.

@@ -32,6 +32,7 @@ use crate::client::client_envelope_tests::{BANK, Receiver, VICTIM, hand_push, he
 use crate::client::client_tests::{TOKEN, cfg, create_item, serve, sqlite};
 use crate::client::{pull, pull_with_denial};
 use crate::client_refusal::{PLAINTEXT_REFUSED_KEYLESS_REASON, PLAINTEXT_REFUSED_REASON};
+use crate::credential_fixtures::{Scratch, record_as};
 use crate::crypto::SyncCipherKey;
 use crate::denial::{DenialCarrier, denial_mutation};
 use crate::denial_fixtures::FakeDenial;
@@ -43,6 +44,7 @@ use clio_store::{
     DeadLetterStatus, DekProvider, DenialVerdict, ErasureDenial, LocalDevKms, SqliteStore, Store,
     SyncStore,
 };
+use clio_types::Actor;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -101,7 +103,10 @@ fn plant_plain(relay: &Arc<SqliteStore>, m: &SyncMutation) {
 fn denial_relay(banks: &[&str]) -> (SyncServer, Arc<FakeDenial>) {
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
     let store = Arc::new(SqliteStore::open_in_memory(Arc::clone(&kms)).expect("sqlite open"));
-    let credentials = crate::credential_fixtures::scoped_store("plain-policy-relay", TOKEN, banks);
+    // The relay must accept the carrier so the pulling client is what refuses
+    // the plaintext row, so its credential carries erasure privilege.
+    let credentials = Scratch::new("plain-policy-relay");
+    credentials.write(&[record_as("scoped-client", TOKEN, Actor::Harness, banks)]);
     let denial = FakeDenial::new("fp-relay-policy");
     let server = sync_serve_with_denial(
         SyncServerOptions {

@@ -4,15 +4,17 @@
 //! # Responsibility
 //!
 //! This module is responsible for the sync server's push route: request
-//! decoding, per-mutation and per-covered-bank bank authorization, the
-//! per-bank apply lock, the guarded apply of every mutation, the dead-letter
-//! quarantine of refused mutations, and the acknowledgement that carries each
-//! denial operation's durable proof.
+//! decoding, per-mutation bank authorization, the credential authority the
+//! denial-carrier gate reads, the per-bank apply lock, the guarded apply of
+//! every mutation, the dead-letter quarantine of refused mutations, and the
+//! acknowledgement that carries each denial operation's durable proof.
 //!
 //! ## Owns
 //! - `handle_push` and the push acknowledgement body it writes
-//! - The authorization refusals (the envelope bank, each mutation, and every
-//!   covered bank of a denial carrier) and their quarantine placement
+//! - The authorization refusals (the envelope bank and each mutation) and
+//!   their quarantine placement
+//! - The credential authority (`PushCarrierAuthority`) the denial-carrier gate
+//!   reads, and the sealed subject check the apply path cannot make
 //! - The denial acknowledgement list a push returns
 //!
 //! ## Does not own
@@ -30,11 +32,10 @@
 //!
 //! Keep this module focused on the push route.
 
-use crate::apply::{
-    ApplyEngine, ApplyOutcome, apply_mutation_guarded, apply_mutation_guarded_relaying, quarantine,
-};
+use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation_guarded_relaying, quarantine};
 use crate::credential::AuthOutcome;
 use crate::denial::DenialAck;
+use crate::denial_guard::CarrierAuthority;
 use crate::protocol::{PushAck, SyncContent, SyncMutation, encode_cursor};
 use crate::server::{ServeOptions, bank_authorized};
 use crate::server_conn::{write_json, write_status_error};
@@ -56,6 +57,25 @@ const PLAINTEXT_CONTENT_REFUSAL: &str = "refused plaintext content: this node st
 /// quarantined as the erased subject rather than as an unreadable envelope.
 const SEALED_ERASED_SUBJECT_REFUSAL: &str = "refused sealed content for a subject a recorded erasure denial covers: the \
      person's data was erased, so the row is quarantined instead of applied";
+
+/// The presented credential's authority over a denial carrier on this route.
+///
+/// It reads the actor's erasure privilege and the per-bank reach the route
+/// already applies to every mutation, and hands both to the carrier gate.
+struct PushCarrierAuthority<'a> {
+    options: &'a ServeOptions,
+    auth: &'a AuthOutcome,
+}
+
+impl CarrierAuthority for PushCarrierAuthority<'_> {
+    fn may_record_denial(&self) -> bool {
+        self.auth.may_record_denial()
+    }
+
+    fn bank_authorized(&self, bank: &str) -> bool {
+        bank_authorized(self.options, self.auth, bank)
+    }
+}
 
 /// What the sealed subject check allows for one mutation.
 enum SealedCheck {
@@ -134,6 +154,7 @@ fn refuse(
 fn apply_and_record(
     engine: &ApplyEngine<'_>,
     options: &ServeOptions,
+    auth: &AuthOutcome,
     bank: &str,
     m: &SyncMutation,
     envelope: &str,
@@ -142,6 +163,7 @@ fn apply_and_record(
     denial_acks: &mut Vec<DenialAck>,
 ) -> Result<(), AmError> {
     let denial = options.denial.as_deref();
+    let authority = PushCarrierAuthority { options, auth };
     let result = match options
         .sync_key
         .as_deref()
@@ -152,9 +174,9 @@ fn apply_and_record(
                 content: SyncContent::Plain(content),
                 ..m.clone()
             };
-            apply_mutation_guarded_relaying(engine, denial, &opened, envelope, m)?
+            apply_mutation_guarded_relaying(engine, denial, Some(&authority), &opened, envelope, m)?
         }
-        None => apply_mutation_guarded(engine, denial, m, envelope)?,
+        None => apply_mutation_guarded_relaying(engine, denial, Some(&authority), m, envelope, m)?,
     };
     // The durable record is written before this acknowledgement: the proof is
     // the authority's own record of it, never a transport receipt, and a
@@ -264,28 +286,9 @@ pub(crate) fn handle_push(
             )?;
             continue;
         }
-        // A denial carrier records one serve marker per covered bank before
-        // the proof exists, so every covered bank must be authorized first:
-        // a credential for one bank must never durably refuse another. A
-        // carrier that does not decode is not a carrier, and the plaintext
-        // refusal below quarantines it rather than reading it as one.
-        if let Ok(Some(carrier)) = crate::denial::denial_carrier(&m)
-            && let Some(unauthorized) = carrier
-                .covered_banks()
-                .iter()
-                .find(|covered| !bank_authorized(options, auth, covered))
-        {
-            refuse(
-                &engine,
-                &bank,
-                &m,
-                &envelope,
-                crate::protocol::REASON_UNAUTHORIZED_BANK,
-                &format!("denial carrier covers unauthorized bank {unauthorized}"),
-                &mut rejected,
-            )?;
-            continue;
-        }
+        // A denial carrier answers to the credential gate inside the apply
+        // path, where every recorded denial passes: a mutation that is not one
+        // passes straight through.
         // Content crosses this route only as client-sealed bytes. A plaintext
         // row carries no authenticated envelope, so whoever holds the bank
         // token — or a relay in front of the peer — could have invented it or
@@ -316,6 +319,7 @@ pub(crate) fn handle_push(
         if let Err(err) = apply_and_record(
             &engine,
             options,
+            auth,
             &bank,
             &m,
             &envelope,
@@ -350,3 +354,7 @@ mod server_push_denial_tests;
 #[cfg(test)]
 #[path = "server_push_stale_tests.rs"]
 mod server_push_stale_tests;
+
+#[cfg(test)]
+#[path = "server_push_sealed_tests.rs"]
+mod server_push_sealed_tests;

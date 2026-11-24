@@ -28,7 +28,7 @@
 //!
 //! Keep this module focused on the server's denial surface.
 
-use crate::credential_fixtures::{Scratch, record, secret};
+use crate::credential_fixtures::{Scratch, record_as, secret};
 use crate::denial::{
     DenialCarrier, DenialProof, DenialProofBinding, denial_mutation, denied_bank_marker,
 };
@@ -38,6 +38,7 @@ use crate::protocol::{SyncContent, SyncMutation};
 use crate::server::server_tests::{http, item_value, mutation, push_body, sqlite, wait_closed};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve_with_denial};
 use clio_store::{DekProvider, ErasureDenial, LocalDevKms, SqliteStore, Store, SyncStore};
+use clio_types::Actor;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -68,11 +69,17 @@ fn options(
     }
 }
 
-/// A scoped credential for all three banks, and the token it presents.
+/// A scoped credential for all three banks, and the token it presents. The
+/// actor carries erasure privilege, because these tests record denials.
 fn credential() -> (Scratch, String) {
     let scratch = Scratch::new("denial-serve");
     let token = secret("t");
-    scratch.write(&[record("client-a", &token, &["b-a", "b-b", "b-c"])]);
+    scratch.write(&[record_as(
+        "client-a",
+        &token,
+        Actor::Harness,
+        &["b-a", "b-b", "b-c"],
+    )]);
     (scratch, token)
 }
 
@@ -306,7 +313,7 @@ fn a_second_server_over_the_same_authority_still_refuses_a_denied_bank() {
 fn a_reopened_store_and_journal_refuse_a_bank_denied_before_the_restart() {
     let scratch = Scratch::new("denial-durable");
     let token = secret("t");
-    scratch.write(&[record("client-a", &token, &["b-a"])]);
+    scratch.write(&[record_as("client-a", &token, Actor::Harness, &["b-a"])]);
     let dir = ScratchDir::new("denial-durable");
     let store_path = dir.path.join("store.db");
     let journal = dir.path.join("erasure-journal.json");

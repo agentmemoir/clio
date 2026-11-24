@@ -73,6 +73,8 @@ pub const OP_PRUNE: &str = "prune";
 pub const REASON_MALFORMED: &str = "malformed";
 /// Dead-letter reason: bank not authorized for this token.
 pub const REASON_UNAUTHORIZED_BANK: &str = "unauthorized_bank";
+/// Dead-letter reason: the credential's actor may not record a denial.
+pub const REASON_UNAUTHORIZED_ACTOR: &str = "unauthorized_actor";
 /// Dead-letter reason: erased-subject content resurrection attempt.
 pub const REASON_ERASED_SUBJECT: &str = "erased_subject";
 /// Dead-letter reason: op not supported by this release.
