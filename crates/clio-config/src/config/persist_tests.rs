@@ -211,11 +211,58 @@ fn backup_copies_owner_only_and_skips_missing() {
         let mode = fs::metadata(&backup).expect("meta").permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "backup must be owner-only");
     }
-    // Unreadable source file surfaces an error naming the path.
+    // A directory source is refused by the descriptor's file-type check rather
+    // than read, so nothing is backed up from a path that is not a file.
     let dir = tmp("bak-dir");
     fs::create_dir_all(&dir).expect("dir");
     assert_eq!(
         backup_config_file(&dir).expect_err("read").code,
-        ErrorCode::Internal
+        ErrorCode::Forbidden
     );
+    let _ = fs::remove_dir_all(&dir);
+    if let Some(parent) = path.parent() {
+        let _ = fs::remove_dir_all(parent);
+    }
+}
+
+// A symlink planted at the source is refused, so a backup never holds the bytes
+// of a file the existence check approved. `O_NOFOLLOW` refuses the link in the
+// one open, so no descriptor ever reaches the file behind it.
+#[cfg(unix)]
+#[test]
+fn planted_symlink_at_backup_source_is_refused() {
+    use std::os::unix::fs::symlink;
+    let dir = tmp("bak-symlink");
+    fs::create_dir_all(&dir).expect("dir");
+    let secret = r#"{"credentials.embed_api_key":"sk-keep-me"}"#;
+    let victim = dir.join("victim.json");
+    fs::write(&victim, secret).expect("victim");
+    let source = dir.join("deployment.json");
+    symlink(&victim, &source).expect("symlink");
+
+    let err = backup_config_file(&source).expect_err("refused");
+
+    assert_eq!(err.code, ErrorCode::Forbidden, "{}", err.message);
+    assert!(
+        err.message.contains("symbolic link"),
+        "the refusal must name the link: {}",
+        err.message
+    );
+    assert!(
+        !dir.join(BACKUP_DIR_NAME).exists(),
+        "a refused source must not leave a backup directory behind"
+    );
+    assert_eq!(
+        fs::read_to_string(&victim).expect("victim"),
+        secret,
+        "the link target must be untouched"
+    );
+    assert!(
+        fs::symlink_metadata(&source)
+            .expect("meta")
+            .file_type()
+            .is_symlink(),
+        "the planted entry must still be the symlink, not a replaced file"
+    );
+    let _ = fs::remove_dir_all(&dir);
 }
