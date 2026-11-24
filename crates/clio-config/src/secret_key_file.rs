@@ -97,16 +97,26 @@ where
 ///
 /// `create_new` plus the mode in the same `open` call is the shape the generated
 /// `.env` already uses: no window exists in which another user can read the key,
-/// and a file that appeared since the existence check is never clobbered. The
-/// write is flushed before returning, so a key that has been reported as created
-/// is on disk.
+/// and a file that appeared since the key was found missing is never clobbered.
+/// The write is flushed before returning, so a key that has been reported as
+/// created is on disk.
+///
+/// The directory holding the file is made owner-only before the file is created,
+/// whether the directory was created here or already existed. A mode is not
+/// enough on its own: a link or a non-directory at that path is refused, and so
+/// is a directory that still grants group or other access after the change.
+///
+/// A relative path with no parent component has no directory of its own, so
+/// nothing is created or tightened for it.
 ///
 /// # Errors
-/// The directory could not be created, or the file could not be opened or written.
+/// The directory could not be created or made owner-only, or the file could not
+/// be opened or written.
 pub fn write_key_file(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), AmError> {
     if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .map_err(|err| io_error(path, "create the directory for", &err))?;
+        crate::sync_key_gate::ensure_owner_only_dir(parent)?;
     }
     let mut file = open_new_owner_only(path).map_err(|err| io_error(path, "create", &err))?;
     file.write_all(key)
@@ -156,3 +166,7 @@ where
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
 }
+
+#[cfg(test)]
+#[path = "secret_key_file_write_tests.rs"]
+mod write_tests;

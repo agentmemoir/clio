@@ -21,9 +21,7 @@
 //!
 //! ## Does not own
 //! - Where these files live, what they are called, or what they hold (see
-//!   `sync_key_file` and `sync_key_rotation`)
-//! - The path-based owner-only rule the encryption key read still uses (see
-//!   `sync_key_file::owner_only_refusal`)
+//!   `sync_key_file`, `sync_key_rotation`, and `secret_key_file`)
 //!
 //! ## Boundary
 //!
@@ -63,13 +61,27 @@ use std::path::Path;
 
 use clio_types::{AmError, ErrorCode};
 
+use crate::log;
+
+/// Report a refusal once, naming the subject, the path, and the reason.
+///
+/// Every caller of a gate therefore logs the refusal it returns, so a refused key
+/// file or key directory is a line in the log and not only a message a caller may
+/// show or drop.
+fn report_refusal(subject: &str, path: &Path, reason: &str) {
+    let shown = path.display().to_string();
+    log::warn(
+        "key material refused",
+        &[("subject", subject), ("path", &shown), ("reason", reason)],
+    );
+}
+
 /// Refuse an already-open file that is not a regular owner-only file.
 ///
-/// [`crate::sync_key_file::owner_only_refusal`] asks the path, and a path can
-/// lead to a file another account chose. This asks the descriptor, so it judges
-/// the file the caller is about to read or write whatever the path pointed at
-/// when it was opened. `subject` labels the message, on the same rule as
-/// `owner_only_refusal`, so the path in it is what names the file.
+/// A path can lead to a file another account chose. This asks the descriptor, so
+/// it judges the file the caller is about to read or write whatever the path
+/// pointed at when it was opened. `subject` labels the message, so the path in it
+/// is what names the file.
 ///
 /// The owner check is explicit — the file's uid against the effective uid of this
 /// process — because a successful open does not imply ownership: root opens and
@@ -120,6 +132,7 @@ fn descriptor_refusal_for_uid(
     } else {
         return Ok(());
     };
+    report_refusal(subject, path, refusal);
     Err(AmError::new(
         ErrorCode::Forbidden,
         format!("{subject} {}: refused because {refusal}", path.display()),
@@ -139,6 +152,7 @@ fn effective_uid() -> u32 {
 /// nothing was read from or written to it.
 #[cfg(unix)]
 fn link_refusal(path: &Path, subject: &str) -> AmError {
+    report_refusal(subject, path, "it is a symbolic link");
     AmError::new(
         ErrorCode::Forbidden,
         format!(
@@ -245,6 +259,7 @@ where
             } else {
                 "a FIFO is a pipe and not a file that holds a key"
             };
+            report_refusal(subject, path, shape);
             return Err(AmError::new(
                 ErrorCode::Forbidden,
                 format!(
@@ -328,6 +343,11 @@ pub(crate) fn read_string(file: &mut fs::File) -> std::io::Result<String> {
 
 /// Make the directory holding key material owner-only, or refuse it.
 ///
+/// Clio tightens the directory it is given only when that directory is a real,
+/// named directory, and never the process working directory or a parent of it: a
+/// path that is `.`, is empty, or is made only of `..` names a directory no key
+/// setting chose, so it is left exactly as it is.
+///
 /// The caller runs `create_dir_all` first, so a missing parent is created rather
 /// than refused. Then, in order: the parent must be a real directory — a link is
 /// refused, because `O_NOFOLLOW` on the file's name does not stop the directory
@@ -344,6 +364,12 @@ pub(crate) fn read_string(file: &mut fs::File) -> std::io::Result<String> {
 /// [`ErrorCode::Internal`] naming the path when the directory cannot be read,
 /// cannot be tightened, or still grants group or other access afterwards.
 pub(crate) fn ensure_owner_only_dir(parent: &Path) -> Result<(), AmError> {
+    if !parent
+        .components()
+        .any(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return Ok(());
+    }
     let file_type = fs::symlink_metadata(parent)
         .map_err(|err| dir_error(parent, "cannot read the Clio sync key directory", &err))?
         .file_type();
@@ -353,6 +379,7 @@ pub(crate) fn ensure_owner_only_dir(parent: &Path) -> Result<(), AmError> {
         } else {
             "not a directory"
         };
+        report_refusal("sync key directory", parent, &format!("it is {shape}"));
         return Err(AmError::new(
             ErrorCode::Forbidden,
             format!(

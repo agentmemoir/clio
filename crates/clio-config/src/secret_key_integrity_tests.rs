@@ -108,17 +108,19 @@ fn an_empty_key_is_refused_rather_than_treated_as_absent() {
 
 #[test]
 fn an_unreadable_key_file_names_the_file_and_the_env_var() {
-    let directory = unreadable_file();
+    // A name longer than the filesystem allows cannot be opened at all, so the
+    // refusal is the read failure rather than the gate's shape verdict.
+    let too_long = key_file("name-too-long").with_file_name("k".repeat(300));
 
     let err = err_of(load_or_create_with(
         &FakeStore::empty(),
-        Some(directory.clone()),
+        Some(too_long.clone()),
     ));
 
     assert_eq!(err.code, ErrorCode::Internal);
     assert!(
         err.message
-            .contains(&format!("cannot read the key file {}", directory.display())),
+            .contains(&format!("cannot read the key file {}", too_long.display())),
         "{}",
         err.message
     );
@@ -188,6 +190,92 @@ fn an_owner_only_key_file_is_read() {
 
     assert_eq!(loaded.expose(), &seeded);
     assert_eq!(loaded.location, KeyLocation::File(file));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_at_the_key_path_is_refused_rather_than_followed() {
+    use std::os::unix::fs::symlink;
+    let link = key_file("key-symlink");
+    let planted = [6_u8; KEY_LEN];
+    let target = link.with_file_name("planted-key");
+    write_key(&target, &planted);
+    symlink(&target, &link).expect("plant the link at the key path");
+
+    let err = err_of(load_or_create_with(&absent_keystore(), Some(link.clone())));
+
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(
+        err.message.contains(&format!(
+            "encryption key file {}: refused because it is a symbolic link",
+            link.display()
+        )),
+        "the refusal names the link, not its target: {}",
+        err.message
+    );
+    assert_eq!(
+        fs::read(&target).expect("read"),
+        planted,
+        "the bytes behind the link are left where they were, never returned as the key"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_read_tightens_an_existing_key_directory_to_owner_only() {
+    // A successful read already says the file belongs to this account, so a key
+    // directory other accounts can enter is a refusal rather than a working
+    // configuration. The read tightens it, and the key still loads.
+    use std::os::unix::fs::PermissionsExt;
+    let file = key_file("read-tightens-dir");
+    let seeded = [5_u8; KEY_LEN];
+    write_key(&file, &seeded);
+    let dir = file
+        .parent()
+        .expect("the key file has a directory")
+        .to_path_buf();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    let loaded = load_or_create_with(&absent_keystore(), Some(file)).expect("load");
+
+    assert_eq!(loaded.expose(), &seeded);
+    let mode = fs::metadata(&dir).expect("metadata").permissions().mode();
+    assert_eq!(
+        mode & 0o777,
+        0o700,
+        "the read made the key directory owner-only"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_directory_at_the_key_path_is_refused_as_a_forbidden_shape() {
+    let file = key_file("key-is-a-dir");
+    fs::create_dir_all(&file).expect("plant a directory at the key path");
+
+    let err = err_of(load_or_create_with(&absent_keystore(), Some(file.clone())));
+
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(
+        err.message
+            .contains("refused because it is not a regular file"),
+        "the refusal names the shape: {}",
+        err.message
+    );
+    assert!(
+        fs::metadata(&file).expect("metadata").is_dir(),
+        "the directory is left exactly as found"
+    );
+}
+
+#[test]
+fn a_missing_key_file_still_generates_one_on_first_run() {
+    let file = key_file("first-run");
+
+    let loaded = load_or_create_with(&absent_keystore(), Some(file.clone())).expect("create");
+
+    assert_eq!(loaded.location, KeyLocation::File(file.clone()));
+    assert_eq!(&fs::read(&file).expect("read"), loaded.expose());
 }
 
 #[test]

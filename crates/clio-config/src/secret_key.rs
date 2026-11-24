@@ -60,7 +60,6 @@ use crate::secret_key_source::{self, KeySource};
 use crate::secret_key_store::{
     ACCOUNT, ENCRYPTION_KEY, KeyringStore, NoKeystore, SecretStore, display_name,
 };
-use crate::sync_key_file::owner_only_refusal;
 use clio_types::{AmError, ErrorCode};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -226,8 +225,7 @@ fn load_from_file(file: Option<PathBuf>) -> Result<LoadedKey, AmError> {
             ),
         )
     })?;
-    if path.exists() {
-        let key = read_key_file(&path)?;
+    if let Some(key) = read_key_file(&path)? {
         return Ok(LoadedKey::new(key, KeyLocation::File(path)));
     }
     let key = generate();
@@ -310,25 +308,53 @@ fn generate() -> Zeroizing<[u8; KEY_LEN]> {
     Zeroizing::new(rand::random::<[u8; KEY_LEN]>())
 }
 
-fn read_key_file(path: &Path) -> Result<Zeroizing<[u8; KEY_LEN]>, AmError> {
+/// Read the encryption key file at `path`, or report that there is none yet.
+///
+/// The path is opened once, without following a link and without waiting on a
+/// FIFO, and the descriptor that open returned is what is judged and read, so the
+/// file the refusal approved is the file the bytes came from. `Ok(None)` is how a
+/// first run tells a missing key file from a damaged one, and it is the only case
+/// that generates a key.
+///
+/// The parent directory is made owner-only before the open, by the same rule the
+/// write path uses: a read that succeeds also says the directory cannot be left
+/// for another account to swap the entry in. A directory that is missing is not a
+/// refusal, because a first run has no key directory yet; the open below reports
+/// the absent file and the write path creates the directory.
+///
+/// # Errors
+/// [`ErrorCode::Forbidden`] for a link, a file that is not a regular owner-only
+/// file this process owns, or a key directory that is a link or not a directory;
+/// [`ErrorCode::Internal`] when the file or its directory cannot be opened, read,
+/// or tightened; [`ErrorCode::ConfigCorrupt`] when the key length is wrong.
+fn read_key_file(path: &Path) -> Result<Option<Zeroizing<[u8; KEY_LEN]>>, AmError> {
     let location = KeyLocation::File(path.to_path_buf());
-    // Only a path that resolves to a regular file is judged on its mode; anything
-    // else keeps the read error below, so a missing key file is never reported as
-    // a permissions problem.
-    if fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
-        owner_only_refusal(path, "encryption key file")?;
-    }
-    let raw = Zeroizing::new(fs::read(path).map_err(|err| {
+    let unreadable = |reason: String| {
         AmError::new(
             ErrorCode::Internal,
             format!(
-                "cannot read the {location}: {err}. Clio will not generate a replacement, because a \
-                 new key makes every sealed value unreadable; restore access to the file, or point \
-                 {KEY_FILE_ENV} at the file that holds the key"
+                "cannot read the {location}: {reason}. Clio will not generate a replacement, \
+                 because a new key makes every sealed value unreadable; restore access to the \
+                 file, or point {KEY_FILE_ENV} at the file that holds the key"
             ),
         )
-    })?);
-    key_from_bytes(&raw, &location)
+    };
+    if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty())
+        && parent.exists()
+    {
+        crate::sync_key_gate::ensure_owner_only_dir(parent)?;
+    }
+    let opened: Option<fs::File> =
+        crate::sync_key_gate::open_read_no_follow(path, "encryption key file", |err| {
+            unreadable(err.to_string())
+        })?;
+    let Some(mut file) = opened else {
+        return Ok(None);
+    };
+    let raw = Zeroizing::new(
+        crate::sync_key_gate::read_bytes(&mut file).map_err(|err| unreadable(err.to_string()))?,
+    );
+    key_from_bytes(&raw, &location).map(Some)
 }
 
 /// The exact-length check, shared by both stores.
