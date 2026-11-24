@@ -36,10 +36,8 @@ impl Scratch {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "am-save-{tag}-{}-{nanos}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("am-save-{tag}-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).expect("scratch dir");
         Self(dir)
     }
@@ -53,7 +51,13 @@ impl Scratch {
     fn entries(&self) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(&self.0)
             .expect("read_dir")
-            .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
         names.sort();
         names

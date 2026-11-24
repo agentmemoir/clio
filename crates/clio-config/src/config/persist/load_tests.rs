@@ -33,10 +33,8 @@ impl Scratch {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "am-load-{tag}-{}-{nanos}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("am-load-{tag}-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).expect("scratch dir");
         Self(dir)
     }

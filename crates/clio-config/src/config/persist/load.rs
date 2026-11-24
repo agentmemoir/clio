@@ -128,8 +128,7 @@ impl CheckedOverwrite {
                 }
             }
             Some(expected) => {
-                let same = entry
-                    .is_some_and(|meta| meta.is_file() && expected.matches(&meta));
+                let same = entry.is_some_and(|meta| meta.is_file() && expected.matches(&meta));
                 if !same {
                     return Err(changed_failure(path));
                 }
