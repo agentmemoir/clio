@@ -72,6 +72,69 @@ enum SealedCheck {
     Refused,
 }
 
+/// What the denial-carrier gates allow for one mutation.
+enum CarrierCheck {
+    /// The mutation may take the ordinary apply path.
+    Apply,
+    /// The carrier was quarantined by a gate.
+    Refused,
+}
+
+/// Apply the denial-carrier gates to one mutation.
+///
+/// A carrier records one serve marker per covered bank before its proof
+/// exists, so every covered bank must be authorized first: a credential for one
+/// bank must never durably refuse another. A carrier also durably refuses its
+/// subject on this whole node, so only an actor with erasure privilege may send
+/// one at all: a bank token proves reach, not the authority to erase. A
+/// mutation that does not decode as a carrier passes through, and the
+/// plaintext refusal quarantines it rather than reading it as one.
+///
+/// # Errors
+/// The quarantine write of a refused carrier.
+fn check_denial_carrier(
+    engine: &ApplyEngine<'_>,
+    options: &ServeOptions,
+    auth: &AuthOutcome,
+    bank: &str,
+    m: &SyncMutation,
+    envelope: &str,
+    rejected: &mut Vec<String>,
+) -> Result<CarrierCheck, AmError> {
+    let Ok(Some(carrier)) = crate::denial::denial_carrier(m) else {
+        return Ok(CarrierCheck::Apply);
+    };
+    if !auth.may_record_denial() {
+        refuse(
+            engine,
+            bank,
+            m,
+            envelope,
+            crate::protocol::REASON_UNAUTHORIZED_ACTOR,
+            DENIAL_ACTOR_REFUSAL,
+            rejected,
+        )?;
+        return Ok(CarrierCheck::Refused);
+    }
+    if let Some(unauthorized) = carrier
+        .covered_banks()
+        .iter()
+        .find(|covered| !bank_authorized(options, auth, covered))
+    {
+        refuse(
+            engine,
+            bank,
+            m,
+            envelope,
+            crate::protocol::REASON_UNAUTHORIZED_BANK,
+            &format!("denial carrier covers unauthorized bank {unauthorized}"),
+            rejected,
+        )?;
+        return Ok(CarrierCheck::Refused);
+    }
+    Ok(CarrierCheck::Apply)
+}
+
 /// Refuse a sealed mutation whose resolved subject a recorded denial covers.
 ///
 /// A sealed row keeps its subject inside the ciphertext, so the apply guard's
@@ -271,43 +334,12 @@ pub(crate) fn handle_push(
             )?;
             continue;
         }
-        // A denial carrier records one serve marker per covered bank before
-        // the proof exists, so every covered bank must be authorized first:
-        // a credential for one bank must never durably refuse another. A
-        // carrier also durably refuses its subject on this whole node, so
-        // only an actor with erasure privilege may send one at all: a bank
-        // token proves reach, not the authority to erase. A carrier that does
-        // not decode is not a carrier, and the plaintext refusal below
-        // quarantines it rather than reading it as one.
-        if let Ok(Some(carrier)) = crate::denial::denial_carrier(&m) {
-            if !auth.may_record_denial() {
-                refuse(
-                    &engine,
-                    &bank,
-                    &m,
-                    &envelope,
-                    crate::protocol::REASON_UNAUTHORIZED_ACTOR,
-                    DENIAL_ACTOR_REFUSAL,
-                    &mut rejected,
-                )?;
-                continue;
-            }
-            if let Some(unauthorized) = carrier
-                .covered_banks()
-                .iter()
-                .find(|covered| !bank_authorized(options, auth, covered))
-            {
-                refuse(
-                    &engine,
-                    &bank,
-                    &m,
-                    &envelope,
-                    crate::protocol::REASON_UNAUTHORIZED_BANK,
-                    &format!("denial carrier covers unauthorized bank {unauthorized}"),
-                    &mut rejected,
-                )?;
-                continue;
-            }
+        // A denial carrier answers to the gates below; a mutation that is not
+        // one passes straight through them.
+        match check_denial_carrier(&engine, options, auth, &bank, &m, &envelope, &mut rejected) {
+            Ok(CarrierCheck::Apply) => {}
+            Ok(CarrierCheck::Refused) => continue,
+            Err(err) => return write_status_error(stream, 500, &err),
         }
         // Content crosses this route only as client-sealed bytes. A plaintext
         // row carries no authenticated envelope, so whoever holds the bank
@@ -373,3 +405,7 @@ mod server_push_denial_tests;
 #[cfg(test)]
 #[path = "server_push_stale_tests.rs"]
 mod server_push_stale_tests;
+
+#[cfg(test)]
+#[path = "server_push_sealed_tests.rs"]
+mod server_push_sealed_tests;
