@@ -11,7 +11,9 @@
 //! - The sync key file path resolution (`CLIO_SYNC_KEY_FILE`, else beside the
 //!   encryption key file)
 //! - Creating and reading the raw 32-byte sync key file
-//! - The owner-only refusal on read, and the `sync-key-created` sidecar
+//! - The path-based owner-only refusal the encryption key read reuses, and the
+//!   `sync-key-created` sidecar (the descriptor gate and the no-follow openers
+//!   live in `sync_key_gate`)
 //!
 //! ## Does not own
 //! - Which store holds the sync key (see `sync_key` and `secret_key_source`)
@@ -95,12 +97,18 @@ pub(crate) fn sidecar_path(key_file: Option<&Path>) -> Option<PathBuf> {
 /// or readable by another account is not this key, and guessing would lock away
 /// everything sealed under the real one.
 ///
+/// The path is opened once, without following a link and without waiting on a
+/// FIFO, and the descriptor that open returned is what is judged and read, so the
+/// file the refusal approved is the file the bytes came from.
+///
 /// # Errors
-/// The mode grants group or other access, the file cannot be read, or its length
-/// is wrong.
+/// A link, a file that is not regular, is owned by another user, or grants group
+/// or other access ([`ErrorCode::Forbidden`]); the file cannot be opened or read
+/// ([`ErrorCode::Internal`]); or its length is wrong
+/// ([`ErrorCode::ConfigCorrupt`]).
 pub(crate) fn read_key(path: &Path) -> Result<Zeroizing<[u8; KEY_LEN]>, AmError> {
-    owner_only_refusal(path, "sync key file")?;
-    let raw = Zeroizing::new(fs::read(path).map_err(|err| {
+    let mut file = open_judged(path, "sync key file")?;
+    let raw = Zeroizing::new(crate::sync_key_gate::read_bytes(&mut file).map_err(|err| {
         AmError::new(
             ErrorCode::Internal,
             format!(
@@ -141,6 +149,7 @@ pub(crate) fn write_key(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), AmError>
     if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .map_err(|err| io_error(path, "create the directory for", &err))?;
+        crate::sync_key_gate::ensure_owner_only_dir(parent)?;
     }
     let mut file = open_new_owner_only(path).map_err(|err| io_error(path, "create", &err))?;
     file.write_all(key)
@@ -226,6 +235,7 @@ pub(crate) fn write_created(key_file: Option<&Path>, stamp: &str) -> Result<(), 
     if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .map_err(|err| io_error(&path, "create the directory for", &err))?;
+        crate::sync_key_gate::ensure_owner_only_dir(parent)?;
     }
     match fs::remove_file(&path) {
         Ok(()) => {}
@@ -284,6 +294,33 @@ pub(crate) fn owner_only_refusal(path: &Path, subject: &str) -> Result<(), AmErr
 #[cfg(not(unix))]
 pub(crate) fn owner_only_refusal(_path: &Path, _subject: &str) -> Result<(), AmError> {
     Ok(())
+}
+
+/// Open `path` for reading once, judged on the descriptor that open returned.
+///
+/// The gate in [`crate::sync_key_gate`] does the open without following a link or
+/// waiting on a FIFO, and refuses a descriptor that is not a regular owner-only
+/// file this process owns. Nothing here asks the path again, so the file the
+/// refusal approved is the file the caller reads from.
+///
+/// # Errors
+/// [`ErrorCode::Forbidden`] for a link or a refused descriptor, and the
+/// missing-or-unreadable refusal naming the path when the file is absent or the
+/// open failed.
+fn open_judged(path: &Path, subject: &str) -> Result<fs::File, AmError> {
+    let unreadable = |reason: String| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!(
+                "cannot read the Clio {subject} {}: {reason}. Clio will not generate a \
+                 replacement, because a new key cannot open anything sealed under the old one; \
+                 restore access to the file and run again",
+                path.display()
+            ),
+        )
+    };
+    crate::sync_key_gate::open_read_no_follow(path, subject, |err| unreadable(err.to_string()))?
+        .ok_or_else(|| unreadable("the file does not exist".to_owned()))
 }
 
 /// A sync-key file that could not be created or written.

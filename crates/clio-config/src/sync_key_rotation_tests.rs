@@ -103,10 +103,10 @@ fn a_group_readable_archive_is_refused() {
 
     let err = read_entries(Some(&dir.key())).expect_err("not owner-only");
 
-    // The archive is refused under the sync key file label; the path in the
-    // message is what names the archive.
+    // The archive is refused under the archive's own label; the path in the
+    // message is what names the file an operator has to restrict.
     let expected = format!(
-        "sync key file {}: refused because it is not owner-only; restrict it to the owner \
+        "sync key archive {}: refused because it is not owner-only; restrict it to the owner \
          (0600) and run again",
         dir.path().join(ARCHIVE_NAME).display()
     );
@@ -193,13 +193,29 @@ fn an_archive_that_cannot_be_opened_for_writing_is_refused() {
     )
     .expect_err("the archive refuses the write");
 
-    assert_eq!(err.code, clio_types::ErrorCode::Internal);
-    assert!(
-        err.message
-            .contains("cannot write the Clio sync key archive"),
-        "{}",
-        err.message
-    );
+    // `EISDIR` arrives before any descriptor exists to judge, and it is the same
+    // refusal a FIFO gets: the path holds a shape that cannot hold a key, so it
+    // is `Forbidden` and not an internal failure.
+    #[cfg(unix)]
+    {
+        assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+        let expected = format!(
+            "sync key archive {}: refused because it is not a regular file; a directory is not a \
+             file that holds a key, so replace it with the file itself and run again",
+            dir.path().join(ARCHIVE_NAME).display()
+        );
+        assert_eq!(err.message, expected);
+    }
+    #[cfg(not(unix))]
+    {
+        assert_eq!(err.code, clio_types::ErrorCode::Internal);
+        assert!(
+            err.message
+                .contains("cannot write the Clio sync key archive"),
+            "the archive reports under its own name, not the key file's: {}",
+            err.message
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -236,7 +252,7 @@ fn an_appended_key_refuses_an_archive_that_is_not_owner_only() {
     // The append path reports the same refusal as the read path, archive label
     // and all, so the two cannot drift apart.
     let expected = format!(
-        "sync key file {}: refused because it is not owner-only; restrict it to the owner \
+        "sync key archive {}: refused because it is not owner-only; restrict it to the owner \
          (0600) and run again",
         dir.path().join(ARCHIVE_NAME).display()
     );
@@ -278,11 +294,102 @@ fn an_unreadable_archive_is_refused_not_read_as_empty() {
 
     let err = read_entries(Some(&dir.key())).expect_err("a directory cannot be read");
 
-    assert_eq!(err.code, clio_types::ErrorCode::Internal);
+    // The descriptor's file type is checked before the read, so a directory is
+    // refused as the wrong shape of file rather than reported as a read that
+    // failed, on the same rule the token store uses.
+    #[cfg(unix)]
+    {
+        assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+        assert!(
+            err.message.contains("not a regular file"),
+            "{}",
+            err.message
+        );
+        assert!(
+            err.message.contains("sync key archive"),
+            "the refusal names the archive, not the key file: {}",
+            err.message
+        );
+    }
+    #[cfg(not(unix))]
+    {
+        assert_eq!(err.code, clio_types::ErrorCode::Internal);
+        assert!(
+            err.message
+                .contains("cannot read the Clio sync key archive"),
+            "{}",
+            err.message
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn an_appended_key_refuses_a_link_at_the_archive_path() {
+    // A link at the archive path that resolves to an owner-only file passes any
+    // check that asks the path, so the refusal has to come from the open and the
+    // descriptor. The target stays empty, which is the leak this guards.
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let dir = TempDir::new("archive-symlink");
+    let target = dir.path().join("target");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&target)
+        .expect("seed an owner-only target");
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    std::os::unix::fs::symlink(&target, dir.path().join(ARCHIVE_NAME)).expect("plant the link");
+
+    let err = append_entry(
+        Some(&dir.key()),
+        &ArchivedSyncKey {
+            key_b64: "AAAA".to_owned(),
+            created_at: None,
+        },
+    )
+    .expect_err("a link is not the archive file");
+
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+    let expected = format!(
+        "sync key archive {}: refused because it is a symbolic link; replace it with the file \
+         itself and run again",
+        dir.path().join(ARCHIVE_NAME).display()
+    );
+    assert_eq!(
+        err.message, expected,
+        "the refusal names the path an operator has to replace, and what is wrong with it"
+    );
+    let received = std::fs::read_to_string(&target).expect("read the target back");
     assert!(
-        err.message
-            .contains("cannot read the Clio sync key archive"),
-        "{}",
-        err.message
+        received.is_empty(),
+        "the refused append wrote nothing into the target: {received:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_existing_archive_directory_becomes_owner_only_on_append() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("archive-dir-mode");
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    append_entry(
+        Some(&dir.key()),
+        &ArchivedSyncKey {
+            key_b64: "AAAA".to_owned(),
+            created_at: None,
+        },
+    )
+    .expect("append");
+
+    let mode = std::fs::metadata(dir.path())
+        .expect("metadata")
+        .permissions()
+        .mode();
+    assert_eq!(
+        mode & 0o777,
+        0o700,
+        "the directory holds key material, so it is owner-only even though it already existed"
     );
 }

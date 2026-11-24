@@ -353,8 +353,23 @@ fn a_key_path_that_is_a_readable_directory_is_refused_on_read() {
 
     let err = read_key(&dir.key()).expect_err("a directory is not a key");
 
-    assert_eq!(err.code, clio_types::ErrorCode::Internal);
-    assert!(err.message.contains("cannot read"), "{}", err.message);
+    // The descriptor's file type is checked before the read, so a directory is
+    // refused as the wrong shape of file rather than reported as a read that
+    // failed; the same verdict the token store gives a directory at its path.
+    #[cfg(unix)]
+    {
+        assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+        assert!(
+            err.message.contains("not a regular file"),
+            "{}",
+            err.message
+        );
+    }
+    #[cfg(not(unix))]
+    {
+        assert_eq!(err.code, clio_types::ErrorCode::Internal);
+        assert!(err.message.contains("cannot read"), "{}", err.message);
+    }
 }
 
 #[test]

@@ -69,6 +69,9 @@ pub mod secret_seal;
 pub mod sync_device_id;
 pub mod sync_key;
 pub mod sync_key_file;
+// The gate is an internal seam: every item in it is `pub(crate)`, so it is
+// declared crate-private and exports no public interface.
+pub(crate) mod sync_key_gate;
 pub mod sync_key_rotation;
 pub mod sync_key_store;
 pub mod sync_key_value;
