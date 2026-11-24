@@ -69,6 +69,7 @@ pub mod secret_seal;
 pub mod sync_device_id;
 pub mod sync_key;
 pub mod sync_key_file;
+pub mod sync_key_gate;
 pub mod sync_key_rotation;
 pub mod sync_key_store;
 pub mod sync_key_value;

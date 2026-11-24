@@ -11,9 +11,9 @@
 //! - The sync key file path resolution (`CLIO_SYNC_KEY_FILE`, else beside the
 //!   encryption key file)
 //! - Creating and reading the raw 32-byte sync key file
-//! - The owner-only refusal on read, the descriptor refusal and no-follow
-//!   append opener the archive writes through, and the `sync-key-created`
-//!   sidecar
+//! - The path-based owner-only refusal the encryption key read reuses, and the
+//!   `sync-key-created` sidecar (the descriptor gate and the no-follow openers
+//!   live in `sync_key_gate`)
 //!
 //! ## Does not own
 //! - Which store holds the sync key (see `sync_key` and `secret_key_source`)
@@ -97,12 +97,18 @@ pub(crate) fn sidecar_path(key_file: Option<&Path>) -> Option<PathBuf> {
 /// or readable by another account is not this key, and guessing would lock away
 /// everything sealed under the real one.
 ///
+/// The path is opened once, without following a link and without waiting on a
+/// FIFO, and the descriptor that open returned is what is judged and read, so the
+/// file the refusal approved is the file the bytes came from.
+///
 /// # Errors
-/// The mode grants group or other access, the file cannot be read, or its length
-/// is wrong.
+/// A link, a file that is not regular, is owned by another user, or grants group
+/// or other access ([`ErrorCode::Forbidden`]); the file cannot be opened or read
+/// ([`ErrorCode::Internal`]); or its length is wrong
+/// ([`ErrorCode::ConfigCorrupt`]).
 pub(crate) fn read_key(path: &Path) -> Result<Zeroizing<[u8; KEY_LEN]>, AmError> {
-    owner_only_refusal(path, "sync key file")?;
-    let raw = Zeroizing::new(fs::read(path).map_err(|err| {
+    let mut file = open_judged(path, "sync key file")?;
+    let raw = Zeroizing::new(crate::sync_key_gate::read_bytes(&mut file).map_err(|err| {
         AmError::new(
             ErrorCode::Internal,
             format!(
@@ -143,7 +149,7 @@ pub(crate) fn write_key(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), AmError>
     if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .map_err(|err| io_error(path, "create the directory for", &err))?;
-        crate::config::restrict_dir(parent);
+        crate::sync_key_gate::ensure_owner_only_dir(parent)?;
     }
     let mut file = open_new_owner_only(path).map_err(|err| io_error(path, "create", &err))?;
     file.write_all(key)
@@ -229,7 +235,7 @@ pub(crate) fn write_created(key_file: Option<&Path>, stamp: &str) -> Result<(), 
     if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .map_err(|err| io_error(&path, "create the directory for", &err))?;
-        crate::config::restrict_dir(parent);
+        crate::sync_key_gate::ensure_owner_only_dir(parent)?;
     }
     match fs::remove_file(&path) {
         Ok(()) => {}
@@ -290,110 +296,31 @@ pub(crate) fn owner_only_refusal(_path: &Path, _subject: &str) -> Result<(), AmE
     Ok(())
 }
 
-/// Refuse an already-open file that is not a regular owner-only file.
+/// Open `path` for reading once, judged on the descriptor that open returned.
 ///
-/// [`owner_only_refusal`] asks the path, and a path can lead to a file another
-/// account chose. This asks the descriptor, so it judges the file the caller is
-/// about to write to whatever the path pointed at when it was opened. `subject`
-/// labels the message on the same rule as [`owner_only_refusal`].
-///
-/// The owner check is the mode bits plus the open's own permission check, not a
-/// read of the effective uid: a 0600 file another account owns cannot be opened
-/// for append by this process, so a successful open plus an owner-only mode
-/// already means the caller owns the file. Reading the effective uid would need
-/// `unsafe` and could not change the outcome.
+/// The gate in [`crate::sync_key_gate`] does the open without following a link or
+/// waiting on a FIFO, and refuses a descriptor that is not a regular owner-only
+/// file this process owns. Nothing here asks the path again, so the file the
+/// refusal approved is the file the caller reads from.
 ///
 /// # Errors
-/// [`ErrorCode::Forbidden`] naming the path when the file is not regular or
-/// grants group or other access.
-#[cfg(unix)]
-pub(crate) fn descriptor_refusal(
-    file: &fs::File,
-    path: &Path,
-    subject: &str,
-) -> Result<(), AmError> {
-    use std::os::unix::fs::PermissionsExt;
-    let meta = file.metadata().map_err(|err| {
+/// [`ErrorCode::Forbidden`] for a link or a refused descriptor, and the
+/// missing-or-unreadable refusal naming the path when the file is absent or the
+/// open failed.
+fn open_judged(path: &Path, subject: &str) -> Result<fs::File, AmError> {
+    let unreadable = |reason: String| {
         AmError::new(
             ErrorCode::Internal,
-            format!("cannot read the Clio {subject} {}: {err}", path.display()),
-        )
-    })?;
-    let refusal = if !meta.is_file() {
-        "it is not a regular file"
-    } else if meta.permissions().mode() & 0o077 != 0 {
-        "it is not owner-only; restrict it to the owner (0600) and run again"
-    } else {
-        return Ok(());
-    };
-    Err(AmError::new(
-        ErrorCode::Forbidden,
-        format!("{subject} {}: refused because {refusal}", path.display()),
-    ))
-}
-
-/// Non-Unix platforms have no mode bits to check on a descriptor, so the rule is
-/// a no-op there like [`owner_only_refusal`].
-#[cfg(not(unix))]
-pub(crate) fn descriptor_refusal(
-    _file: &fs::File,
-    _path: &Path,
-    _subject: &str,
-) -> Result<(), AmError> {
-    Ok(())
-}
-
-/// Open an existing file for appending without following a link at the path.
-///
-/// `O_NOFOLLOW` makes the open itself refuse a link, so the descriptor returned
-/// here is the file the path names. It is then judged by [`descriptor_refusal`]
-/// before the caller writes key material through it.
-///
-/// # Errors
-/// The path is a link ([`ErrorCode::Forbidden`]), the open failed
-/// ([`ErrorCode::Internal`]), or [`descriptor_refusal`] refused the descriptor.
-#[cfg(unix)]
-pub(crate) fn open_append_no_follow(path: &Path, subject: &str) -> Result<fs::File, AmError> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let open_error = |err: std::io::Error| {
-        if err.raw_os_error() == Some(libc::ELOOP) {
-            return AmError::new(
-                ErrorCode::Forbidden,
-                format!(
-                    "{subject} {}: refused because it is a symbolic link; replace it with the \
-                     file itself and run again",
-                    path.display()
-                ),
-            );
-        }
-        AmError::new(
-            ErrorCode::Internal,
-            format!("cannot open the Clio {subject} {}: {err}", path.display()),
+            format!(
+                "cannot read the Clio {subject} {}: {reason}. Clio will not generate a \
+                 replacement, because a new key cannot open anything sealed under the old one; \
+                 restore access to the file and run again",
+                path.display()
+            ),
         )
     };
-    let file = fs::OpenOptions::new()
-        .append(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(open_error)?;
-    descriptor_refusal(&file, path, subject)?;
-    Ok(file)
-}
-
-/// Non-Unix platforms have no `O_NOFOLLOW` and nothing for
-/// [`descriptor_refusal`] to judge, so an append opens the path as it always
-/// has.
-#[cfg(not(unix))]
-pub(crate) fn open_append_no_follow(path: &Path, subject: &str) -> Result<fs::File, AmError> {
-    fs::OpenOptions::new()
-        .append(true)
-        .open(path)
-        .map_err(|err| {
-            AmError::new(
-                ErrorCode::Internal,
-                format!("cannot open the Clio {subject} {}: {err}", path.display()),
-            )
-        })
+    crate::sync_key_gate::open_read_no_follow(path, subject, |err| unreadable(err.to_string()))?
+        .ok_or_else(|| unreadable("the file does not exist".to_owned()))
 }
 
 /// A sync-key file that could not be created or written.
