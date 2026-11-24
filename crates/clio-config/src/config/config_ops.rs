@@ -22,7 +22,7 @@
 //! Keep this module focused on the `config_get` / `config_set` Runtime handlers.
 
 use super::merge::{path_to_pointer, value_as_string};
-use super::persist::{ensure_overwritable, save_overlay_file};
+use super::persist::{check_overwritable, save_overlay_file_checked};
 use super::validate::{validate_set_path, validate_set_value};
 use super::{ConfigGetData, ConfigScope, ConfigSetData, Runtime};
 use crate::error::{AmError, ErrorCode, ToolResult};
@@ -103,8 +103,8 @@ impl Runtime {
         if scope == ConfigScope::Deployment
             && let Some(path_buf) = self.deployment_path.clone()
         {
-            ensure_overwritable(&path_buf)?;
-            save_overlay_file(&path_buf, &self.deployment_overlay)?;
+            let checked = check_overwritable(&path_buf)?;
+            save_overlay_file_checked(&path_buf, &self.deployment_overlay, &checked)?;
         }
         log::info("config_set", &[("path", path), ("scope", scope.as_str())]);
         let shown = value_as_string(&value);

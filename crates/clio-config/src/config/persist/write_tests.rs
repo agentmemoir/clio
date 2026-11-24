@@ -223,6 +223,32 @@ fn planted_symlink_at_atomic_temp_name_is_refused() {
 }
 
 #[test]
+fn failed_pre_rename_check_removes_the_temp_file_and_keeps_the_target() {
+    let dir = tmp("check-refused");
+    fs::create_dir_all(&dir).expect("dir");
+    let path = dir.join("deployment.json");
+    fs::write(&path, "old").expect("seed");
+
+    let err = write_private_atomic_checked(&path, "new", || {
+        Err(AmError::new(ErrorCode::Internal, "changed"))
+    })
+    .expect_err("the check refuses the replacement");
+
+    assert_eq!(err.message, "changed");
+    assert_eq!(
+        fs::read_to_string(&path).expect("read"),
+        "old",
+        "a refused check must not touch the target"
+    );
+    assert_eq!(
+        entry_names(&dir),
+        vec!["deployment.json".to_owned()],
+        "a refused check must remove its own temp file"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn failed_rename_removes_the_temp_file() {
     let dir = tmp("rename-missing-target-dir");
     fs::create_dir_all(&dir).expect("dir");

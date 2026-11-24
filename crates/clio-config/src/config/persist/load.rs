@@ -28,6 +28,9 @@ use crate::error::{AmError, ErrorCode};
 use crate::secret_seal;
 use serde_json::Value;
 use std::fs;
+use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 /// Load a flat `{ "dot.path": value, ... }` or nested JSON object into an overlay.
@@ -61,28 +64,175 @@ pub fn load_overlay_file(path: &Path) -> Result<Overlay, AmError> {
 /// so it keeps calling `save_overlay_file` directly; this gate is only for
 /// `config_set`, which has no backup.
 ///
+/// The file is opened once and judged from the bytes read through that open
+/// handle. The handle stays in the returned guard, so the save that follows
+/// can refuse to replace a path that no longer names the file that was
+/// judged.
+///
 /// # Errors
 /// The existing file cannot be loaded (unsealed secret, bad JSON, unreadable).
-pub(crate) fn ensure_overwritable(path: &Path) -> Result<(), AmError> {
+pub(crate) fn check_overwritable(path: &Path) -> Result<CheckedOverwrite, AmError> {
     // Only regular files carry prior settings to protect; a directory path
     // falls through to the save, which already fails it as `Internal`.
-    if path.is_file() {
-        load_overlay_file(path).map(|_| ())?;
+    if !path.is_file() {
+        return Ok(CheckedOverwrite {
+            _file: None,
+            identity: None,
+        });
     }
-    Ok(())
+    let mut file = fs::File::open(path).map_err(|e| read_failure(path, &e))?;
+    let meta = file.metadata().map_err(|e| read_failure(path, &e))?;
+    let text = read_text(&mut file, path)?;
+    parse_overlay(&text, path)?;
+    Ok(CheckedOverwrite {
+        _file: Some(file),
+        identity: Some(FileIdentity::from_metadata(&meta)),
+    })
+}
+
+/// A deployment file that passed the overwrite check.
+///
+/// The open handle keeps the judged file alive. `ensure_unchanged` compares
+/// the path with that file just before a rename replaces it.
+pub(crate) struct CheckedOverwrite {
+    /// Keeps the judged file open for the life of the guard.
+    _file: Option<fs::File>,
+    /// `None` means no file sat at the path when the check ran.
+    identity: Option<FileIdentity>,
+}
+
+impl CheckedOverwrite {
+    /// Refuse when the path no longer names the file this check judged.
+    ///
+    /// The check looks at the entry itself, not what it points at, because the
+    /// rename replaces the entry. A symbolic link at the path is refused: the
+    /// loader follows it but the rename would replace the link entry, so the
+    /// two steps would judge different objects.
+    ///
+    /// # Errors
+    /// The entry is a symbolic link, the path is gone, is no longer a regular
+    /// file, names a different file, or gained a regular file after an absent
+    /// check.
+    pub(crate) fn ensure_unchanged(&self, path: &Path) -> Result<(), AmError> {
+        let entry = fs::symlink_metadata(path).ok();
+        if entry
+            .as_ref()
+            .is_some_and(|meta| meta.file_type().is_symlink())
+        {
+            return Err(symlink_failure(path));
+        }
+        match self.identity {
+            None => {
+                if entry.is_some_and(|meta| meta.is_file()) {
+                    return Err(changed_failure(path));
+                }
+            }
+            Some(expected) => {
+                let same = entry
+                    .is_some_and(|meta| meta.is_file() && expected.matches(&meta));
+                if !same {
+                    return Err(changed_failure(path));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The identity of one file, so a later stat can tell the same file apart from
+/// a different entry at the same path.
+#[derive(Debug, Clone, Copy)]
+struct FileIdentity {
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+}
+
+impl FileIdentity {
+    #[cfg(unix)]
+    fn from_metadata(meta: &fs::Metadata) -> Self {
+        Self {
+            dev: meta.dev(),
+            ino: meta.ino(),
+        }
+    }
+
+    /// Other platforms carry no comparison fields, so they cannot tell two
+    /// entries apart. The path-must-still-be-a-file part of the check still
+    /// runs there.
+    #[cfg(not(unix))]
+    fn from_metadata(_meta: &fs::Metadata) -> Self {
+        Self {}
+    }
+
+    #[cfg(unix)]
+    fn matches(self, meta: &fs::Metadata) -> bool {
+        self.dev == meta.dev() && self.ino == meta.ino()
+    }
+
+    #[cfg(not(unix))]
+    fn matches(self, _meta: &fs::Metadata) -> bool {
+        true
+    }
+}
+
+/// The refusal for a deployment path that is a symbolic link.
+fn symlink_failure(path: &Path) -> AmError {
+    AmError::new(
+        ErrorCode::ConfigCorrupt,
+        format!(
+            "deployment config {} is a symbolic link, and Clio will not replace a link entry. \
+             Replace the link with the real file and run the command again",
+            path.display()
+        ),
+    )
+}
+
+/// The refusal for a deployment file that changed after it was checked.
+fn changed_failure(path: &Path) -> AmError {
+    AmError::new(
+        ErrorCode::ConfigCorrupt,
+        format!(
+            "deployment config {} changed while Clio checked it, so Clio refused to replace it \
+             and wrote nothing. Run the command again",
+            path.display()
+        ),
+    )
 }
 
 fn load_overlay_inner(path: &Path) -> Result<Overlay, AmError> {
     if !path.exists() {
         return Ok(Overlay::new());
     }
-    let text = fs::read_to_string(path).map_err(|e| {
-        AmError::new(
-            ErrorCode::ConfigCorrupt,
-            format!("failed to read deployment config {}: {e}", path.display()),
-        )
-    })?;
-    let value: Value = serde_json::from_str(&text).map_err(|e| {
+    let mut file = fs::File::open(path).map_err(|e| read_failure(path, &e))?;
+    let text = read_text(&mut file, path)?;
+    parse_overlay(&text, path)
+}
+
+/// Read the whole file through `source`.
+fn read_text(mut source: impl Read, path: &Path) -> Result<String, AmError> {
+    let mut text = String::new();
+    source
+        .read_to_string(&mut text)
+        .map_err(|e| read_failure(path, &e))?;
+    Ok(text)
+}
+
+fn read_failure(path: &Path, error: &std::io::Error) -> AmError {
+    AmError::new(
+        ErrorCode::ConfigCorrupt,
+        format!(
+            "failed to read deployment config {}: {error}",
+            path.display()
+        ),
+    )
+}
+
+/// Parse and open the text of one deployment file. Shared by the plain load
+/// and the overwrite check, so both judge the same bytes.
+fn parse_overlay(text: &str, path: &Path) -> Result<Overlay, AmError> {
+    let value: Value = serde_json::from_str(text).map_err(|e| {
         AmError::new(
             ErrorCode::ConfigCorrupt,
             format!("deployment config parse error: {e}"),
@@ -160,3 +310,7 @@ fn unsealed_failure(key: &str, path: &Path) -> AmError {
         ),
     )
 }
+
+#[cfg(test)]
+#[path = "load_tests.rs"]
+mod load_tests;
