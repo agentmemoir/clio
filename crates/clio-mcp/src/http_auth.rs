@@ -34,8 +34,23 @@
 //! inode, modification time, and length are compared with the values captured
 //! when the records were loaded. When they differ, the shared loader runs again
 //! and the new records replace the old snapshot, so a secret revoked by the
-//! token management verbs stops resolving on the running server. The cost is
-//! one `stat` per authorized request.
+//! token management verbs stops resolving on the running server.
+//!
+//! The cost depends on the path the request takes. A store already in step with
+//! the file is answered from one `stat` and no read at all. A reload that finds
+//! the file changed pays a `stat`, the read, and a second `stat`, and may
+//! repeat that up to `REFRESH_ATTEMPTS` (3) times before it fails closed.
+//!
+//! A new snapshot is published only when the file was the same version before
+//! and after it was read, so a revoke that lands mid-read is not undone by the
+//! records that read returned. A file that keeps moving is re-read a bounded
+//! number of times and then refused rather than served from a guess.
+//!
+//! That is the whole guarantee: a snapshot read while the store changed is
+//! never published. It does not close the last gap between the two steps, so a
+//! revocation that completes after `refresh`'s final stat and before
+//! `resolve`'s digest compare can still authorize that one request already in
+//! flight. A revoke that lands after that stat is seen by the next request.
 //!
 //! A reload that fails refuses the request rather than serving the previous
 //! snapshot: a stale snapshot would keep a revoked secret alive. The reason is
@@ -55,6 +70,13 @@ use clio_config::auth_tokens::{AuthTokenRecord, ct_eq, digest_hex, load_auth_tok
 use clio_types::{AmError, ErrorCode};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+
+/// How many times a reload may re-read a store that changed while it was read.
+///
+/// A writer that is still running when the read starts is likely still running
+/// when it ends, so one retry is usually enough; the bound is what turns a store
+/// that never settles into a refusal instead of a spin.
+const REFRESH_ATTEMPTS: usize = 3;
 
 /// One loaded record: the principal it names plus the only secret-derived value
 /// that exists on disk.
@@ -235,33 +257,50 @@ impl CredentialStore {
 
     /// Reload the records when the file no longer matches the snapshot.
     fn refresh(&self) -> Result<(), AmError> {
+        self.refresh_with(|| {})
+    }
+
+    /// Reload under a read-verify-publish sequence, retrying a moving file.
+    ///
+    /// `after_read` runs between the load and the stat that follows it. Nothing
+    /// calls it in production; a test uses it to place a writer where it would
+    /// otherwise be a race, since the sequence below is what that writer's
+    /// interleaving depends on.
+    ///
+    /// A snapshot is published only when the file was the same version before
+    /// and after it was read, and only when no other reload published while it
+    /// was being read: a store that changed underneath the read says nothing
+    /// about what a revoked record is, so its records are discarded rather than
+    /// made current.
+    fn refresh_with(&self, mut after_read: impl FnMut()) -> Result<(), AmError> {
         let Some(path) = self.path.as_deref() else {
             return Ok(());
         };
-        let metadata = match std::fs::metadata(path) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                return Err(self.degrade(format!(
-                    "credential store {} cannot be read: {error}",
-                    path.display()
-                )));
-            }
-        };
-        let current = fingerprint(&metadata);
-        let in_step = self.state().fingerprint.as_ref() == Some(&current);
-        if in_step {
-            return Ok(());
-        }
-        match load_auth_tokens(path) {
-            Ok(records) => {
-                let mut state = self.state();
+        for _ in 0..REFRESH_ATTEMPTS {
+            let before = stat_fingerprint(path).map_err(|error| self.degrade(error.message))?;
+            let seen = {
+                let state = self.state();
+                let seen = state.fingerprint;
+                if seen.as_ref() == Some(&before) {
+                    return Ok(());
+                }
+                seen
+            };
+            let records = load_auth_tokens(path).map_err(|error| self.degrade(error.message))?;
+            after_read();
+            let after = stat_fingerprint(path).map_err(|error| self.degrade(error.message))?;
+            let mut state = self.state();
+            if before == after && state.fingerprint == seen {
                 state.replace(records);
-                state.fingerprint = Some(current);
+                state.fingerprint = Some(after);
                 state.degraded = false;
-                Ok(())
+                return Ok(());
             }
-            Err(error) => Err(self.degrade(error.message)),
         }
+        Err(self.degrade(format!(
+            "credential store {} kept changing while it was read",
+            path.display()
+        )))
     }
 
     /// Mark the store degraded, report the reason once, and return the error.
@@ -364,3 +403,7 @@ fn credential_required(store: &CredentialStore) -> Result<AuthOutcome, u16> {
 #[cfg(test)]
 #[path = "http_auth_tests.rs"]
 mod http_auth_tests;
+
+#[cfg(test)]
+#[path = "http_auth_refresh_tests.rs"]
+mod http_auth_refresh_tests;
