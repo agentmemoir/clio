@@ -35,8 +35,9 @@ use std::time::Duration;
 
 use clio_admission::AdmissionPolicy;
 use clio_admission::gated::{GateRequest, gated_create_raw};
+use clio_admission::is_exact_duplicate_reason;
 use clio_compliance::ImportReport;
-use clio_config::secret::{mask_secret, masked_clone, scrub_inline_secrets};
+use clio_config::secret::scrub_inline_secrets;
 use clio_types::{
     AmError, EpistemicKind, ErrorCode, ItemKind, MemoryItem, OpContext, SemanticCategory,
     SourceType,
@@ -44,30 +45,42 @@ use clio_types::{
 use serde_json::{Value, json};
 
 use crate::runtime::{McpState, StderrSinks, StoreSignals};
-use crate::write_tools::{gated_write_policy, opt_bool, opt_str};
+use crate::write_tools::{admission_policy, opt_bool, opt_str};
 
 const DEFAULT_MEM0_BASE_URL: &str = "https://api.mem0.ai/v1";
 const DEFAULT_PAGE_SIZE: u64 = 50;
 const DEFAULT_MAX_ITEMS: u64 = 500;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The environment the credential fallback reads, as a seam a test can supply.
+pub(crate) type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
+
 enum ItemOutcome {
     Created,
     Skipped,
+    SkippedDuplicate(String),
     Rejected(Option<String>),
 }
 
 /// Import memories from Mem0 end-to-end: pull, credential masking, dry-run
 /// reporting, gating, `provider:<id>` provenance, and external-id idempotency.
 pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Value, AmError> {
+    import_mem0(state, args, &|k| std::env::var(k).ok())
+}
+
+pub(crate) fn import_mem0(
+    state: &McpState,
+    args: &Value,
+    env: EnvLookup<'_>,
+) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args)?;
     let dry_run = opt_bool(args, "dry_run", false)?;
     let options = args.get("options").unwrap_or(&Value::Null);
 
-    let base_url = opt_str(options, "api_base_url")
-        .or_else(|| opt_str(options, "base_url"))
-        .unwrap_or(DEFAULT_MEM0_BASE_URL);
+    let base_url =
+        crate::provider_destination::checked_base_url(state, options, DEFAULT_MEM0_BASE_URL)?;
+    let sanctioned = crate::provider_destination::allowlisted_host(state, base_url);
     let user_id = opt_str(options, "user_id");
     let agent_id = opt_str(options, "agent_id");
     let page_size = options
@@ -81,20 +94,13 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
         .unwrap_or(DEFAULT_MAX_ITEMS)
         .max(1);
 
-    let api_key = extract_api_key(args);
-    let auth_header = api_key.as_deref().map(|k| {
-        if k.starts_with("Token ") || k.starts_with("Bearer ") {
-            k.to_owned()
-        } else {
-            format!("Token {k}")
-        }
-    });
+    let auth_header = crate::provider_credentials::authorization(args, env, sanctioned)?;
 
-    let policy = gated_write_policy(state, ctx.bank.as_str(), args)?;
+    let policy = admission_policy(state, ctx.bank.as_str());
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
 
     let mut would_create = 0usize;
-    let mut would_skip = 0usize;
+    let (mut would_skip, mut would_skip_duplicate) = (0usize, 0usize);
     let mut would_reject = 0usize;
     let mut rejection_samples = Vec::new();
     let mut notes = Vec::new();
@@ -132,6 +138,12 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
             )? {
                 ItemOutcome::Created => would_create += 1,
                 ItemOutcome::Skipped => would_skip += 1,
+                ItemOutcome::SkippedDuplicate(reason) => {
+                    would_skip_duplicate += 1;
+                    if notes.len() < 10 {
+                        notes.push(format!("skipped duplicate: {reason}"));
+                    }
+                }
                 ItemOutcome::Rejected(reason) => {
                     would_reject += 1;
                     if let Some(r) = reason
@@ -152,6 +164,7 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
     let report = ImportReport {
         would_create,
         would_skip,
+        would_skip_duplicate,
         would_reject,
         would_overwrite: 0,
         // Provider rows are scored item by item, so no entity is skipped for
@@ -170,7 +183,7 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
     Ok(json!({
         "ok": true,
         "provider": "mem0",
-        "credentials_masked": masked_credentials(args),
+        "credentials_masked": crate::provider_credentials::masked_credentials(args, env, sanctioned),
         "report": serde_json::to_value(&report).expect("import report serializes"),
         "writes_performed": if dry_run { 0 } else { would_create },
         "bank": ctx.bank.as_str()
@@ -280,53 +293,17 @@ fn process_mem0_item(
     if decision.pass {
         seen_external_ids.insert(ext_id.to_owned());
         Ok(ItemOutcome::Created)
+    } else if decision
+        .rejection_reason
+        .as_deref()
+        .is_some_and(is_exact_duplicate_reason)
+    {
+        Ok(ItemOutcome::SkippedDuplicate(
+            decision.rejection_reason.unwrap_or_default(),
+        ))
     } else {
         Ok(ItemOutcome::Rejected(decision.rejection_reason))
     }
-}
-
-/// Fully-redacted view of accepted credentials (never plaintext).
-pub(crate) fn masked_credentials(args: &Value) -> Value {
-    masked_credentials_with(args, &|k| std::env::var(k).ok())
-}
-
-pub(crate) fn masked_credentials_with(args: &Value, env: &dyn Fn(&str) -> Option<String>) -> Value {
-    if let Some(creds) = args.get("credentials") {
-        match creds {
-            Value::String(s) => Value::String(mask_secret(s)),
-            Value::Object(_) => masked_clone(creds),
-            Value::Null => Value::Null,
-            other => masked_clone(other),
-        }
-    } else if let Some(env_key) = env("CLIO_MEM0_API_KEY") {
-        json!({ "api_key": mask_secret(&env_key) })
-    } else {
-        Value::Null
-    }
-}
-
-fn extract_api_key(args: &Value) -> Option<String> {
-    extract_api_key_with(args, &|k| std::env::var(k).ok())
-}
-
-fn extract_api_key_with(args: &Value, env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-    if let Some(creds) = args.get("credentials") {
-        if let Some(s) = creds.as_str()
-            && !s.trim().is_empty()
-        {
-            return Some(s.trim().to_owned());
-        }
-        if let Some(obj) = creds.as_object() {
-            for key in ["api_key", "token", "key", "secret"] {
-                if let Some(val) = obj.get(key).and_then(Value::as_str)
-                    && !val.trim().is_empty()
-                {
-                    return Some(val.trim().to_owned());
-                }
-            }
-        }
-    }
-    env("CLIO_MEM0_API_KEY").filter(|s| !s.trim().is_empty())
 }
 
 fn build_mem0_url(
@@ -439,3 +416,7 @@ mod provider_adapter_tests;
 #[cfg(test)]
 #[path = "provider_adapter_edge_tests.rs"]
 mod provider_adapter_edge_tests;
+
+#[cfg(test)]
+#[path = "provider_adapter_destination_tests.rs"]
+mod provider_adapter_destination_tests;

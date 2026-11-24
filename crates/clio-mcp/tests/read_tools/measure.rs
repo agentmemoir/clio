@@ -196,7 +196,12 @@ pub fn run(backend: &str, fx: &Fixture, bounds: &Bounds) {
 /// Check the block shape and the fixture's component counts on the same state
 /// the timed read uses, so timing cannot hide a broken payload.
 fn assert_block_shape(state: &McpState, fx: &Fixture, args: &serde_json::Value) {
-    let out = clio_mcp::write_tools::dispatch(state, "maintenance_status", args);
+    let out = clio_mcp::write_tools::dispatch_in_scope(
+        state,
+        "maintenance_status",
+        args,
+        clio_mcp::ToolScope::Advertised,
+    );
     assert_eq!(out["ok"], json!(true), "{out}");
     let pressure = out["pressure"].as_object().expect("pressure block object");
     let mut keys: Vec<&str> = pressure.keys().map(String::as_str).collect();
@@ -257,7 +262,12 @@ fn measure_read_paths(
 ) {
     // The operator-visible read: the whole dispatch, pressure block included.
     let full = time(|| {
-        let out = clio_mcp::write_tools::dispatch(state, "maintenance_status", args);
+        let out = clio_mcp::write_tools::dispatch_in_scope(
+            state,
+            "maintenance_status",
+            args,
+            clio_mcp::ToolScope::Advertised,
+        );
         out["pressure"]["archive_candidates"]["count"]
             .as_u64()
             .unwrap_or(u64::MAX)

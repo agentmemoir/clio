@@ -30,7 +30,7 @@ import budget_targets
 REPO_ROOT = HERE.parents[1]
 PACK = REPO_ROOT / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 
-FIXTURE_DIGEST = "f9820131ad2b5f698e08280d0cf5f6226c2aa5e35258a27568d4fb172f592764"
+FIXTURE_DIGEST = "4580e1a598ed2996226b3af163084ba8b3850be8332668e42b0fd93564f33b2f"
 
 ACTIVATED_ROW = "activated_skill_body/tokens"
 ACTIVATED_TOKENS = 594
@@ -63,8 +63,8 @@ class CommandTests(unittest.TestCase):
         return {
             preset: {
                 "sha256": "ab" * 32,
-                "bytes": 140559 if preset == "all" else 84505,
-                "tokens": 30004 if preset == "all" else 15183,
+                "bytes": 141002 if preset == "all" else 84505,
+                "tokens": 30107 if preset == "all" else 15183,
             }
             for preset in budget_targets.TARGET_PRESETS
         }
@@ -84,19 +84,19 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(report["format"], "clio_mcp_budget_check")
         self.assertEqual(report["verdict"], "pass")
         expected_allowance = {
-            "decision_id": "mcp-flattened-pack-shape-2026-11-09",
-            "date": "2026-11-09",
-            "base_commit": "2586d7f35e6d7cb35dbe321125f4731e55ad1ab5",
-            "max_bytes": 140559,
-            "max_tokens": 30004,
+            "decision_id": "mcp-allow-duplicate-removal-2026-11-22",
+            "date": "2026-11-22",
+            "base_commit": "ac0b9fd27a431bb763e8698c9a8e51d26f67e687",
+            "max_bytes": 139124,
+            "max_tokens": 29744,
         }
         self.assertEqual(report["allowance"], expected_allowance)
         self.assertEqual(report["failures"], [])
         self.assertEqual(
             report["candidate"],
-            {"sha256": FIXTURE_DIGEST, "bytes": 140559, "tokens": 30004},
+            {"sha256": FIXTURE_DIGEST, "bytes": 139124, "tokens": 29744},
         )
-        self.assertEqual([arm["delta"] for arm in report["arms"]], [34927, 8313])
+        self.assertEqual([arm["delta"] for arm in report["arms"]], [33492, 8053])
         for arm in report["arms"]:
             self.assertEqual(arm["verdict"], "pass")
             self.assertEqual(arm["allowance"], expected_allowance)
@@ -294,8 +294,8 @@ class ActivatedCommandTests(unittest.TestCase):
         measured = {
             preset: {
                 "sha256": "ab" * 32,
-                "bytes": 140559 if preset == "all" else 84505,
-                "tokens": 30004 if preset == "all" else 15183,
+                "bytes": 141002 if preset == "all" else 84505,
+                "tokens": 30107 if preset == "all" else 15183,
             }
             for preset in budget_targets.TARGET_PRESETS
         }

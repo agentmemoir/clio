@@ -13,7 +13,7 @@ clio-config = { workspace = true }
 clio-admission = { workspace = true }
 clio-store = { workspace = true }
 clio-index = { workspace = true }
-chrono = { workspace = true }
+jiff = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 unicode-normalization = { workspace = true }

@@ -45,7 +45,7 @@ fn unknown_product_path_refuses_closure(env: &Env, request: &str) {
 
     let close = env.command(
         "request-close",
-        &format!("--request-id {request} --product-path {PRODUCT_PATH}"),
+        &format!("--actor harness --request-id {request} --product-path {PRODUCT_PATH}"),
     );
     assert_unknown_product_path_refusal(&close);
 

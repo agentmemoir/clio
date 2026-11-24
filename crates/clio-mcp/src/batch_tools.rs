@@ -55,13 +55,29 @@ pub(crate) struct Staged {
     pub(crate) admission_score: Option<f64>,
 }
 
-/// `batch(operations, dry_run?)`: atomic multi-mutation of Core write tools.
+/// `batch(operations, dry_run?)`: atomic multi-mutation of Core write tools,
+/// through the advertised view for in-crate tests that name no scope.
+#[cfg(test)]
 #[must_use]
 pub fn batch_tool(state: &McpState, args: &Value) -> Value {
-    tool_result(run_batch(state, args))
+    batch_tool_in_scope(state, args, crate::tools_page::ToolScope::Advertised)
 }
 
-fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
+/// The same batch tool bounded by `scope`.
+#[must_use]
+pub(crate) fn batch_tool_in_scope(
+    state: &McpState,
+    args: &Value,
+    scope: crate::tools_page::ToolScope,
+) -> Value {
+    tool_result(run_batch(state, args, scope))
+}
+
+fn run_batch(
+    state: &McpState,
+    args: &Value,
+    scope: crate::tools_page::ToolScope,
+) -> Result<Value, AmError> {
     let ops = args
         .get("operations")
         .and_then(Value::as_array)
@@ -73,14 +89,19 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
         ));
     }
     let dry_run = opt_bool(args, "dry_run", false)?;
-    // The view `tools/list` advertises decides which op tools may run: the same
-    // predicate a direct `tools/call` is gated on, because naming a tool inside
-    // a batch must not reach one the active selection hides. It is resolved
-    // once, before the first operation, so every operation reads one view. A
-    // configuration fault reading it is this tool's own failure, so it travels
-    // in-band like every other batch abort.
-    let view = crate::tools_page::visible_view(state)
-        .map_err(|err| AmError::new(ErrorCode::Internal, err.message))?;
+    // The catalogue this dispatch is bounded by decides which op tools may run:
+    // an advertised view hides what it does not list, while the command line's
+    // dispatch serves the whole bound catalogue. It is one scope for the whole
+    // batch, resolved before the first operation. A configuration fault reading
+    // the advertised view is this tool's own failure, so it travels in-band
+    // like every other batch abort.
+    let view = match scope {
+        crate::tools_page::ToolScope::Advertised => Some(
+            crate::tools_page::visible_view(state)
+                .map_err(|err| AmError::new(ErrorCode::Internal, err.message))?,
+        ),
+        crate::tools_page::ToolScope::Bound => None,
+    };
     let mut writes: Vec<BatchWrite> = Vec::new();
     let mut resolved: Vec<Option<String>> = Vec::new();
     let mut reports: Vec<Value> = Vec::new();
@@ -88,10 +109,11 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
     for (index, op) in ops.iter().enumerate() {
         let tool = req_str(op, "tool")?;
         // One refusal covers both halves: a name this build does not bind, and a
-        // name the active view does not advertise. The wording and the op index
-        // are identical, so a caller cannot tell a hidden tool from a
+        // name the advertised view does not advertise. The wording and the op
+        // index are identical, so a caller cannot tell a hidden tool from a
         // nonexistent one, and the abort keeps this tool's in-band error.
-        if !BATCH_TOOLS.contains(&tool) || !view.advertises(tool) {
+        if !BATCH_TOOLS.contains(&tool) || view.as_ref().is_some_and(|view| !view.advertises(tool))
+        {
             return Err(AmError::new(
                 ErrorCode::InvalidArgument,
                 format!("operation {index}: unrecognized batch op tool `{tool}`"),

@@ -14,7 +14,8 @@
 //! ## Does not own
 //! - The store itself: records, validation, digests, permissions
 //!   (`clio_config::auth_tokens`)
-//! - Any transport behavior; no runtime reads the store in this phase
+//! - Any transport behavior, including when a running MCP HTTP server re-reads
+//!   the store
 //! - The verbs' static records (see `cli_command_registry_auth_config`)
 //! - Output/error contracts (see `cli_read`) or flag parsing (`cli_args`)
 //!
@@ -360,7 +361,8 @@ fn row(record: &AuthTokenRecord) -> Value {
     })
 }
 
-/// `auth token revoke --label L`; the change applies at the next server start.
+/// `auth token revoke --label L`; a running MCP HTTP server applies the change
+/// without a restart, while the sync server applies it at its next start.
 ///
 /// The removal runs under the store's exclusive hold
 /// (`clio_config::auth_tokens::revoke_token`), so a rewrite cannot drop a
@@ -383,12 +385,13 @@ fn run_revoke(
     let payload = json!({
         "ok": true,
         "label": label,
-        "effective": "next_server_start",
-        "note": "servers load the token store at start, so revocation applies at the next server start",
+        "effective": "immediately",
+        "note": "the running MCP HTTP server applies the change without a restart, \
+                 while the sync server applies it at its next start",
     });
     let text = format!(
-        "token `{label}` revoked; servers load the store at start, so the change \
-         takes effect at the next server start"
+        "token `{label}` revoked; the running MCP HTTP server applies the change \
+         without a restart, while the sync server applies it at its next start"
     );
     emit(io, mode, &payload, &text);
     ExitCode::from(EXIT_OK)
@@ -397,3 +400,7 @@ fn run_revoke(
 #[cfg(test)]
 #[path = "auth_cli_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "auth_cli_help_tests.rs"]
+mod auth_cli_help_tests;

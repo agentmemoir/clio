@@ -379,8 +379,13 @@ fn one_invocation_records_only_the_target() {
 fn the_execute_path_refuses_a_discovery_name_by_any_route() {
     let (_handler, state) = handler();
     for target in DISCOVERY {
-        let err = McpHandler::execute_tool_call(&state, target, &json!({}))
-            .expect_err("the shared execute path refuses a discovery name");
+        let err = McpHandler::execute_tool_call(
+            &state,
+            target,
+            &json!({}),
+            crate::tools_page::ToolScope::Advertised,
+        )
+        .expect_err("the shared execute path refuses a discovery name");
         assert_eq!(err.code, ERR_INVALID_PARAMS, "{target}");
         assert!(
             err.message.contains(target),

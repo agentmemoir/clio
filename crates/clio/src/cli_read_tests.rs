@@ -48,7 +48,12 @@ fn seed(state: &McpState, bank: &str, id: &str, gist: &str) {
         "actor": "agent",
         "timestamp": "2024-01-01T00:00:00Z"
     });
-    let stored = clio_mcp::write_tools::dispatch(state, "store", &args);
+    let stored = clio_mcp::write_tools::dispatch_in_scope(
+        state,
+        "store",
+        &args,
+        clio_mcp::ToolScope::Advertised,
+    );
     assert_eq!(stored["ok"], json!(true), "seed {id}: {stored}");
     state
         .index

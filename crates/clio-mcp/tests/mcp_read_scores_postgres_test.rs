@@ -25,7 +25,7 @@
 //! Keep this module focused on Postgres `scores` payload coverage.
 
 use clio_mcp::runtime::{McpOpenOptions, McpState};
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use serde_json::{Map, Value, json};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -55,7 +55,7 @@ fn postgres_url() -> Option<String> {
 
 #[allow(clippy::needless_pass_by_value)]
 fn call(state: &McpState, name: &str, args: Value) -> Value {
-    dispatch(state, name, &args)
+    dispatch_in_scope(state, name, &args, clio_mcp::ToolScope::Advertised)
 }
 
 /// The store-tool argument shape the drain hardening suite seeds with.

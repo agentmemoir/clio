@@ -1,0 +1,1 @@
+Clio clears the CodeQL findings by keeping sensitive values out of test assertion messages and by deriving export seal keys and salts from runtime data instead of literal buffers, without changing the sealed output.

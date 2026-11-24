@@ -1,6 +1,8 @@
 // Copyright 2026 Agent Memoir (https://agentmemoir.com/)
 // SPDX-License-Identifier: Apache-2.0
-
+//
+//! # Responsibility
+//!
 //! This module is responsible for one long-lived `clio mcp stdio` child and the
 //! JSON-RPC conversation a harness holds with it.
 //!
@@ -61,7 +63,14 @@ impl McpSession {
     pub fn open(f: &Fixture) -> Self {
         let mut child = f
             .command_for(&["mcp", "stdio", "--bank", BANK])
-            .args(["mcp", "stdio", "--bank", BANK])
+            .args([
+                "mcp",
+                "stdio",
+                "--bank",
+                BANK,
+                "--tools",
+                "custom:item-read,ranking",
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

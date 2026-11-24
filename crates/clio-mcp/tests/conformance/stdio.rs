@@ -52,7 +52,14 @@ fn stdio_write_set_matrix_with_parity() {
     let direct_state = state();
     let direct: Vec<Value> = fixtures
         .iter()
-        .map(|(name, args)| clio_mcp::write_tools::dispatch(&direct_state, name, args))
+        .map(|(name, args)| {
+            clio_mcp::write_tools::dispatch_in_scope(
+                &direct_state,
+                name,
+                args,
+                clio_mcp::ToolScope::Advertised,
+            )
+        })
         .collect();
     let mut frames = String::new();
     for (i, (name, args)) in fixtures.iter().enumerate() {

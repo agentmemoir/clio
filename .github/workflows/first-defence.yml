@@ -68,7 +68,7 @@ jobs:
       # cannot be verified, while a live credential can. See the `--results`
       # flag in the upstream usage notes.
       - name: Scan committed secrets
-        uses: trufflesecurity/trufflehog@ea68ca03c865c5f324e86e849ced20ed3cf9dbbb # v3.99.8
+        uses: trufflesecurity/trufflehog@d232362a64a09a9e7d58267b8f5acef00ae90e23 # v3.100.0
         with:
           extra_args: --results=verified
 
@@ -100,7 +100,7 @@ jobs:
       # Third-party action. It needs no key and no network write.
       # Inputs used: fail-on. See its action.yml for the values.
       - name: Scan the change
-        uses: qazbnm456/diff-sentry@a0419df0c483b37caa9f5234b999fb7feda4dccc # v0.17.0
+        uses: qazbnm456/diff-sentry@3634e72d0eb0fce3c9fc4963c3cc52b299ff74c1 # v0.18.0
         with:
           fail-on: high
 

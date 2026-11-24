@@ -21,6 +21,7 @@
 //! Test-only. Never compiled into production builds.
 
 use crate::temporal::{MAX_TEMPORAL_QUERY_BYTES, TemporalWindow, resolve_window};
+use jiff::{Span, Timestamp};
 
 /// The one window a query resolves to, panicking when it does not resolve.
 fn window(query: &str, anchor: &str) -> TemporalWindow {
@@ -412,11 +413,9 @@ fn resolve_window_is_pure_in_query_and_anchor() {
 
 /// Add `days` to a UTC bound string of the window format.
 fn plus_days(bound: &str, days: i64) -> String {
-    let time =
-        chrono::NaiveDateTime::parse_from_str(bound, "%Y-%m-%dT%H:%M:%SZ").expect("a window bound");
-    (time + chrono::Duration::days(days))
-        .format("%Y-%m-%dT%H:%M:%SZ")
-        .to_string()
+    let time: Timestamp = bound.parse().expect("a window bound");
+    let zoned = time.in_tz("UTC").expect("UTC is valid");
+    Timestamp::from(zoned + Span::new().days(days)).to_string()
 }
 
 #[test]

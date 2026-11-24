@@ -30,7 +30,6 @@ use clio_config::{prior_for, threshold_for};
 pub struct AdmissionPolicy<'a> {
     env: &'a RankingEnv,
     retention: ResolvedRetention,
-    force: bool,
 }
 
 impl<'a> AdmissionPolicy<'a> {
@@ -42,37 +41,13 @@ impl<'a> AdmissionPolicy<'a> {
         Self {
             env,
             retention: ResolvedRetention::builtin_default(),
-            force: false,
         }
     }
 
     /// Wrap a ranking-env snapshot plus a resolved per-bank retention snapshot.
     #[must_use]
     pub fn with_retention(env: &'a RankingEnv, retention: ResolvedRetention) -> Self {
-        Self {
-            env,
-            retention,
-            force: false,
-        }
-    }
-
-    /// Set the caller's explicit force flag.
-    ///
-    /// Force waives the unconditional exact-duplicate rejection only. Every
-    /// other gate — the category gate, span verification, the mission veto, the
-    /// novelty floor, and the score threshold — still runs, so a forced write
-    /// can never skip validation.
-    #[must_use]
-    pub fn with_force(mut self, force: bool) -> Self {
-        self.force = force;
-        self
-    }
-
-    /// Whether the caller explicitly forced this write past the
-    /// exact-duplicate rejection.
-    #[must_use]
-    pub const fn force(&self) -> bool {
-        self.force
+        Self { env, retention }
     }
 
     /// Four-factor weights `w1…w4` in score order.

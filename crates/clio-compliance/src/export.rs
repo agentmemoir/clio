@@ -39,7 +39,7 @@ use clio_store::{DestinationCustodyStore, LocalEventStore};
 use clio_types::{Actor, AmError, ErrorCode, OpContext};
 use std::path::Path;
 
-/// Upper bound for bank-wide history reads.
+/// Upper bound for one bounded history read, whether it spans a whole bank or one subject.
 pub(crate) const HISTORY_LIMIT: usize = 10_000;
 
 /// Which bounded history reads returned their full row cap (may be truncated).
@@ -106,6 +106,9 @@ pub struct ExportDelivery<'a> {
     pub action_id: &'a str,
     /// The product-controlled directory the bytes are staged in.
     pub staging_dir: &'a Path,
+    /// The trusted export root the destination is confined to, when the caller
+    /// has one; `None` keeps the path-based delivery.
+    pub root: Option<&'a Path>,
     /// The owner of the destination copy.
     pub custody_owner: &'a str,
     /// The action the destination requires before it is settled.
@@ -142,6 +145,10 @@ pub struct ExportArgs<'a> {
     pub backend: Option<InventoryBackend>,
     /// The durable delivery boundary; required to write.
     pub delivery: Option<ExportDelivery<'a>>,
+    /// Explicit caller opt-in for a readable (`dsar_plaintext`) export.
+    pub readable_export_opt_in: bool,
+    /// Recipient X25519 public key a readable export is sealed to.
+    pub recipient: Option<String>,
 }
 
 /// Export result.
@@ -159,24 +166,61 @@ pub struct ExportOutcome {
 ///
 /// AUTHORISATION: only `harness` or `system` actors may export; agent/user
 /// callers get [`ErrorCode::Forbidden`] and no file is created. The payload is
-/// built fully in memory. The file is written through the durable custody
-/// boundary; an [`ExportDelivery`] is required to write.
+/// built fully in memory. A readable `dsar_plaintext` export additionally needs
+/// an explicit opt-in, which is recorded as a durable event intent, and an
+/// X25519 recipient public key it is sealed to before any byte reaches disk. The file is
+/// written through the durable custody boundary; an [`ExportDelivery`] is
+/// required to write.
 ///
 /// # Errors
-/// Authorization, missing bank, storage, delivery refusal, or write failures.
+/// Authorization, readable opt-in, malformed recipient, missing bank, storage,
+/// delivery refusal, or write failures.
 pub fn export(args: &ExportArgs<'_>) -> Result<ExportOutcome, AmError> {
     let bank = args.ctx.bank.as_str();
     if bank.is_empty() {
         return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
     }
     authorize(args.ctx.actor)?;
+    if args.content_mode == ExportContentMode::DsarPlaintext {
+        require_readable_opt_in(args)?;
+    }
     let payload = crate::export_subject::build_payload(args, bank)?;
-    write_payload(args, &payload.bytes)?;
+    let bytes = match args.content_mode {
+        ExportContentMode::DsarPlaintext => crate::export_seal::seal_to_recipient(
+            &payload.bytes,
+            args.recipient.as_deref().unwrap_or_default(),
+        )?,
+        ExportContentMode::CiphertextBackup => payload.bytes,
+    };
+    write_payload(args, &bytes)?;
     Ok(ExportOutcome {
         destination: args.destination.to_owned(),
         manifest: payload.manifest,
         content_mode: args.content_mode,
     })
+}
+
+/// Refuse a readable export without its explicit opt-in and recipient, before
+/// any payload is built or staged. The delivery intent records the opt-in
+/// durably when it is written, before any byte is staged.
+fn require_readable_opt_in(args: &ExportArgs<'_>) -> Result<(), AmError> {
+    if !args.readable_export_opt_in {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "readable export requires explicit opt-in",
+        ));
+    }
+    if args
+        .recipient
+        .as_deref()
+        .is_none_or(|recipient| recipient.trim().is_empty())
+    {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "readable export requires an X25519 recipient public key",
+        ));
+    }
+    Ok(())
 }
 
 /// Write the payload through the durable delivery boundary.
@@ -188,9 +232,11 @@ fn write_payload(args: &ExportArgs<'_>, bytes: &[u8]) -> Result<(), AmError> {
         action_id: delivery.action_id,
         destination: Path::new(args.destination),
         staging_dir: delivery.staging_dir,
+        root: delivery.root,
         custody_owner: delivery.custody_owner,
         required_action: delivery.required_action,
         now: args.timestamp,
+        readable_opt_in: args.content_mode == ExportContentMode::DsarPlaintext,
     };
     match deliver_export(
         args.ctx,

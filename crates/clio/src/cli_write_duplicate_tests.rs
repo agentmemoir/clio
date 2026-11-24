@@ -2,31 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Unit tests for the duplicate write CLI contract.
 
-use super::{allow_duplicate_arg, is_duplicate_noop, remember_refusal};
-use crate::cli_args::{FlagSpec, ParsedArgs, parse};
+use super::{is_duplicate_noop, remember_refusal};
 use serde_json::json;
-
-fn parsed(args: &[&str]) -> ParsedArgs {
-    let spec = FlagSpec::new(&["category"], &["allow-duplicate"]);
-    let tokens = args
-        .iter()
-        .map(|value| (*value).to_owned())
-        .collect::<Vec<_>>();
-    parse(&spec, tokens).expect("parse")
-}
-
-#[test]
-fn allow_duplicate_is_absent_without_the_flag() {
-    assert_eq!(allow_duplicate_arg(&parsed(&["remember", "text"])), None);
-}
-
-#[test]
-fn allow_duplicate_is_true_with_the_flag() {
-    assert_eq!(
-        allow_duplicate_arg(&parsed(&["remember", "text", "--allow-duplicate"])),
-        Some(json!(true))
-    );
-}
 
 #[test]
 fn a_duplicate_payload_is_recognised() {

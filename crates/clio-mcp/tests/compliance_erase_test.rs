@@ -13,7 +13,7 @@
 
 use clio_compliance::{EraseArgs, EraseVecSink, erase_request, tombstone_salt_at};
 use clio_mcp::runtime::{McpOpenOptions, McpState};
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use clio_types::{Actor, Bank, EpistemicKind, ItemKind, MemoryItem, OpContext, SemanticCategory};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -152,10 +152,11 @@ fn erase_request_refuses_a_document_divergent_from_the_deployment() {
         .create_memory_item(&item(item_id), "harness")
         .expect("seed item");
 
-    let refused = dispatch(
+    let refused = dispatch_in_scope(
         &st,
         "erase_request",
         &erase_args("harness", true, "req-divergent"),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(refused["ok"], false, "{refused}");
     assert_eq!(refused["code"], "config_corrupt", "{refused}");
@@ -176,10 +177,11 @@ fn erase_request_refuses_a_document_divergent_from_the_deployment() {
         !scratch.journal().exists(),
         "a refused erase must not write the divergent journal"
     );
-    let read = dispatch(
+    let read = dispatch_in_scope(
         &st,
         "get_snapshot",
         &json!({"bank": BANK, "item_id": item_id}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(read["ok"], true, "the item stays readable: {read}");
 }
@@ -190,7 +192,7 @@ fn retrieve_excludes_erased_item_from_candidates() {
     let scratch = Scratch::new("retrieve");
     let st = state(&scratch);
     let item_id = "e2e-retrieve-1";
-    let stored = dispatch(
+    let stored = dispatch_in_scope(
         &st,
         "store",
         &json!({
@@ -207,6 +209,7 @@ fn retrieve_excludes_erased_item_from_candidates() {
             "actor": "agent",
             "timestamp": "2024-01-01T00:00:00Z"
         }),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(stored["ok"], true, "{stored}");
     st.index
@@ -214,10 +217,11 @@ fn retrieve_excludes_erased_item_from_candidates() {
         .expect("lexical doc");
 
     // Readable through candidate search before erasure.
-    let before = dispatch(
+    let before = dispatch_in_scope(
         &st,
         "retrieve",
         &json!({"bank": BANK, "query": "private medical"}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(before["ok"], true, "{before}");
     let found = before["hits"]
@@ -231,10 +235,11 @@ fn retrieve_excludes_erased_item_from_candidates() {
 
     // After erasure the item is absent from candidate results, and no
     // personal text leaks through the retrieval surface.
-    let after = dispatch(
+    let after = dispatch_in_scope(
         &st,
         "retrieve",
         &json!({"bank": BANK, "query": "private medical"}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(after["ok"], true, "{after}");
     let serialized = serde_json::to_string(&after).unwrap();

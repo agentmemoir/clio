@@ -11,7 +11,7 @@
 //! - Seven identical `remember` calls collapsing to one stored item
 //! - `recall` returning one hit for a bank full of identical rows
 //! - Case, punctuation, and whitespace variants counting as duplicates
-//! - `remember --allow-duplicate` writing a second row on request
+//! - The removed `remember --allow-duplicate` flag rejected as an unknown flag
 //! - Non-duplicate text still being stored
 //!
 //! ## Does not own
@@ -160,6 +160,31 @@ fn remember(db: &Path, text: &str, extra: &[&str]) -> Value {
     json_stdout(&output)
 }
 
+/// One confirmed `correct` of an item's text, asserting the write succeeded, and
+/// returning the parsed payload. Corrections bypass the admission gate, so a
+/// test can seed rows the write path would now refuse.
+fn correct(db: &Path, id: &str, value: &str) -> Value {
+    let output = run(
+        db,
+        &[
+            "correct",
+            id,
+            value,
+            "--reason",
+            "seed a row written before the write-side duplicate rule",
+            "--confirm",
+            "--output",
+            "json",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "correct {id:?} failed: {}",
+        stderr_of(&output)
+    );
+    json_stdout(&output)
+}
+
 /// The `recall` hit gists for a query.
 fn recall_gists(db: &Path, query: &str) -> Vec<String> {
     let output = run(db, &["recall", query, "--output", "json"]);
@@ -290,27 +315,42 @@ fn a_genuinely_different_fact_is_still_stored() {
 }
 
 #[test]
-fn force_writes_a_second_row_on_request() {
-    let (_dir, db) = scenario("force");
-    let first = remember(&db, FACT, &[]);
-    let forced = remember(&db, FACT, &["--allow-duplicate"]);
-
-    assert_eq!(forced["pass"], Value::Bool(true));
-    assert!(
-        forced["id"].is_string(),
-        "--allow-duplicate must store an item"
+fn the_removed_allow_duplicate_flag_is_an_unknown_flag() {
+    let (_dir, db) = scenario("removed-flag");
+    let output = run(
+        &db,
+        &[
+            "remember",
+            FACT,
+            "--category",
+            "persona",
+            "--allow-duplicate",
+        ],
     );
-    assert_ne!(first["id"], forced["id"]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "the removed flag must be a usage error: {}",
+        stderr_of(&output)
+    );
+    assert!(
+        stderr_of(&output).contains("unknown flag `--allow-duplicate`"),
+        "unexpected stderr: {}",
+        stderr_of(&output)
+    );
 }
 
 #[test]
 fn a_bank_that_already_holds_identical_rows_returns_one_hit() {
     // The read side must hold for rows written before the write-side rule
-    // existed, so this seeds duplicates with --allow-duplicate and then recalls.
+    // existed, so this seeds duplicates by correcting one row onto another,
+    // which writes without the admission gate.
     let (_dir, db) = scenario("preexisting");
-    for _ in 0..5 {
-        remember(&db, FACT, &["--allow-duplicate"]);
-    }
+    let seed = remember(&db, OTHER, &[]);
+    let seed_id = seed["id"].as_str().expect("seed write has an id");
+    remember(&db, FACT, &[]);
+    correct(&db, seed_id, FACT);
 
     let gists = recall_gists(&db, "When does Tom go on a walk?");
     assert_eq!(

@@ -229,7 +229,7 @@ fn plaintext_mode_keeps_the_plain_mutation_id() {
     assert_eq!(
         plain_task.sync_mutation_id,
         clio_store::sha256_hex(
-            b"am-sync-mut",
+            crate::keyed_roles::published_mutation_id_salt(),
             &format!("{TASK_ID}|{}|upsert", task_record(TASK_ID, "task-row-1").id)
         ),
         "the unkeyed hash over the real identifier, stamp, and op"
@@ -238,7 +238,10 @@ fn plaintext_mode_keeps_the_plain_mutation_id() {
         .expect("plain pref");
     assert_eq!(
         plain_persona.sync_mutation_id,
-        clio_store::sha256_hex(b"am-sync-mut", &format!("{ATTR_NAME}|{STAMP}|upsert")),
+        clio_store::sha256_hex(
+            crate::keyed_roles::published_mutation_id_salt(),
+            &format!("{ATTR_NAME}|{STAMP}|upsert"),
+        ),
         "the shared helper's plaintext key is the same unkeyed hash"
     );
 }

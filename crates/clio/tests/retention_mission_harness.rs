@@ -27,7 +27,7 @@ use clio::{Runtime, ToolResult};
 use clio_config::coding_default::CHATTER_FIXTURE;
 use clio_config::retention_mission::{MissionEntry, MissionMatchKind, RetentionMission};
 use clio_mcp::runtime::{McpOpenOptions, McpState};
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -60,7 +60,7 @@ fn clio_bin() -> Command {
 
 #[allow(clippy::needless_pass_by_value)]
 fn call(state: &McpState, name: &str, args: Value) -> Value {
-    dispatch(state, name, &args)
+    dispatch_in_scope(state, name, &args, clio_mcp::ToolScope::Advertised)
 }
 
 fn get_profile(state: &McpState, bank: &str) -> Value {

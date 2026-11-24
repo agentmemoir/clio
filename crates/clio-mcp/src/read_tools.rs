@@ -26,8 +26,8 @@
 
 use crate::runtime::McpState;
 use crate::write_tools::{opt_str, req_str, strict_string, validate_time_bound};
-use chrono::{DateTime, SecondsFormat, Utc};
 use clio_types::{AmError, ErrorCode, TimeAxis, ToolResult};
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -395,14 +395,18 @@ fn inspect_filter_string<'a>(
     }
 }
 
-fn normalize_time_bound(key: &str, value: &str) -> Result<String, AmError> {
+pub(crate) fn normalize_time_bound(key: &str, value: &str) -> Result<String, AmError> {
     validate_time_bound(key, value)?;
-    Ok(DateTime::parse_from_rfc3339(value).map_or_else(
+    Ok(value.parse::<Timestamp>().map_or_else(
         |_| value.to_owned(),
-        |timestamp| {
-            timestamp
-                .with_timezone(&Utc)
-                .to_rfc3339_opts(SecondsFormat::AutoSi, true)
+        |ts| {
+            let nanos = ts.subsec_nanosecond();
+            let precision = if nanos == 0 {
+                0
+            } else {
+                9 - 3 * (usize::from(nanos % 1_000_000 == 0) + usize::from(nanos % 1_000 == 0))
+            };
+            format!("{ts:.precision$}")
         },
     ))
 }

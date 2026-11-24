@@ -30,7 +30,7 @@
 //! Keep this module focused on the composed pack's form payload.
 
 use clio_mcp::runtime::{McpOpenOptions, McpState};
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use clio_retrieve::REFERENCE_MARKER;
 use clio_types::{EpisodicType, EpistemicKind, ItemKind, MemoryItem};
 use serde_json::{Value, json};
@@ -156,10 +156,11 @@ fn put(state: &McpState, entry: &MemoryItem, text: &str) {
 /// fixed through the resolved `timestamp` argument. The profile write lands in
 /// the fixture-owned store, never the store the host environment names.
 fn seed(state: &McpState) {
-    let held = dispatch(
+    let held = dispatch_in_scope(
         state,
         "retention_profile_set",
         &json!({"bank": BANK, "profile": {"retention_curve": false}, "confirm": true}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(held["ok"], json!(true), "{held}");
     put(
@@ -172,10 +173,11 @@ fn seed(state: &McpState) {
 
 /// One fixed-clock `compose_context` call over the seeded bank.
 fn compose(state: &McpState) -> Value {
-    let pack = dispatch(
+    let pack = dispatch_in_scope(
         state,
         "compose_context",
         &json!({"bank": BANK, "query": QUERY, "budget_tokens": 400, "timestamp": TS}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(pack["ok"], json!(true), "{pack}");
     pack
@@ -294,10 +296,11 @@ fn retention_profile_writes_stay_in_the_fixture_owned_store() {
     let absent_host_store = std::env::var_os(clio_config::retention_store::RETENTION_PROFILES_ENV)
         .map(PathBuf::from)
         .filter(|path| !path.exists());
-    let held = dispatch(
+    let held = dispatch_in_scope(
         &state,
         "retention_profile_set",
         &json!({"bank": BANK, "profile": {"retention_curve": false}, "confirm": true}),
+        clio_mcp::ToolScope::Advertised,
     );
     assert_eq!(held["ok"], json!(true), "{held}");
     assert_eq!(

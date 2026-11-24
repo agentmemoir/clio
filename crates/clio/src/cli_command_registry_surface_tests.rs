@@ -160,7 +160,7 @@ fn version_and_health_carry_their_help_prose_and_only_their_own_flags() {
     assert_eq!(
         record("health").notes,
         [
-            "Prints the machine-readable health JSON: name and version only.\nIt opens no database and checks no service."
+            "Prints the machine-readable health JSON: name and version only. It opens no database and checks no service."
         ]
     );
     let version_flags: Vec<&str> = record("version")

@@ -195,9 +195,12 @@ impl SubjectExport<'_> {
                 controls: self.controls,
                 action_id: self.action_id,
                 staging_dir: self.staging_dir,
+                root: None,
                 custody_owner: "clio",
                 required_action: "delivery",
             }),
+            readable_export_opt_in: true,
+            recipient: Some(crate::export_tests::test_recipient()),
         })
     }
 }
@@ -238,7 +241,7 @@ fn subject_export_delivers_under_custody_with_only_the_selected_subject() {
         staging_entries(&staging).is_empty(),
         "the managed staging file is removed"
     );
-    let text = std::fs::read_to_string(scratch.destination()).expect("read the payload");
+    let text = crate::export_tests::read_sealed(&scratch.destination());
     assert!(
         !text.contains(OTHER),
         "no other subject marker in the payload"
@@ -281,6 +284,8 @@ fn subject_export_manifest_records_the_narrowing_it_applies() {
         facts: Some(&facts),
         backend: Some(InventoryBackend::Sqlite),
         delivery: None,
+        readable_export_opt_in: true,
+        recipient: Some(crate::export_tests::test_recipient()),
     })
     .expect("the narrowed subject export delivers");
 
@@ -296,7 +301,7 @@ fn subject_export_manifest_records_the_narrowing_it_applies() {
         !outcome.manifest.complete,
         "a narrowed selection is not complete"
     );
-    let text = std::fs::read_to_string(scratch.destination()).expect("read the payload");
+    let text = crate::export_tests::read_sealed(&scratch.destination());
     assert!(
         text.contains("discarded items excluded"),
         "the delivered file carries the same named omission"

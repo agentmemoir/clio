@@ -129,6 +129,7 @@ pub(crate) fn run_mcp_export(target: &Target, destination: &Path) {
     let mut command = clio_command(&target.journal, &target.kms, &target.backups);
     command
         .args(["mcp", "stdio"])
+        .args(["--tools", "custom:portability"])
         .args(target.args())
         .stdin(Stdio::piped());
     command.stdout(Stdio::piped()).stderr(Stdio::null());

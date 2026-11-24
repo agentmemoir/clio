@@ -29,7 +29,7 @@ publish = false
 
 [workspace.dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = "1.0.154"
 clio-types = { path = "crates/clio-types" }
 clio-config = { path = "crates/clio-config" }
 clio-store = { path = "crates/clio-store" }
@@ -48,9 +48,16 @@ clio-backup = { path = "crates/clio-backup" }
 clio-mcp = { path = "crates/clio-mcp" }
 # deny (not forbid): sqlite-vec registration requires a one-site allow(unsafe_code).
 base64 = "0.23"
-chrono = { version = "0.4", default-features = false, features = ["alloc", "std"] }
+jiff = "1.0.2"
 unicode-normalization = "0.1"
-chacha20poly1305 = "0.11"
+chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
+# X25519 key agreement for the readable-export seal. The operator supplies a
+# 32-byte public key as base64 text, and the matching secret key never enters
+# Clio.
+x25519-dalek = "3"
+# Stretches the export seal key out of an X25519 shared secret. HKDF-SHA256
+# binds the ephemeral and recipient public keys through the salt.
+hkdf = "0.13"
 # Stretches the sync key out of its secret: a single fast SHA-256 pass lets a
 # low-entropy secret be brute-forced offline from stolen ciphertext.
 argon2 = "0.6"
@@ -60,6 +67,11 @@ rand = "0.10"
 # The one signal the CLI sets itself: restoring the default `SIGPIPE` disposition
 # so a closed stdout ends the process quietly rather than panicking.
 libc = "0.2"
+# The effective uid the token store's owner must match, and the descriptor-relative
+# file operations export delivery links through. Rustix exposes both as safe
+# functions, which is what a crate forbidding unsafe code can call; the `process`
+# and `fs` modules are what is needed, and its default `std` feature stays on.
+rustix = { version = "1.1", features = ["process", "fs"] }
 # OS secret store for the Clio encryption key. `keyring-core` owns the entry
 # type, the credential trait, and the error; one platform store crate below
 # supplies the backend, and `clio-config` installs exactly one of them at
@@ -87,7 +99,7 @@ dbus-secret-service-keyring-store = { version = "1", features = [
 # `fallible_uint` restores the `usize`/`u64` `ToSql`/`FromSql` implementations
 # rusqlite 0.41 moved behind that feature, so `belief_tx`'s `COUNT(*)` read
 # needs no code change.
-rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"] }
+rusqlite = { version = "0.43.0", features = ["bundled", "fallible_uint"] }
 sha2 = "0.11"
 sqlite-vec = "0.1"
 zeroize = { version = "1", features = ["derive"] }
@@ -97,7 +109,7 @@ anstyle = "1.0"
 # draws to stderr, so every prompt it owns needs a real TTY; the wizard's
 # in-memory reader and the plain-text renderer are what tests and any
 # terminal-less run use instead.
-cliclack = "0.5.6"
+cliclack = "0.5.7"
 # Masks a typed password so it does not land in the terminal scrollback, in a
 # screen recording, or in a pasted transcript. This is the only raw-terminal
 # code in the tree, and it sits behind the `setup_test_seam` masked-reader seam
@@ -132,7 +144,7 @@ webpki-roots = "1"
 ureq = "3.5.1"
 # Gzip wrapper for the backup archive container; pinned to the version already
 # resolved as a transitive dependency of the HTTP transport (no new package).
-flate2 = "1.1.10"
+flate2 = "1.1.11"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

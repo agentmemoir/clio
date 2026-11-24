@@ -78,6 +78,19 @@ struct Cursor {
     offset: usize,
 }
 
+/// The catalogue a dispatch is bounded by.
+///
+/// A client sees the view `tools/list` advertises. The command line names its
+/// own verbs and serves the whole bound catalogue, so its dispatch is bounded
+/// by that catalogue and not by a listing it never asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolScope {
+    /// The view `tools/list` advertises, which bounds a client's `tools/call`.
+    Advertised,
+    /// The whole bound catalogue, which the command line dispatches against.
+    Bound,
+}
+
 /// The installed snapshot, seeding it from the live configuration on first use.
 ///
 /// Every caller shares one immutable value, so a listing and a listener agree

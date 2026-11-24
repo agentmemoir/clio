@@ -57,7 +57,7 @@ use crate::store_double::CountingStore;
 use clio_compliance::BeliefContextCorrector;
 use clio_mcp::index_drain::{INDEX_MAX_BATCH, IndexDrain};
 use clio_mcp::runtime::McpState;
-use clio_mcp::write_tools::dispatch;
+use clio_mcp::write_tools::dispatch_in_scope;
 use clio_retrieve::{AssociationEngine, HybridRetriever};
 use clio_store::{
     AssocEdgeRecord, AssocKind, AssocPolicy, BatchStore, BatchWrite, BeliefStore, ComplianceStore,
@@ -197,10 +197,11 @@ pub fn with_double(state: &Arc<McpState>, double: &Arc<CountingStore>) -> Arc<Mc
 /// Dispatch `maintenance_status` with the fixed bank and timestamp.
 #[must_use]
 pub fn status_call(state: &McpState) -> Value {
-    dispatch(
+    dispatch_in_scope(
         state,
         "maintenance_status",
         &json!({"bank": support::BANK, "timestamp": support::TS}),
+        clio_mcp::ToolScope::Advertised,
     )
 }
 
@@ -394,7 +395,7 @@ impl BeliefStore for ViewDouble<dyn BeliefStore> {
 
 impl HistoryStore for ViewDouble<dyn HistoryStore> {
     view_store! {
-        reads { get_task(bank_id: &str, task_id: &str) -> Result<Option<TaskRecord>, AmError>; task_history(bank_id: &str, task_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError>; list_tasks(bank_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError>; get_failure(bank_id: &str, failure_id: &str) -> Result<Option<FailureRecord>, AmError>; failures_for_task_exact(bank_id: &str, task_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError>; list_failures(bank_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError>; triple_history(bank_id: &str, subject: &str, predicate: &str, limit: usize) -> Result<Vec<TripleRecord>, AmError>; triple_history_at(bank_id: &str, subject: &str, predicate: &str, as_of: &str, axis: TimeAxis, limit: usize) -> Result<Vec<TripleRecord>, AmError>; }
+        reads { get_task(bank_id: &str, task_id: &str) -> Result<Option<TaskRecord>, AmError>; task_history(bank_id: &str, task_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError>; list_tasks(bank_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError>; list_tasks_for_subject(bank_id: &str, subject_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError>; get_failure(bank_id: &str, failure_id: &str) -> Result<Option<FailureRecord>, AmError>; failures_for_task_exact(bank_id: &str, task_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError>; list_failures(bank_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError>; list_failures_for_subject(bank_id: &str, subject_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError>; triple_history(bank_id: &str, subject: &str, predicate: &str, limit: usize) -> Result<Vec<TripleRecord>, AmError>; triple_history_at(bank_id: &str, subject: &str, predicate: &str, as_of: &str, axis: TimeAxis, limit: usize) -> Result<Vec<TripleRecord>, AmError>; }
         writes { commit_task_upsert(item: &MemoryItem, draft: &TaskRecord, actor: &str) -> Result<TaskRecord, AmError>; commit_failure_record(item: &MemoryItem, draft: &FailureRecord, actor: &str) -> Result<FailureRecord, AmError>; }
     }
 }

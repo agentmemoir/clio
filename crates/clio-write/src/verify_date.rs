@@ -19,18 +19,23 @@
 //! Changes to date format policy should normally require changes here.
 
 use crate::verify::VerifyConfig;
-use chrono::{NaiveDate, NaiveDateTime};
+use jiff::civil::{Date, DateTime};
 use serde_json::Value;
 
 /// Unambiguous format strings tried before numeric slash dates.
 const SAFE_DATE: &[&str] = &["%Y-%m-%d", "%d %b %Y", "%b %d, %Y", "%d %B %Y", "%B %d, %Y"];
 const SAFE_DATETIME: &[&str] = &["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"];
 
+/// Longest original month word a span window keeps.
+const MONTH_WORD_MAX: usize = 19;
+/// Longest non-alphabetic run kept after the month word in a span window.
+const MONTH_TAIL_MAX: usize = 24;
+
 /// Parsed instant at the precision present in the snapshot or source span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParsedInstant {
-    Date(NaiveDate),
-    DateTime(NaiveDateTime),
+    Date(Date),
+    DateTime(DateTime),
 }
 
 impl ParsedInstant {
@@ -47,6 +52,7 @@ impl ParsedInstant {
 }
 
 /// Locate a source substring that parses to the same calendar instant as `value`.
+/// Returns character (Unicode scalar) offsets into `source`, not byte offsets, per `SpanOffsets`.
 ///
 /// # Errors
 /// Unparsable snapshot date, ambiguous numeric date without `day_first`, or no span.
@@ -90,8 +96,8 @@ fn try_token(token: &str, expected: ParsedInstant, config: &VerifyConfig) -> Tok
             let Some((a, b, y)) = split_numeric_date(token) else {
                 return TokenOutcome::No;
             };
-            let day_first = NaiveDate::from_ymd_opt(y, b, a).map(ParsedInstant::Date);
-            let month_first = NaiveDate::from_ymd_opt(y, a, b).map(ParsedInstant::Date);
+            let day_first = ymd_option(y, b, a).map(ParsedInstant::Date);
+            let month_first = ymd_option(y, a, b).map(ParsedInstant::Date);
             if day_first.is_some_and(|d| expected.matches(d))
                 || month_first.is_some_and(|d| expected.matches(d))
             {
@@ -112,13 +118,13 @@ fn snapshot_instant(value: &Value) -> Result<ParsedInstant, String> {
     if s.is_empty() {
         return Err("empty date value".into());
     }
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+    if let Ok(dt) = DateTime::strptime("%Y-%m-%dT%H:%M:%S", s) {
         return Ok(ParsedInstant::DateTime(dt));
     }
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+    if let Ok(dt) = DateTime::strptime("%Y-%m-%d %H:%M:%S", s) {
         return Ok(ParsedInstant::DateTime(dt));
     }
-    if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+    if let Ok(d) = Date::strptime("%Y-%m-%d", s) {
         return Ok(ParsedInstant::Date(d));
     }
     Err("snapshot date must be ISO date or date-time".into())
@@ -149,32 +155,24 @@ fn next_date_token(chars: &[char], start: usize) -> Option<(usize, String)> {
 
 /// Build a month-name window using char counts (never byte-index into UTF-8).
 fn month_name_token(chars: &[char], start: usize) -> Option<(usize, String)> {
-    let end = (start + 18).min(chars.len());
-    let window: String = chars[start..end].iter().collect();
-    let normalized = localize_months(&window);
+    let run = &chars[start..];
+    let head = &run[..run.len().min(MONTH_WORD_MAX)];
+    let word_len = head.iter().take_while(|c| c.is_alphabetic()).count();
+    let tail = run[word_len..].iter().take(MONTH_TAIL_MAX);
+    let end = start + word_len + tail.take_while(|c| !c.is_alphabetic()).count();
     for fmt in ["%b %d, %Y", "%B %d, %Y", "%d %b %Y", "%d %B %Y"] {
-        let char_len = normalized.chars().count();
-        for take in (6..=char_len).rev() {
-            let candidate: String = normalized.chars().take(take).collect();
-            let candidate = candidate.trim_end();
-            if NaiveDate::parse_from_str(candidate, fmt).is_err() {
-                continue;
-            }
-            // Map localized prefix length back onto the original UTF-8 window.
-            let max_orig = (end - start).min(take + 6);
-            for orig_take in take..=max_orig {
-                let orig: String = chars[start..start + orig_take].iter().collect();
-                let loc = localize_months(orig.trim_end());
-                if loc == candidate {
-                    return Some((start + orig_take, orig.trim_end().to_owned()));
-                }
+        for take in (6..=end - start).rev() {
+            let orig: String = chars[start..start + take].iter().collect();
+            let orig = orig.trim_end();
+            if Date::strptime(fmt, localize_months(orig)).is_ok() {
+                return Some((start + take, orig.to_owned()));
             }
         }
     }
     None
 }
 
-/// Map common non-English month tokens to English abbreviations chrono accepts.
+/// Map common non-English month tokens to English abbreviations jiff accepts.
 fn localize_months(s: &str) -> String {
     const ALIASES: &[(&str, &str)] = &[
         ("März", "Mar"),
@@ -199,31 +197,41 @@ fn localize_months(s: &str) -> String {
 fn parse_date_token(token: &str, config: &VerifyConfig) -> Result<Option<ParsedInstant>, String> {
     let token = localize_months(token);
     for fmt in SAFE_DATETIME {
-        if let Ok(dt) = NaiveDateTime::parse_from_str(&token, fmt) {
+        if let Ok(dt) = DateTime::strptime(fmt, &token) {
             return Ok(Some(ParsedInstant::DateTime(dt)));
         }
     }
     for fmt in SAFE_DATE {
-        if let Ok(d) = NaiveDate::parse_from_str(&token, fmt) {
+        if let Ok(d) = Date::strptime(fmt, &token) {
             return Ok(Some(ParsedInstant::Date(d)));
         }
     }
     if let Some((a, b, y)) = split_numeric_date(&token) {
         if a > 12 && b <= 12 {
-            return Ok(NaiveDate::from_ymd_opt(y, b, a).map(ParsedInstant::Date));
+            return Ok(ymd_option(y, b, a).map(ParsedInstant::Date));
         }
         if b > 12 && a <= 12 {
-            return Ok(NaiveDate::from_ymd_opt(y, a, b).map(ParsedInstant::Date));
+            return Ok(ymd_option(y, a, b).map(ParsedInstant::Date));
         }
         if a <= 12 && b <= 12 {
             return match config.day_first {
                 None => Err("ambiguous".into()),
-                Some(true) => Ok(NaiveDate::from_ymd_opt(y, b, a).map(ParsedInstant::Date)),
-                Some(false) => Ok(NaiveDate::from_ymd_opt(y, a, b).map(ParsedInstant::Date)),
+                Some(true) => Ok(ymd_option(y, b, a).map(ParsedInstant::Date)),
+                Some(false) => Ok(ymd_option(y, a, b).map(ParsedInstant::Date)),
             };
         }
     }
     Ok(None)
+}
+
+/// Build a civil date from numeric parts, failing closed on out-of-range parts.
+fn ymd_option(year: i32, month: u32, day: u32) -> Option<Date> {
+    let (Ok(year), Ok(month), Ok(day)) =
+        (i16::try_from(year), i8::try_from(month), i8::try_from(day))
+    else {
+        return None;
+    };
+    Date::new(year, month, day).ok()
 }
 
 fn split_numeric_date(token: &str) -> Option<(u32, u32, i32)> {
@@ -246,3 +254,7 @@ fn split_numeric_date(token: &str) -> Option<(u32, u32, i32)> {
     }
     Some((a, b, y))
 }
+
+#[cfg(test)]
+#[path = "verify_date_tests.rs"]
+mod verify_date_tests;

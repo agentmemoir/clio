@@ -340,7 +340,7 @@ pub(crate) const COMPLIANCE_REQUEST_EVENTS: CommandSpec = request_spec(
 
 pub(crate) const COMPLIANCE_REQUEST_CLOSE: CommandSpec = request_spec(
     "compliance request-close",
-    "Accept closure for one request, finalize its outcome, and report the request",
+    "Accept closure for one request, finalize its outcome, and report the request (requires --actor harness|system)",
     &[
         REQUEST_ID,
         REQUEST_PRODUCT,
@@ -350,11 +350,11 @@ pub(crate) const COMPLIANCE_REQUEST_CLOSE: CommandSpec = request_spec(
     ],
     &[
         Example::new(
-            "clio compliance request-close --request-id r1 --product-path ./product.db",
+            "clio compliance request-close --request-id r1 --product-path ./product.db --actor harness",
             None,
         ),
         Example::new(
-            "clio compliance request-close --request-id r1 --product-path ./product.db -o json",
+            "clio compliance request-close --request-id r1 --product-path ./product.db --actor system -o json",
             None,
         ),
     ],

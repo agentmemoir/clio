@@ -5,14 +5,14 @@
 //!
 //! This module is responsible for the live credential contract of `clio mcp
 //! http`: which credential class a real served process answers under, that a
-//! credential dropped from the store is refused at the next start, that a
-//! loopback start with no token file refuses rather than serving, and that
-//! `--insecure-no-auth` restores the credential-free local server.
+//! credential dropped from the store is refused by the server already running,
+//! that a loopback start with no token file refuses rather than serving, and
+//! that `--insecure-no-auth` restores the credential-free local server.
 //!
 //! ## Owns
 //! - The two- and one-record store writers
 //! - The per-credential-class probe helper
-//! - The live server answers, the revocation-at-restart check, the legacy-flag
+//! - The live server answers, the live revocation check, the legacy-flag
 //!   check, and the unchanged default
 //!
 //! ## Does not own
@@ -77,7 +77,7 @@ fn write_two_record_store(store: &Store, harness_secret: &str, agent_secret: &st
 /// Write a one-record store: one harness credential, at `demo`.
 ///
 /// The same writer and the same owner-only mode as the two-record helper, so
-/// rewriting the same path between two server starts is the change an operator
+/// rewriting the same path while a server is running is the change an operator
 /// makes when they revoke one credential.
 fn write_one_record_store(store: &Store, label: &str, secret: &str) {
     use clio_config::auth_tokens::{AuthTokenRecord, digest_hex, save_auth_tokens};
@@ -172,6 +172,8 @@ fn a_live_server_answers_under_each_credential_class() {
         "127.0.0.1:0",
         "--token-file",
         store.path(),
+        "--tools",
+        "custom:item-write,portability",
     ]);
     assert_ne!(server.port, 0, "the server must announce a port");
     let port = server.port;
@@ -237,13 +239,14 @@ fn a_live_server_answers_under_each_credential_class() {
     );
 }
 
-/// A record removed from the store is refused by the next server, not the one
-/// that loaded it.
+/// A record removed from the store is refused by the server already running,
+/// and a record that survives keeps authenticating on that same server.
 #[test]
-fn a_credential_removed_from_the_store_is_401_at_the_next_start() {
+fn a_credential_removed_from_the_store_is_refused_without_a_restart() {
     let store = Store::new("revoked");
     let removed = clio_config::auth_tokens::generate_secret();
-    write_one_record_store(&store, "ci", &removed);
+    let surviving = clio_config::auth_tokens::generate_secret();
+    write_two_record_store(&store, &removed, &surviving);
 
     let probe = call(
         "store",
@@ -254,7 +257,9 @@ fn a_credential_removed_from_the_store_is_401_at_the_next_start() {
         }),
     );
 
-    let first = Server::start(&[
+    // One server for the whole test: the revocation below must reach it while
+    // it is running, so no restart is allowed to stand in for a reload.
+    let server = Server::start(&[
         "mcp",
         "http",
         "--db",
@@ -263,46 +268,49 @@ fn a_credential_removed_from_the_store_is_401_at_the_next_start() {
         "127.0.0.1:0",
         "--token-file",
         store.path(),
+        "--tools",
+        "custom:item-write,portability",
     ]);
-    assert_ne!(first.port, 0, "the server must announce a port");
-    let (status, body) = post(first.port, &probe, &bearer(&removed));
+    assert_ne!(server.port, 0, "the server must announce a port");
+    let port = server.port;
+
+    let (status, body) = post(port, &probe, &bearer(&removed));
     assert_eq!(status, 200, "{body}");
     assert!(ok(&body), "{body}");
-    // The first child is killed and reaped here, so the second start is a real
-    // restart of the binary rather than a second server beside the first.
-    let _ = first.stop();
 
-    // A different record survives, so the store still loads and authorizes
-    // somebody: the 401 below can only be the revoked credential, not a store
-    // that stopped working.
-    let surviving = clio_config::auth_tokens::generate_secret();
+    // The operator removes the first record and leaves the second: the store
+    // still loads and authorizes somebody, so the 401 below can only be the
+    // removed credential.
     write_one_record_store(&store, "bot", &surviving);
 
-    let second = Server::start(&[
-        "mcp",
-        "http",
-        "--db",
-        "sqlite::memory:",
-        "--bind",
-        "127.0.0.1:0",
-        "--token-file",
-        store.path(),
-    ]);
-    assert_ne!(second.port, 0, "the server must announce a port");
-
-    let (status, body) = post(second.port, &probe, &bearer(&removed));
-    assert_eq!(status, 401, "a removed credential must be refused: {body}");
+    let (status, body) = post(port, &probe, &bearer(&removed));
+    assert_eq!(
+        status, 401,
+        "a removed credential must be refused on the running server: {body}"
+    );
     assert!(
         !body.contains("structuredContent"),
         "the removed credential reached a tool: {body}"
     );
 
-    let (status, body) = post(second.port, &probe, &bearer(&surviving));
+    // A second item, so the surviving write lands instead of colliding with
+    // the row the removed credential already wrote on this same server.
+    let survivor_probe = call(
+        "store",
+        json!({
+            "bank": "demo",
+            "item": {"id": "revoked-2", "gist": "served by the record that survives"},
+            "category": "task_spec", "epistemic_kind": "fact"
+        }),
+    );
+    let (status, body) = post(port, &survivor_probe, &bearer(&surviving));
     assert_eq!(
         status, 200,
         "the surviving credential must still be served: {body}"
     );
-    let _ = second.stop();
+    assert!(ok(&body), "{body}");
+
+    let _ = server.stop();
 }
 
 /// A loopback server with no `--token-file` refuses to start unless the
@@ -339,6 +347,8 @@ fn insecure_no_auth_keeps_the_credential_free_loopback_server() {
         "--bind",
         "127.0.0.1:0",
         "--insecure-no-auth",
+        "--tools",
+        "custom:item-write,portability",
     ]);
     assert_ne!(server.port, 0, "the server must announce a port");
     let body = call(

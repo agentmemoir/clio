@@ -1,12 +1,19 @@
+10.0.0.1
+10.0.0.5
+100.64.0.1
 127.0.0.1
 127.1.2.3
 127.9.9.9
+169.254.169.254
 192.0.2.1
 agentmemoir.com
 agentmemour.com
 api
+# percent-escaped host in a strict-parser refusal test, not a real destination
+api%2emem0%2eai
 api.cohere.com
 api.mem0.ai
+api.mem0.ai.
 api.openai.com
 api2
 example.com
@@ -15,5 +22,6 @@ h
 host
 huggingface.co
 localhost
+localhost.
 status.invalid
 x

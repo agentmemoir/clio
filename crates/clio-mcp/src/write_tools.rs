@@ -27,7 +27,6 @@
 
 use crate::runtime::McpState;
 use crate::write_tools_handlers::{belief_observe, graph_link, triple_add, triple_end};
-use chrono::{DateTime, NaiveDate};
 use clio_admission::decision::Candidate;
 use clio_admission::policy::AdmissionPolicy;
 use clio_types::{
@@ -36,6 +35,7 @@ use clio_types::{
 };
 use clio_write::MaintenanceSignal;
 use clio_write::memtree::AttachLeaf;
+use jiff::civil::Date;
 use serde_json::{Map, Value};
 
 /// Tools whose in-process mutator implements a real no-write `dry_run` path.
@@ -61,10 +61,24 @@ fn dry_run_unsupported(name: &str, args: &Value) -> bool {
         && !DRY_RUN_TOOLS.contains(&name)
 }
 
-/// Route one bound write tool to its in-process handler.
+/// Route one bound write tool through the advertised view for in-crate tests,
+/// which drive a tool body without naming the caller context they serve.
+#[cfg(test)]
 #[must_use]
 #[inline(never)]
 pub fn dispatch(state: &McpState, name: &str, args: &Value) -> Value {
+    dispatch_in_scope(state, name, args, crate::tools_page::ToolScope::Advertised)
+}
+
+/// Route one bound write tool under `scope`, which every inner check reads.
+#[must_use]
+#[inline(never)]
+pub fn dispatch_in_scope(
+    state: &McpState,
+    name: &str,
+    args: &Value,
+    scope: crate::tools_page::ToolScope,
+) -> Value {
     if crate::ops_tools::is_ops_tool(name) {
         return crate::ops_tools::dispatch_ops(state, name, args);
     }
@@ -78,7 +92,10 @@ pub fn dispatch(state: &McpState, name: &str, args: &Value) -> Value {
         )));
     }
     if name == "batch" {
-        return nudge_if_ok(state, crate::batch_tools::batch_tool(state, args));
+        return nudge_if_ok(
+            state,
+            crate::batch_tools::batch_tool_in_scope(state, args, scope),
+        );
     }
     let result = match name {
         "admit_preview" => crate::store_write::admit_preview(state, args),
@@ -90,7 +107,7 @@ pub fn dispatch(state: &McpState, name: &str, args: &Value) -> Value {
         "config_set" | "config_profile_apply" | "ranking_env_set" => {
             crate::config_tools::dispatch_write(state, name, args)
         }
-        other => crate::additive_tools::dispatch_inner(state, other, args),
+        other => crate::additive_tools::dispatch_inner(state, other, args, scope),
     };
     nudge_if_ok(state, tool_result(result))
 }
@@ -161,9 +178,7 @@ pub(crate) fn strict_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, 
 
 /// Accept an RFC 3339 timestamp or an ISO calendar date as a time bound.
 pub(crate) fn validate_time_bound(key: &str, value: &str) -> Result<(), AmError> {
-    if DateTime::parse_from_rfc3339(value).is_ok()
-        || NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
-    {
+    if value.parse::<jiff::Timestamp>().is_ok() || Date::strptime("%Y-%m-%d", value).is_ok() {
         Ok(())
     } else {
         Err(AmError::new(
@@ -214,20 +229,6 @@ pub(crate) fn opt_bool(args: &Value, key: &str, default: bool) -> Result<bool, A
 /// Admission policy snapshot for one call, honoring the bank's retention profile.
 pub(crate) fn admission_policy<'a>(state: &'a McpState, bank: &str) -> AdmissionPolicy<'a> {
     AdmissionPolicy::with_retention(&state.env, state.resolved_retention(bank))
-}
-
-/// The policy for a gated write, with the caller's duplicate waiver applied.
-///
-/// Every gated long-term write can hit the unconditional exact-duplicate
-/// rejection, so every one of them must read the same `allow_duplicate`
-/// argument. Routing them all through this helper is what keeps a new surface
-/// from silently shipping without an escape hatch.
-pub(crate) fn gated_write_policy<'a>(
-    state: &'a McpState,
-    bank: &str,
-    args: &Value,
-) -> Result<AdmissionPolicy<'a>, AmError> {
-    Ok(admission_policy(state, bank).with_force(opt_bool(args, "allow_duplicate", false)?))
 }
 
 /// Build the candidate item shell for `store` / `admit_preview`.
@@ -368,3 +369,22 @@ mod write_tools_context_write_tests;
 #[cfg(test)]
 #[path = "write_tools_bool_arg_tests.rs"]
 mod write_tools_bool_arg_tests;
+
+#[cfg(test)]
+mod timestamp_bound_format_tests {
+    use crate::read_tools::normalize_time_bound;
+
+    #[test]
+    fn utc_bound_keeps_auto_si_fraction_groups() {
+        for (input, want) in [
+            ("2024-01-02T03:04:05+00:00", "2024-01-02T03:04:05Z"),
+            ("2024-01-02T03:04:05.120+00:00", "2024-01-02T03:04:05.120Z"),
+            (
+                "2024-01-02T03:04:05.123456+00:00",
+                "2024-01-02T03:04:05.123456Z",
+            ),
+        ] {
+            assert_eq!(normalize_time_bound("time", input).unwrap(), want);
+        }
+    }
+}

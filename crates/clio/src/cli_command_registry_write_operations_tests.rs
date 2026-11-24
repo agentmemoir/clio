@@ -166,7 +166,7 @@ fn export_matches_the_registered_usage_and_parser() {
     let spec = record("export");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio export --out FILE [--content-mode dsar_plaintext|ciphertext_backup] [--category C] [--time-start TS] [--time-end TS] [--include-archived true|false] [--include-discarded true|false] [--subject S] [--bank BANK] [--actor ACTOR] [--output json|text]",
+        "usage: clio export --out FILE [--content-mode dsar_plaintext|ciphertext_backup] [--readable-export-opt-in true|false] [--recipient B64_X25519_PUBLIC_KEY] [--category C] [--time-start TS] [--time-end TS] [--include-archived true|false] [--include-discarded true|false] [--subject S] [--bank BANK] [--actor ACTOR] [--output json|text]",
         "export full usage"
     );
     assert_eq!(
@@ -179,6 +179,8 @@ fn export_matches_the_registered_usage_and_parser() {
             "output",
             "out",
             "content-mode",
+            "readable-export-opt-in",
+            "recipient",
             "category",
             "time-start",
             "time-end",
@@ -324,7 +326,7 @@ fn the_write_operations_tranche_has_complete_flag_metadata() {
 
 /// Every documented flag carries the kind its consumer parses: the enum
 /// lists name exactly the accepted values (`cli_write_shared`'s four review
-/// actions, `cli_write_portability`'s two content modes and two include
+/// actions, `cli_write_portability`'s two content modes and three boolean
 /// labels and the `clio_types` category wire table, and the `erase_request`
 /// tool's two actors), and every remaining flag stays free text or the shared `--output` global.
 #[test]
@@ -340,7 +342,7 @@ fn the_write_operations_flag_kinds_match_their_consumers() {
                     ValueKind::Enum(&["dsar_plaintext", "ciphertext_backup"])
                 }
                 ("export", "category") => ValueKind::Enum(clio_types::SemanticCategory::WIRE),
-                ("export", "include-archived" | "include-discarded") => {
+                ("export", "include-archived" | "include-discarded" | "readable-export-opt-in") => {
                     ValueKind::Enum(&["true", "false"])
                 }
                 ("erase", "actor") => ValueKind::Enum(&["harness", "system"]),
@@ -353,14 +355,14 @@ fn the_write_operations_flag_kinds_match_their_consumers() {
 }
 
 /// The recorded defaults are the values the tools apply when the flag is
-/// omitted: the export tool bundles plaintext with archived and discarded
-/// rows, and compliance erasure defaults to the crypto-shred reason code,
+/// omitted: the export tool bundles opaque ciphertext with archived and
+/// discarded rows, and compliance erasure defaults to the crypto-shred reason code,
 /// whose named constant lives in `clio_compliance`, outside this crate's
 /// dependency set.
 #[test]
 fn the_recorded_defaults_are_the_values_the_tools_apply() {
     for (name, flag, default) in [
-        ("export", "content-mode", Some("dsar_plaintext")),
+        ("export", "content-mode", Some("ciphertext_backup")),
         ("export", "include-archived", Some("true")),
         ("export", "include-discarded", Some("true")),
         ("erase", "reason-code", Some("COMPLIANCE_CRYPTO_SHRED")),

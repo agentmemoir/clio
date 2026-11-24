@@ -95,7 +95,7 @@ pub(crate) const MCP_SCHEMA_EXPORT: CommandSpec = CommandSpec {
     aliases: &[],
     summary: "Print/write the tool_schema pack (alias: --path)",
     notes: &[
-        "--out FILE writes the pack to a file; --path is an accepted alias.\nWith neither flag the pack is written to stdout.",
+        "--out FILE writes the pack to a file; --path is an accepted alias. With neither flag the pack is written to stdout.",
         "--tools narrows the pack to a tool-group selection: minimal, coding, ops, all, or custom:GROUP[,GROUP] for the minimal set plus the listed groups and what they require. With no --tools the pack holds every tool in the catalog.",
     ],
     positionals: &[],

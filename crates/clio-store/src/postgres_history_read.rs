@@ -43,9 +43,7 @@ const TRIPLE_COLS: &str = "id, bank_id, item_id, subject, predicate, object_ciph
 impl PostgresStore {
     /// Attach the carrier item's sealed descriptive `context` to each record.
     ///
-    /// `None` covers an absent body, no stored context, or an unreadable body
-    /// (for example a crypto-shredded subject) so the history read stays
-    /// available after erasure.
+    /// `None` covers an absent body, no stored context, or an unreadable body (for example a crypto-shredded subject) so the history read stays available after erasure.
     fn attach_triple_carrier_context(&self, records: &mut [TripleRecord]) -> Result<(), AmError> {
         for record in records {
             let cipher: Option<String> = self
@@ -196,6 +194,7 @@ impl PostgresStore {
     pub(crate) fn list_tasks_impl(
         &self,
         bank_id: &str,
+        subject: Option<&str>,
         limit: usize,
     ) -> Result<Vec<TaskRecord>, AmError> {
         self.list_task_rows(
@@ -204,9 +203,9 @@ impl PostgresStore {
                  JOIN (SELECT bank_id, task_id, MAX(version) AS mv FROM task_records
                        WHERE bank_id = $1 GROUP BY bank_id, task_id) m
                    ON t.bank_id = m.bank_id AND t.task_id = m.task_id AND t.version = m.mv
-                 ORDER BY t.created_at DESC, t.task_id LIMIT $2"
+                 WHERE ($2::text IS NULL OR t.subject_id = $2) ORDER BY t.created_at DESC, t.task_id LIMIT $3"
             ),
-            &[&bank_id, &(limit as i64)],
+            &[&bank_id, &subject, &(limit as i64)],
         )
     }
 
@@ -256,14 +255,15 @@ impl PostgresStore {
     pub(crate) fn list_failures_impl(
         &self,
         bank_id: &str,
+        subject: Option<&str>,
         limit: usize,
     ) -> Result<Vec<FailureRecord>, AmError> {
         self.list_failure_rows(
             &format!(
                 "SELECT {FAILURE_COLS}, i.content_ciphertext {FAILURE_FROM}
-                 WHERE f.bank_id = $1 ORDER BY f.created_at DESC, f.id LIMIT $2"
+                 WHERE f.bank_id = $1 AND ($2::text IS NULL OR f.subject_id = $2) ORDER BY f.created_at DESC, f.id LIMIT $3"
             ),
-            &[&bank_id, &(limit as i64)],
+            &[&bank_id, &subject, &(limit as i64)],
         )
     }
 
@@ -369,7 +369,16 @@ impl HistoryStore for PostgresStore {
     }
 
     fn list_tasks(&self, bank_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError> {
-        self.list_tasks_impl(bank_id, limit)
+        self.list_tasks_impl(bank_id, None, limit)
+    }
+
+    fn list_tasks_for_subject(
+        &self,
+        bank_id: &str,
+        subject_id: &str,
+        limit: usize,
+    ) -> Result<Vec<TaskRecord>, AmError> {
+        self.list_tasks_impl(bank_id, Some(subject_id), limit)
     }
 
     fn commit_failure_record(
@@ -399,7 +408,16 @@ impl HistoryStore for PostgresStore {
     }
 
     fn list_failures(&self, bank_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError> {
-        self.list_failures_impl(bank_id, limit)
+        self.list_failures_impl(bank_id, None, limit)
+    }
+
+    fn list_failures_for_subject(
+        &self,
+        bank_id: &str,
+        subject_id: &str,
+        limit: usize,
+    ) -> Result<Vec<FailureRecord>, AmError> {
+        self.list_failures_impl(bank_id, Some(subject_id), limit)
     }
 
     fn triple_history(

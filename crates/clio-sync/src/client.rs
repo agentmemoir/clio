@@ -34,6 +34,8 @@ use crate::http::post_json;
 use crate::protocol::{BankSyncStatus, PullRequest, PullResponse, SyncStatusReport};
 use clio_store::{DeadLetterStatus, ErasureDenial, Store, SyncStore};
 use clio_types::{AmError, ErrorCode};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 #[path = "client_decrypt.rs"]
@@ -222,6 +224,27 @@ fn required_remote(cfg: &SyncClientConfig) -> Result<String, AmError> {
     })
 }
 
+/// Digest of a consumed cursor: the peer owns each token's size, so the loop
+/// keeps 8 bytes per page instead of the strings.
+fn cursor_digest(cursor: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    cursor.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// The refusal for a cursor too large to be the short opaque token the protocol
+/// defines, naming the bank, the token's byte length, and the limit.
+fn oversized_cursor(bank: &str, cursor: &str) -> AmError {
+    AmError::new(
+        ErrorCode::Forbidden,
+        format!(
+            "sync pull for bank {bank} refused a {len}-byte cursor: a cursor is a short opaque \
+             token, and this pull never stores or resends a larger one",
+            len = cursor.len()
+        ),
+    )
+}
+
 fn pull_bank(
     cfg: &SyncClientConfig,
     remote: &str,
@@ -237,7 +260,26 @@ fn pull_bank(
         clock: &crate::clock::now_epoch,
         max_envelope_skew_secs: cfg.max_envelope_skew_secs,
     };
+    let mut pages = 0usize;
+    let mut seen = vec![cursor_digest(&cursor)];
     loop {
+        // Bounded first: a peer that always answers `has_more` must not keep
+        // this loop fetching. The cursor is durable page by page, so a
+        // legitimately larger backlog resumes from it on the next pull: the stop
+        // is the client's own guard, not a verdict on the peer, and it loses
+        // nothing, so it is coded as a bound of this loop rather than a
+        // refusal of a misbehaving peer.
+        if pages >= crate::PULL_MAX_PAGES {
+            return Err(AmError::new(
+                ErrorCode::OutOfRange,
+                format!(
+                    "sync pull for bank {bank} stopped at the {cap}-page cap: the cursor \
+                     is saved, so running the pull again continues from there",
+                    cap = crate::PULL_MAX_PAGES
+                ),
+            ));
+        }
+        pages += 1;
         let request = PullRequest {
             bank: bank.to_owned(),
             cursor: cursor.clone(),
@@ -249,6 +291,24 @@ fn pull_bank(
             cfg.token.as_deref(),
             &serde_json::to_value(&request).expect("serialize pull request"),
         )?;
+        // A cursor is a short opaque token. Checked before the repeat decision
+        // and the row loop, so a refused page applies nothing and no cursor is
+        // stored or resent.
+        if response.next_cursor.len() > crate::PULL_MAX_CURSOR_BYTES {
+            return Err(oversized_cursor(bank, &response.next_cursor));
+        }
+        // A peer that says more rows remain but hands back a cursor an earlier
+        // page of this pull already used would serve the same page forever.
+        // Cursors are opaque, so the token is compared by digest, and the
+        // decision is taken here, immediately after the response is
+        // deserialized and before any row of this page is applied, so a
+        // repeat-refused page applies nothing and persists nothing. The refusal
+        // itself is raised after the row loop below: the loop still opens each
+        // row because an unusable row is what freezes the bank, and a freeze is
+        // a stop for the operator (nothing was trusted, nothing was applied)
+        // rather than a peer protocol violation, so the freeze must win over
+        // this refusal.
+        let repeated = response.has_more && seen.contains(&cursor_digest(&response.next_cursor));
         let mut frozen = false;
         for m in &response.mutations {
             // Refuse a wrong-bank row first, before serialization and
@@ -267,6 +327,11 @@ fn pull_bank(
                 frozen = true;
                 break;
             };
+            if repeated {
+                // Opened but never applied: the page is refused as a repeat, so
+                // its rows may not land in the store.
+                continue;
+            }
             let result = apply_mutation_guarded(&engine, denial, &m, &envelope)?;
             match result.outcome {
                 // A refused envelope is never applied and never journaled, but
@@ -285,8 +350,20 @@ fn pull_bank(
         if frozen {
             break;
         }
+        if repeated {
+            return Err(AmError::new(
+                ErrorCode::Forbidden,
+                format!(
+                    "sync pull for bank {bank} repeated cursor {next}: the peer answered \
+                     has_more with a cursor this pull already used, so the pull would \
+                     never advance",
+                    next = response.next_cursor
+                ),
+            ));
+        }
         cursor.clone_from(&response.next_cursor);
         cfg.sync.cursor_set(bank, "pull", &cursor)?;
+        seen.push(cursor_digest(&cursor));
         if !response.has_more {
             break;
         }
@@ -315,6 +392,12 @@ mod client_freshness_tests;
 #[cfg(test)]
 #[path = "client_plain_policy_tests.rs"]
 mod client_plain_policy_tests;
+#[cfg(test)]
+#[path = "client_pull_bound_tests.rs"]
+mod client_pull_bound_tests;
+#[cfg(test)]
+#[path = "client_pull_size_tests.rs"]
+mod client_pull_size_tests;
 #[cfg(test)]
 #[path = "client_receipt_tests.rs"]
 mod client_receipt_tests;

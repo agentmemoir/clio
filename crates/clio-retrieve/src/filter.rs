@@ -71,7 +71,7 @@ pub fn recency_score(item: &MemoryItem, now: &str, tau_days: f64) -> f64 {
 pub fn age_days(ts: &str, now: &str) -> Option<f64> {
     let a = parse_ts(ts)?;
     let b = parse_ts(now)?;
-    Some((b - a).num_seconds() as f64 / 86_400.0)
+    Some((b - a).as_secs() as f64 / 86_400.0)
 }
 
 /// Current UTC time as `%Y-%m-%dT%H:%M:%SZ` (empty string only if the clock is before epoch).
@@ -80,18 +80,19 @@ pub fn system_now_iso() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    chrono::DateTime::from_timestamp(secs as i64, 0)
-        .map_or_else(String::new, |d| d.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+    jiff::Timestamp::from_second(secs as i64).map_or_else(|_| String::new(), |ts| ts.to_string())
 }
 
-fn parse_ts(s: &str) -> Option<chrono::NaiveDateTime> {
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
-        return Some(dt.naive_utc());
+fn parse_ts(s: &str) -> Option<jiff::Timestamp> {
+    if let Ok(ts) = s.parse::<jiff::Timestamp>() {
+        return Some(ts);
     }
-    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        return d.and_hms_opt(0, 0, 0);
+    if let Ok(d) = jiff::civil::Date::strptime("%Y-%m-%d", s) {
+        return jiff::tz::Offset::UTC.to_timestamp(d.at(0, 0, 0, 0)).ok();
     }
-    chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").ok()
+    jiff::civil::DateTime::strptime("%Y-%m-%dT%H:%M:%S", s)
+        .ok()
+        .and_then(|dt| jiff::tz::Offset::UTC.to_timestamp(dt).ok())
 }
 
 #[cfg(test)]

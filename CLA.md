@@ -41,7 +41,3 @@ You are not expected to provide support for Your Contributions, except to the ex
 ## 8. Miscellaneous
 
 This Agreement is the whole agreement between You and the Project about the license of Your Contributions. If any part of this Agreement is held to be unenforceable, the rest stays in force. This Agreement is governed by the laws that apply to the Project maintainers, without regard to conflict of law rules.
-
----
-
-This text is adapted from the Apache Individual Contributor License Agreement v2.0 (r190612). It is not legal advice. A lawyer should review it before the Project relies on it.

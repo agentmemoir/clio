@@ -56,6 +56,7 @@ pub(crate) fn env(store: &SqliteStore) -> SubjectRequestEnv<'_> {
         events: store,
         peers: store,
         copies: store,
+        audit: store,
     }
 }
 

@@ -51,8 +51,11 @@
 //! more than one distinct window, or an oversized query yields no window at all:
 //! the arm never guesses.
 
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, TimeZone};
 use clio_types::{AmError, ErrorCode};
+use jiff::civil::{Date, Time};
+use jiff::fmt::temporal::Pieces;
+use jiff::tz::{Offset, TimeZone};
+use jiff::{Span, ZonedDateTime};
 
 /// Largest query text the parser scans, in UTF-8 bytes.
 ///
@@ -107,19 +110,27 @@ const PHRASES: &[(&[&str], Expression)] = &[
 /// # Errors
 /// Malformed `anchor` text (`invalid_argument`).
 pub fn resolve_window(query: &str, anchor: &str) -> Result<Option<TemporalWindow>, AmError> {
-    let anchor = DateTime::parse_from_rfc3339(anchor).map_err(|_| {
-        AmError::new(
-            ErrorCode::InvalidArgument,
-            "query_anchor must be an RFC 3339 timestamp with an explicit UTC offset, \
-             for example 2026-09-26T10:00:00Z or 2026-09-26T10:00:00-07:00",
-        )
-    })?;
+    let anchor = Pieces::parse(anchor)
+        .ok()
+        .and_then(|pieces| {
+            let offset = pieces.to_numeric_offset()?;
+            let time = pieces.time().unwrap_or_else(Time::midnight);
+            let local = pieces.date().to_datetime(time);
+            TimeZone::fixed(offset).to_zoned_datetime(local).ok()
+        })
+        .ok_or_else(|| {
+            AmError::new(
+                ErrorCode::InvalidArgument,
+                "query_anchor must be an RFC 3339 timestamp with an explicit UTC offset, \
+                 for example 2026-09-26T10:00:00Z or 2026-09-26T10:00:00-07:00",
+            )
+        })?;
     Ok(find_window(query, &anchor))
 }
 
 /// Scan the query's whole tokens for supported phrases and resolve the one
 /// window they agree on.
-fn find_window(query: &str, anchor: &DateTime<FixedOffset>) -> Option<TemporalWindow> {
+fn find_window(query: &str, anchor: &ZonedDateTime) -> Option<TemporalWindow> {
     if query.len() > MAX_TEMPORAL_QUERY_BYTES {
         return None;
     }
@@ -154,18 +165,18 @@ fn find_window(query: &str, anchor: &DateTime<FixedOffset>) -> Option<TemporalWi
 impl Expression {
     /// Resolve this expression to a half-open window in the anchor's offset;
     /// `None` when calendar arithmetic overflows the representable range.
-    fn resolve(self, anchor: &DateTime<FixedOffset>) -> Option<TemporalWindow> {
-        let offset = *anchor.offset();
-        let day = anchor.date_naive();
-        let (start, end): (NaiveDate, NaiveDate) = match self {
+    fn resolve(self, anchor: &ZonedDateTime) -> Option<TemporalWindow> {
+        let offset = anchor.offset();
+        let day = anchor.date();
+        let (start, end): (Date, Date) = match self {
             Self::Today => (day, add_days(day, 1)?),
             Self::Yesterday => (add_days(day, -1)?, day),
             Self::ThisWeek => {
-                let monday = add_days(day, -i64::from(day.weekday().num_days_from_monday()))?;
+                let monday = add_days(day, -i64::from(day.weekday().to_monday_zero_offset()))?;
                 (monday, add_days(monday, 7)?)
             }
             Self::LastWeek => {
-                let monday = add_days(day, -i64::from(day.weekday().num_days_from_monday()))?;
+                let monday = add_days(day, -i64::from(day.weekday().to_monday_zero_offset()))?;
                 (add_days(monday, -7)?, monday)
             }
             Self::ThisMonth => {
@@ -177,12 +188,12 @@ impl Expression {
                 (previous_month(first)?, first)
             }
             Self::ThisYear => (
-                NaiveDate::from_ymd_opt(day.year(), 1, 1)?,
-                NaiveDate::from_ymd_opt(day.year() + 1, 1, 1)?,
+                Date::new(day.year(), 1, 1).ok()?,
+                Date::new(day.year() + 1, 1, 1).ok()?,
             ),
             Self::LastYear => (
-                NaiveDate::from_ymd_opt(day.year() - 1, 1, 1)?,
-                NaiveDate::from_ymd_opt(day.year(), 1, 1)?,
+                Date::new(day.year() - 1, 1, 1).ok()?,
+                Date::new(day.year(), 1, 1).ok()?,
             ),
         };
         Some(TemporalWindow {
@@ -192,39 +203,38 @@ impl Expression {
     }
 }
 
-fn add_days(date: NaiveDate, days: i64) -> Option<NaiveDate> {
-    date.checked_add_signed(Duration::days(days))
+fn add_days(date: Date, days: i64) -> Option<Date> {
+    date.checked_add(Span::new().days(days)).ok()
 }
 
-fn month_start(year: i32, month: u32) -> Option<NaiveDate> {
-    NaiveDate::from_ymd_opt(year, month, 1)
+fn month_start(year: i16, month: i8) -> Option<Date> {
+    Date::new(year, month, 1).ok()
 }
 
-fn next_month(first: NaiveDate) -> Option<NaiveDate> {
+fn next_month(first: Date) -> Option<Date> {
     let (year, month) = (first.year(), first.month());
     if month == 12 {
-        NaiveDate::from_ymd_opt(year + 1, 1, 1)
+        Date::new(year + 1, 1, 1).ok()
     } else {
-        NaiveDate::from_ymd_opt(year, month + 1, 1)
+        Date::new(year, month + 1, 1).ok()
     }
 }
 
-fn previous_month(first: NaiveDate) -> Option<NaiveDate> {
+fn previous_month(first: Date) -> Option<Date> {
     let (year, month) = (first.year(), first.month());
     if month == 1 {
-        NaiveDate::from_ymd_opt(year - 1, 12, 1)
+        Date::new(year - 1, 12, 1).ok()
     } else {
-        NaiveDate::from_ymd_opt(year, month - 1, 1)
+        Date::new(year, month - 1, 1).ok()
     }
 }
 
 /// Midnight of `date` in `offset`, emitted as UTC `%Y-%m-%dT%H:%M:%SZ` text.
-fn utc_text(offset: FixedOffset, date: NaiveDate) -> String {
-    let local = offset
-        .from_local_datetime(&date.and_hms_opt(0, 0, 0).expect("valid midnight"))
-        .single()
-        .expect("a fixed offset maps each local time exactly once");
-    local.naive_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+fn utc_text(offset: Offset, date: Date) -> String {
+    offset
+        .to_timestamp(date.at(0, 0, 0, 0))
+        .expect("a fixed offset maps each local time exactly once")
+        .to_string()
 }
 
 #[cfg(test)]

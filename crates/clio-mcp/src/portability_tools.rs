@@ -28,7 +28,7 @@
 use crate::read_tools::opt_usize;
 use crate::runtime::{McpState, StderrSinks, StoreSignals};
 use crate::write_tools::{
-    gated_write_policy, opt_bool, opt_str, req_str, strict_opt_str, validate_time_bound,
+    admission_policy, opt_bool, opt_str, req_str, strict_opt_str, validate_time_bound,
 };
 use clio_compliance::{
     BindingControls, DEFAULT_REVIEW_LIMIT, DeliverySpec, ExportContentMode, ExportFilter,
@@ -58,8 +58,13 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
     }
 }
 
-/// `export(destination, filter?, content_mode?, subject_id?)`: one bundle file
-/// plus manifest, written through the durable destination-custody boundary.
+/// `export(destination, filter?, content_mode?, subject_id?,
+/// readable_export_opt_in?, recipient?)`: one bundle file plus manifest, written
+/// through the durable destination-custody boundary. The default content mode is
+/// the opaque ciphertext backup; a readable export needs the explicit opt-in and
+/// an X25519 recipient public key it is sealed to. The manifest checksum covers
+/// the opened bundle, while the custody row records the digest of the delivered
+/// file.
 #[inline(never)]
 fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
@@ -92,6 +97,8 @@ fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         subject_id: subject_id.map(str::to_owned),
     };
     let content_mode = ExportContentMode::parse(opt_str(args, "content_mode"))?;
+    let readable_export_opt_in = opt_bool(args, "readable_export_opt_in", false)?;
+    let recipient = opt_str(args, "recipient").map(str::to_owned);
     let controls = clio_compliance::BindingControls {
         copy_controls_accepted: true,
         ..clio_compliance::BindingControls::default()
@@ -119,12 +126,15 @@ fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         subject_id,
         facts,
         backend: Some(state.inventory_backend),
+        readable_export_opt_in,
+        recipient,
         delivery: Some(clio_compliance::ExportDelivery {
             events: &*state.events,
             custody: &*state.custody,
             controls: &controls,
             action_id: &action_id,
             staging_dir: &staging_dir,
+            root: Some(&state.export_root),
             custody_owner: "clio",
             required_action: "delivery",
         }),
@@ -171,9 +181,11 @@ fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
         action_id: &action_id,
         destination: &destination,
         staging_dir: &staging_dir,
+        root: Some(&state.export_root),
         custody_owner: "clio",
         required_action: "delivery",
         now: &now,
+        readable_opt_in: false,
     };
     clio_compliance::write_review_export(
         &ctx,
@@ -208,7 +220,7 @@ fn import_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         dry_run: opt_bool(args, "dry_run", false)?,
         force: opt_bool(args, "force", false)?,
         reason: opt_str(args, "reason"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
+        policy: admission_policy(state, ctx.bank.as_str()),
         signals: &signals,
         sink: &StderrSinks,
         belief_signals: &signals,
@@ -232,6 +244,7 @@ fn import_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
 /// non-writing stub with `PROVIDER_IMPORT_UNSUPPORTED`.
 #[inline(never)]
 fn import_provider_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
+    state.authorize_admin()?;
     let provider = req_str(args, "provider")?;
     match provider {
         "mem0" => crate::provider_adapter::import_provider_mem0(state, args),
@@ -257,11 +270,21 @@ fn import_provider_stub(state: &McpState, args: &Value) -> Result<Value, AmError
     }))
 }
 
-/// Fully-redacted view of any accepted credential parameters (never plaintext).
-fn masked_credentials(args: &Value) -> serde_json::Value {
-    clio_config::secret::masked_clone(args.get("credentials").unwrap_or(&serde_json::Value::Null))
+/// The stub's `credentials_masked` value for `args`, routed through the
+/// credential module rather than the general JSON masker: a bare-string
+/// credential is the secret itself, and the general walk only rewrites object
+/// members.
+pub(crate) fn masked_credentials(args: &Value) -> Value {
+    args.get("credentials").map_or(
+        Value::Null,
+        crate::provider_credentials::masked_credential_value,
+    )
 }
 
 #[cfg(test)]
 #[path = "portability_tools_tests.rs"]
 mod portability_tools_tests;
+
+#[cfg(test)]
+#[path = "portability_tools_readable_tests.rs"]
+mod portability_tools_readable_tests;

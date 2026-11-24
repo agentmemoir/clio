@@ -3,12 +3,10 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the duplicate-write CLI contract: the
-//! `remember --allow-duplicate` flag, and refusing an exact-duplicate write as a
-//! failure with the reason named.
+//! This module is responsible for the duplicate-write CLI contract: refusing an
+//! exact-duplicate write as a failure with the reason named.
 //!
 //! ## Owns
-//! - Decoding `--allow-duplicate` into the store tool's `allow_duplicate` argument
 //! - Recognising a `duplicate: true` store payload
 //! - The refusal for a duplicate write
 //!
@@ -23,19 +21,7 @@
 //!
 //! Keep this module focused on the duplicate write contract.
 
-use crate::cli_args::ParsedArgs;
 use serde_json::Value;
-
-/// The `allow_duplicate` tool argument when the caller passed
-/// `--allow-duplicate`.
-///
-/// Named for what it waives rather than `force`, because `consolidate` already
-/// has an unrelated `force` argument and one flag name should not mean two
-/// things across the tool surface. Absent otherwise, so the store path keeps
-/// refusing an exact duplicate by default.
-pub(crate) fn allow_duplicate_arg(parsed: &ParsedArgs) -> Option<Value> {
-    parsed.has("allow-duplicate").then_some(Value::Bool(true))
-}
 
 /// Whether a store payload reports an exact-duplicate no-op.
 pub(crate) fn is_duplicate_noop(payload: &Value) -> bool {
@@ -47,8 +33,7 @@ pub(crate) fn is_duplicate_noop(payload: &Value) -> bool {
 ///
 /// An exact duplicate stores nothing, so it is refused like every other rejected
 /// write: exit 1, `ok` false, and the reason named. The envelope must not report
-/// `ok` true for a write that did not happen. A caller that wants the copy anyway
-/// passes `--allow-duplicate`.
+/// `ok` true for a write that did not happen.
 pub(crate) fn remember_refusal(payload: &Value) -> Option<crate::cli_write_group::Refusal> {
     if is_duplicate_noop(payload) {
         let reason = payload

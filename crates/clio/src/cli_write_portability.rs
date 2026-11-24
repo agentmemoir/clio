@@ -90,7 +90,8 @@ impl WriteGroup for PortabilityWriteGroup {
     }
 }
 
-/// `export --out FILE [--content-mode M] [--category C] [--time-start TS]
+/// `export --out FILE [--content-mode M] [--readable-export-opt-in B]
+/// [--recipient B64] [--category C] [--time-start TS]
 /// [--time-end TS] [--include-archived B] [--include-discarded B]` → `export`:
 /// one bundle file plus its completeness manifest. The tool refuses
 /// unprivileged actors (`--actor harness|system`); the CLI passes `--actor`
@@ -121,6 +122,15 @@ fn export_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
             };
             args.insert(key.into(), Value::from(value));
         }
+    }
+    include_flag(
+        parsed,
+        "readable-export-opt-in",
+        "readable_export_opt_in",
+        &mut args,
+    )?;
+    if let Some(recipient) = parsed.value("recipient") {
+        args.insert("recipient".into(), Value::from(recipient));
     }
     include_flag(parsed, "include-archived", "include_archived", &mut args)?;
     include_flag(parsed, "include-discarded", "include_discarded", &mut args)?;
@@ -358,7 +368,12 @@ fn review_export_write(io: &CliIo, parsed: &ParsedArgs) -> Result<(), CliError> 
     if let Some(cursor) = parsed.value("cursor") {
         args.insert("cursor".into(), Value::from(cursor));
     }
-    let payload = clio_mcp::write_tools::dispatch(&state, "review_export", &Value::Object(args));
+    let payload = clio_mcp::write_tools::dispatch_in_scope(
+        &state,
+        "review_export",
+        &Value::Object(args),
+        clio_mcp::ToolScope::Bound,
+    );
     if payload.get("ok").and_then(Value::as_bool) == Some(true) {
         return Ok(());
     }

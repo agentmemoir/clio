@@ -152,7 +152,12 @@ pub(crate) fn invoke(state: &McpState, params: &Value) -> Result<Value, RpcError
         };
         return Ok(refusal(target, AmError::new(err.code, message)));
     }
-    McpHandler::execute_tool_call(state, target, &target_args)
+    McpHandler::execute_tool_call(
+        state,
+        target,
+        &target_args,
+        crate::tools_page::ToolScope::Advertised,
+    )
 }
 
 #[cfg(test)]

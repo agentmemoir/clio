@@ -222,9 +222,12 @@ fn a_directory_destination_refuses_the_export_with_invalid_argument() {
             controls: &controls,
             action_id,
             staging_dir: &staging,
+            root: None,
             custody_owner: "clio",
             required_action: "delivery",
         }),
+        readable_export_opt_in: true,
+        recipient: Some(crate::export_tests::test_recipient()),
     };
     let err = export(&export_args).unwrap_err();
     assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument);

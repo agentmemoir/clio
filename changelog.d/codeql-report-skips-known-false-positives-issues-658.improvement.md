@@ -1,0 +1,1 @@
+The twice-daily CodeQL report now counts only results that are not already known false positives, and it prints each skipped result with its rule id and location in the run log and the job summary, so no drop is silent.

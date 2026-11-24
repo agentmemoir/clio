@@ -1,0 +1,1 @@
+A revoked MCP HTTP bearer token now stops working on a running server. The server checks the token store on every request and reloads it when it changed, so `clio auth token revoke` takes effect without a restart. The revoke JSON response now reports `"effective": "immediately"`, in place of `"next_server_start"`; a reader of that JSON sees the new value.

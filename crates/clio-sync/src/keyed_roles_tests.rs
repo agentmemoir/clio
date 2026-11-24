@@ -89,7 +89,7 @@ fn the_content_digest_without_a_cipher_is_the_plain_hash() {
     let plain = content_digest(None, content);
     assert_eq!(
         plain,
-        clio_store::sha256_hex(b"am-sync-hash", content),
+        clio_store::sha256_hex(crate::keyed_roles::published_digest_salt(), content),
         "plaintext mode keeps the pre-keyed value byte for byte"
     );
     assert_eq!(plain.len(), 64, "an unkeyed SHA-256 is 64 hex characters");
@@ -138,6 +138,23 @@ fn the_mutation_id_without_a_cipher_is_the_plain_hash() {
         "a bare date hashes the canonical text, so the key and the wire stamp agree"
     );
     assert_eq!(plain.len(), 64, "an unkeyed SHA-256 is 64 hex characters");
+}
+
+/// The plaintext idempotency label is wire format: a deployment with no cipher
+/// derives every stored key under these exact bytes, so pin them directly.
+#[test]
+fn published_mutation_id_salt_pins_the_wire_label() {
+    assert_eq!(
+        crate::keyed_roles::published_mutation_id_salt(),
+        b"am-sync-mut"
+    );
+}
+
+/// The plaintext digest label is wire format: a deployment with no cipher
+/// derives every stored digest under these exact bytes, so pin them directly.
+#[test]
+fn published_digest_salt_pins_the_wire_label() {
+    assert_eq!(crate::keyed_roles::published_digest_salt(), b"am-sync-hash");
 }
 
 /// With a cipher the idempotency key is keyed, peer-stable, and different for a

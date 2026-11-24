@@ -65,6 +65,10 @@ pub mod portability_tools;
 mod pressure;
 mod principal;
 
+/// The catalogue one dispatch is bounded by. A caller names the scope it
+/// serves: an MCP client transport advertises, a command-line verb binds.
+pub use tools_page::ToolScope;
+
 /// The pressure block's archive-scan constants, re-exported so external
 /// consumers (the measurement target) time the exact values the block runs.
 pub use pressure::{
@@ -72,6 +76,8 @@ pub use pressure::{
 };
 pub mod protocol;
 pub mod provider_adapter;
+mod provider_credentials;
+mod provider_destination;
 pub mod read_explain;
 mod read_history;
 mod read_read_policy;

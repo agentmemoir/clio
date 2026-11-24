@@ -57,9 +57,13 @@ mod erasure_step_probe;
 mod export;
 mod export_custody;
 mod export_mask;
+mod export_seal;
+#[cfg(test)]
+mod export_seal_test_support;
 mod export_subject;
 mod import;
 mod inventory;
+mod inventory_link_read;
 mod journal_denial;
 #[cfg(test)]
 mod local_action_probe;
@@ -76,6 +80,7 @@ mod subject_request_events;
 mod subject_request_frozen;
 mod subject_request_manifest;
 mod subject_request_report;
+mod subject_request_scope_gate;
 pub mod subject_request_service;
 pub mod subject_request_store_wiring;
 mod subject_request_transition;
@@ -116,6 +121,7 @@ pub use export_custody::{
     CustodyState, DeliveryRefusal, DeliveryResult, DeliverySpec, OpenDestination, deliver_export,
     reconcile_open_destinations,
 };
+pub use export_seal::MAGIC as READABLE_EXPORT_SEAL_MAGIC;
 pub use import::{ImportArgs, ImportReport, SkippedInvalid, import};
 pub use inventory::{
     Custody, InventoryBackend, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, Owner,

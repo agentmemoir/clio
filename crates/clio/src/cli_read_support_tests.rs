@@ -112,7 +112,7 @@ pub(crate) fn extract_state() -> Arc<McpState> {
 /// Dispatch an in-process tool call (the same seam the CLI uses).
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn call(state: &McpState, tool: &str, args: Value) -> Value {
-    clio_mcp::write_tools::dispatch(state, tool, &args)
+    clio_mcp::write_tools::dispatch_in_scope(state, tool, &args, clio_mcp::ToolScope::Advertised)
 }
 
 /// Store one admitted item and register its lexical doc.

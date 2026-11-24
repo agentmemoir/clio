@@ -241,8 +241,12 @@ jobs:
       # The installer fetches this file over HTTPS and refuses a download whose
       # hash is absent from it. That catches a truncated transfer, a corrupted
       # proxy response, and an asset swapped for another target. It does not
-      # protect against someone who can publish to this repository: the trust
-      # root is GitHub plus TLS, and the hash file is signed by nobody.
+      # prove who wrote the file, so the next step signs it with the release
+      # key and the installer verifies that signature against the key it
+      # carries. That signature defeats a swapped asset or a swapped manifest.
+      # It does not defeat an attacker who can also replace the installer,
+      # because the install command fetches the installer from the same release
+      # channel and the public key travels inside it.
       - name: Checksum the archives
         run: |
           cd dist
@@ -251,11 +255,59 @@ jobs:
           chmod +x install.sh
           cat checksums.txt
 
+      # An unsigned release must not ship. The secret holds the private key whose
+      # public half is pinned below, and an empty secret stops the job here
+      # rather than publishing a manifest nobody can verify. The pin is what
+      # ties the secret to the tree: changing the installer key means editing
+      # the literal in this step in the same change.
+      - name: Sign the checksum manifest
+        env:
+          # The key reaches the shell through the environment, so no expansion
+          # of its text can form a command.
+          SIGNING_KEY: ${{ secrets.CLIO_RELEASE_SIGNING_KEY }}
+        run: |
+          # The installer key this release must be signed with: the SHA-256 of
+          # its DER SubjectPublicKeyInfo. A key change edits this line and
+          # scripts/install.sh together.
+          EXPECTED_KEY_SHA256=d7ff9d436841ec7203e597d998f6e3425e2e959c831262c2d7b391ce11967a1c
+          umask 077
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          keyfile="$work/signing-key.pem"
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::CLIO_RELEASE_SIGNING_KEY is not set, so checksums.txt cannot be signed. Add the release signing key to the repository secrets before tagging."
+            exit 1
+          fi
+          printf '%s\n' "$SIGNING_KEY" > "$keyfile"
+          openssl dgst -sha256 -sign "$keyfile" -out dist/checksums.txt.sig dist/checksums.txt
+          # Verify with the key the installer carries, read back from the
+          # published copy rather than from source, so a mismatch between the
+          # secret and the installer fails here and not on a user's machine.
+          # The key sits inside a shell assignment, so the quote around it is
+          # trimmed here.
+          awk '/BEGIN PUBLIC KEY/,/END PUBLIC KEY/ {
+            sub(/^.*-----BEGIN PUBLIC KEY-----/, "-----BEGIN PUBLIC KEY-----")
+            sub(/-----END PUBLIC KEY-----.*$/, "-----END PUBLIC KEY-----")
+            print
+          }' dist/install.sh > "$work/install-key.pub"
+          openssl dgst -sha256 -verify "$work/install-key.pub" -signature dist/checksums.txt.sig dist/checksums.txt
+          # The signature proves the manifest matches this secret. The pin
+          # proves the secret is the key the installer carries, which the verify
+          # above cannot tell apart from a secret and an installer replaced
+          # together.
+          actual="$(openssl pkey -pubin -in "$work/install-key.pub" -outform DER | sha256sum | cut -d' ' -f1)"
+          if [ "$actual" != "$EXPECTED_KEY_SHA256" ]; then
+            echo "::error::the key in dist/install.sh hashes to $actual, not the pinned $EXPECTED_KEY_SHA256. Update the installer and the pinned fingerprint together."
+            exit 1
+          fi
+          echo "signature verified against the pinned key $EXPECTED_KEY_SHA256"
+
       # A set missing one target would leave the installer unable to serve a
       # supported platform, and the failure would surface on a user's machine
       # rather than here.
       - name: Assert the asset set is complete
         run: |
+          test -s dist/checksums.txt.sig || { echo "::error::missing checksums.txt.sig"; exit 1; }
           for asset in \
             clio-aarch64-apple-darwin \
             clio-x86_64-unknown-linux-musl \
@@ -325,4 +377,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --notes-file release-notes.md \
-            dist/*.tar.gz dist/checksums.txt dist/install.sh
+            dist/*.tar.gz dist/checksums.txt dist/checksums.txt.sig dist/install.sh

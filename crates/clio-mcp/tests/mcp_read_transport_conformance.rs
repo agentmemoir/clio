@@ -212,7 +212,14 @@ fn stdio_read_matrix_with_parity() {
     let direct_state = read_state();
     let direct: Vec<Value> = fixtures
         .iter()
-        .map(|(name, args)| clio_mcp::write_tools::dispatch(&direct_state, name, args))
+        .map(|(name, args)| {
+            clio_mcp::write_tools::dispatch_in_scope(
+                &direct_state,
+                name,
+                args,
+                clio_mcp::ToolScope::Advertised,
+            )
+        })
         .collect();
     let mut frames = String::new();
     for (i, (name, args)) in fixtures.iter().enumerate() {
@@ -242,7 +249,12 @@ fn http_read_matrix_with_parity() {
     let fixtures = read_fixture();
     let direct_state = read_state();
     for (i, (name, args)) in fixtures.iter().enumerate() {
-        let direct = clio_mcp::write_tools::dispatch(&direct_state, name, args);
+        let direct = clio_mcp::write_tools::dispatch_in_scope(
+            &direct_state,
+            name,
+            args,
+            clio_mcp::ToolScope::Advertised,
+        );
         let body = call_frame(100 + i as u64, name, args);
         let (status, resp) = http_post(&addr, &body, &call_headers(name));
         assert_eq!(status, 200, "read call `{name}`");
