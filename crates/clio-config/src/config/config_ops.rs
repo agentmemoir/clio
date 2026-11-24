@@ -76,6 +76,20 @@ impl Runtime {
     ) -> Result<ConfigSetData, AmError> {
         validate_set_path(path)?;
         validate_set_value(path, &value)?;
+        // Take the overwrite guard before the overlay changes, so a refusal
+        // leaves the live overlay, log level, and bank policy as they were.
+        // The guard stays alive until the save below replaces the file.
+        let checked = if scope == ConfigScope::Deployment {
+            match self.deployment_path.clone() {
+                Some(path_buf) => {
+                    let guard = check_overwritable(&path_buf)?;
+                    Some((path_buf, guard))
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
         {
             let overlay = match scope {
                 ConfigScope::Session => &mut self.session_overlay,
@@ -100,10 +114,7 @@ impl Runtime {
             self.bank_policy =
                 serde_json::from_value(value.clone()).expect("bank.policy after validate");
         }
-        if scope == ConfigScope::Deployment
-            && let Some(path_buf) = self.deployment_path.clone()
-        {
-            let checked = check_overwritable(&path_buf)?;
+        if let Some((path_buf, checked)) = checked {
             save_overlay_file_checked(&path_buf, &self.deployment_overlay, &checked)?;
         }
         log::info("config_set", &[("path", path), ("scope", scope.as_str())]);
