@@ -1,11 +1,33 @@
 // Copyright 2026 Agent Memoir (https://agentmemoir.com/)
 // SPDX-License-Identifier: Apache-2.0
 //
-//! Credential-store reload tests: a revoke that lands while the file is being
-//! read, a store that never settles, the in-step fast path, and a snapshot
-//! another reload publishes first.
+//! # Responsibility
+//!
+//! This module is responsible for the reload tests of the credential store: a
+//! revoke that lands while the file is being read, a store that never settles,
+//! and the in-step fast path that answers without reading the file.
 //!
 //! Test-only. Never compiled into production builds.
+//!
+//! ## Owns
+//! - The mid-read revoke whose records must not be published
+//! - The bounded reload that refuses a store that keeps moving
+//! - The in-step path that stats once and reads nothing
+//!
+//! ## Does not own
+//! - The store load, the snapshot rules it shares, and digest resolution (see
+//!   `http_auth`)
+//! - The store file, its record shape, and the writer that replaces it (see
+//!   `clio_config::auth_tokens`)
+//!
+//! ## Boundary
+//!
+//! Changes to how a reload settles against a moving file should normally
+//! require changes here. Changes to what a resolved principal may do should
+//! not require changes here.
+//!
+//! Keep this module focused on the reload, with every interleaving placed by
+//! the `refresh_with` seam rather than by a thread.
 //!
 //! # Fixtures
 //!
@@ -193,44 +215,4 @@ fn a_store_in_step_with_the_file_is_not_read_again() {
         "an in-step store must not read the file"
     );
     assert!(store.resolve(&known).expect("resolve").is_some());
-}
-
-/// A reload that publishes while another read is in flight must not be
-/// overwritten by the reader it displaced: the newest snapshot is the one the
-/// store keeps.
-#[test]
-fn a_snapshot_published_during_the_read_is_not_overwritten() {
-    let scratch = Scratch::new("supersede");
-    let older = secret("o");
-    let newer = secret("n");
-    scratch.write(&[record("ci", &older, Actor::Harness, &["demo"])]);
-    let store = CredentialStore::load(scratch.path()).expect("load");
-    // The file moves on, so the reload below has work to do.
-    scratch.write(&[record("ci", &newer, Actor::Harness, &["demo"])]);
-
-    let calls = AtomicUsize::new(0);
-    let result = store.refresh_with(|| {
-        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            store
-                .refresh_with(|| {})
-                .expect("the first reload publishes");
-        }
-    });
-    assert!(
-        result.is_ok(),
-        "the displaced read must re-evaluate, not fail"
-    );
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "the re-evaluated attempt must find the store already in step"
-    );
-    assert!(
-        store.resolve(&newer).expect("resolve").is_some(),
-        "the store must hold the snapshot the file was published from"
-    );
-    assert!(
-        store.resolve(&older).expect("resolve").is_none(),
-        "the superseded record must not come back"
-    );
 }

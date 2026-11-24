@@ -34,13 +34,23 @@
 //! inode, modification time, and length are compared with the values captured
 //! when the records were loaded. When they differ, the shared loader runs again
 //! and the new records replace the old snapshot, so a secret revoked by the
-//! token management verbs stops resolving on the running server. The cost is
-//! one `stat` per authorized request.
+//! token management verbs stops resolving on the running server.
+//!
+//! The cost depends on the path the request takes. A store already in step with
+//! the file is answered from one `stat` and no read at all. A reload that finds
+//! the file changed pays a `stat`, the read, and a second `stat`, and may
+//! repeat that up to `REFRESH_ATTEMPTS` (3) times before it fails closed.
 //!
 //! A new snapshot is published only when the file was the same version before
 //! and after it was read, so a revoke that lands mid-read is not undone by the
 //! records that read returned. A file that keeps moving is re-read a bounded
 //! number of times and then refused rather than served from a guess.
+//!
+//! That is the whole guarantee: a snapshot read while the store changed is
+//! never published. It does not close the last gap between the two steps, so a
+//! revocation that completes after `refresh`'s final stat and before
+//! `resolve`'s digest compare can still authorize that one request already in
+//! flight. A revoke that lands after that stat is seen by the next request.
 //!
 //! A reload that fails refuses the request rather than serving the previous
 //! snapshot: a stale snapshot would keep a revoked secret alive. The reason is
