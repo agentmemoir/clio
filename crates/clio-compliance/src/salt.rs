@@ -33,10 +33,10 @@ use clio_store::sha256_hex;
 use clio_types::{AmError, ErrorCode};
 use std::ffi::OsString;
 use std::fs;
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
-use crate::erasure_journal_file::owner_only;
+use crate::erasure_journal_file::{MAX_JOURNAL_BYTES, owner_only, same_file};
 use crate::export_custody::export_custody_files::{fsync_dir, io_error, open_owner_only};
 
 /// The environment override an operator sets to supply the salt directly.
@@ -136,11 +136,44 @@ fn read_salt(path: &Path) -> Result<Option<Vec<u8>>, AmError> {
         Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(io_error("inspect", path, &err)),
     };
-    if let Some(refusal) = untrusted(path, &observed) {
+    read_observed(path, &observed).map(Some)
+}
+
+/// The salt of the sidecar the observation `observed` names.
+///
+/// The observation decides the refusal before any open, and the descriptor the
+/// open returns must still name that same file, so a path swapped between the
+/// observation and the open is refused instead of being read. The mode and the
+/// type that were checked are the ones on that descriptor, and the bytes come
+/// from it, so one file is both checked and read.
+fn read_observed(path: &Path, observed: &fs::Metadata) -> Result<Vec<u8>, AmError> {
+    if let Some(refusal) = untrusted(path, observed) {
         return Err(refusal);
     }
-    let bytes = fs::read(path).map_err(|err| io_error("read", path, &err))?;
-    Ok(Some(exact_salt(&bytes, path)?))
+    let file = fs::File::open(path).map_err(|err| io_error("read", path, &err))?;
+    let opened = file
+        .metadata()
+        .map_err(|err| io_error("inspect", path, &err))?;
+    if let Some(refusal) = untrusted(path, &opened) {
+        return Err(refusal);
+    }
+    if !same_file(observed, &opened) {
+        return Err(AmError::new(
+            ErrorCode::ConfigCorrupt,
+            format!(
+                "the deployment salt file {} was swapped after it was checked, so the bytes \
+                 read would not be the bytes that passed the check. The file is not regenerated \
+                 here, because replacing it would invalidate every identifier already hashed \
+                 under the salt it holds",
+                path.display()
+            ),
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_JOURNAL_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| io_error("read", path, &err))?;
+    exact_salt(&bytes, path)
 }
 
 /// The refusal for a sidecar this build will not read, naming what was found.
@@ -277,6 +310,10 @@ fn restrict_to_owner(file: &fs::File, path: &Path) -> Result<(), AmError> {
 fn restrict_to_owner(_file: &fs::File, _path: &Path) -> Result<(), AmError> {
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "salt_swap_tests.rs"]
+mod salt_swap_tests;
 
 #[cfg(test)]
 #[path = "salt_tests.rs"]
