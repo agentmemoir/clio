@@ -65,6 +65,14 @@ pub(crate) const ARCHIVE_NAME: &str = "clio-sync-keys-archive.json";
 /// the current key names.
 pub(crate) const ARCHIVE_STORE_LABEL: &str = "archive file";
 
+/// The label every archive refusal opens with, so a message names the file the
+/// operator has to fix rather than the key file the archive sits beside.
+///
+/// Before this existed the archive reported under the sync key file's label,
+/// which said `sync key file /path/to/clio-sync-keys-archive.json` and named the
+/// wrong file to repair.
+pub(crate) const ARCHIVE_SUBJECT: &str = "sync key archive";
+
 /// One superseded sync key as the archive file holds it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ArchivedSyncKey {
@@ -88,19 +96,24 @@ fn archive_path(key_file: Option<&Path>) -> Option<PathBuf> {
 
 /// Every archived sync key, oldest first, for a node that has rotated.
 ///
+/// The archive is opened once, without following a link and without waiting on a
+/// FIFO, and the descriptor that open returned is what is judged and read, so the
+/// file the refusal approved is the file the records came from.
+///
 /// # Errors
-/// The archive exists but is not owner-only, cannot be read, or holds a line
-/// that is not an archived key. A damaged archive holds key material, so it is
+/// The archive is a link, is not a regular file, is owned by another user, or is
+/// not owner-only ([`ErrorCode::Forbidden`]); it cannot be opened or read
+/// ([`ErrorCode::Internal`]); or it holds a line that is not an archived key
+/// ([`ErrorCode::ConfigCorrupt`]). A damaged archive holds key material, so it is
 /// refused rather than worked around, on the same rule as the key file.
 pub(crate) fn read_entries(key_file: Option<&Path>) -> Result<Vec<ArchivedSyncKey>, AmError> {
     let Some(path) = archive_path(key_file) else {
         return Ok(Vec::new());
     };
-    if !path.exists() {
+    let Some(mut file) = open_archive_for_read(&path)? else {
         return Ok(Vec::new());
-    }
-    file_store::owner_only_refusal(&path, "sync key file")?;
-    let raw = std::fs::read_to_string(&path).map_err(|err| {
+    };
+    let raw = crate::sync_key_gate::read_string(&mut file).map_err(|err| {
         AmError::new(
             ErrorCode::Internal,
             format!(
@@ -132,9 +145,16 @@ pub(crate) fn read_entries(key_file: Option<&Path>) -> Result<Vec<ArchivedSyncKe
 /// The entry is on disk and flushed before this returns, which is what makes
 /// archive-before-delete safe.
 ///
+/// The archive path is opened once, without following a link and without waiting
+/// on a FIFO, and the descriptor that open returned is judged before a byte is
+/// written through it. `Ok(None)` from that open is the one case that creates the
+/// file, so no existence check of its own can disagree with the open.
+///
 /// # Errors
-/// The key file has no directory to hold the archive, or the filesystem
-/// refused the write.
+/// The key file has no directory to hold the archive
+/// ([`ErrorCode::ConfigCorrupt`]); the archive is a link, is not a regular file,
+/// is owned by another user, or is not owner-only ([`ErrorCode::Forbidden`]); or
+/// the directory and the write itself failed ([`ErrorCode::Internal`]).
 pub(crate) fn append_entry(
     key_file: Option<&Path>,
     entry: &ArchivedSyncKey,
@@ -156,21 +176,16 @@ pub(crate) fn append_entry(
                 ),
             )
         })?;
+        crate::sync_key_gate::ensure_owner_only_dir(parent)?;
     }
-    let exists = path.exists();
-    let mut file = if exists {
-        // The read path refuses an archive that is not owner-only, and the
-        // append must refuse it too: the entry is raw key material, so writing
-        // it next to whatever could already read the file discloses the key
-        // before the next read could refuse.
-        file_store::owner_only_refusal(&path, "sync key file")?;
-        std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .map_err(|err| archive_io_error(&path, &err))?
-    } else {
-        file_store::open_new_owner_only(&path).map_err(|err| archive_io_error(&path, &err))?
-    };
+    let mut file =
+        match crate::sync_key_gate::open_append_no_follow(&path, ARCHIVE_SUBJECT, |err| {
+            archive_io_error(&path, err)
+        })? {
+            Some(file) => file,
+            None => file_store::open_new_owner_only(&path)
+                .map_err(|err| archive_io_error(&path, &err))?,
+        };
     let line = serde_json::to_string(entry).expect("serialize archived sync key");
     file.write_all(line.as_bytes())
         .and_then(|()| file.write_all(b"\n"))
@@ -178,7 +193,32 @@ pub(crate) fn append_entry(
         .map_err(|err| archive_io_error(&path, &err))
 }
 
-/// An archive write or read that the filesystem refused.
+/// Open the archive for reading, judged on the descriptor the open returned.
+///
+/// `Ok(None)` is an archive that does not exist, which the caller reports as
+/// nothing archived: the answer comes from the one open, so no earlier existence
+/// check can point at a file this open then finds missing.
+///
+/// # Errors
+/// [`ErrorCode::Forbidden`] for a link, a file that is not regular, a file another
+/// user owns, and a file that is not owner-only; [`ErrorCode::Internal`] when the
+/// open failed for any other reason.
+fn open_archive_for_read(path: &Path) -> Result<Option<std::fs::File>, AmError> {
+    crate::sync_key_gate::open_read_no_follow(path, ARCHIVE_SUBJECT, |err| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!(
+                "cannot read the Clio sync key archive {}: {err}",
+                path.display()
+            ),
+        )
+    })
+}
+
+/// An archive write that the filesystem refused.
+///
+/// The message names the archive and says what a refused archive write costs: the
+/// superseded key is still there, so nothing sealed under it is lost yet.
 fn archive_io_error(path: &Path, err: &std::io::Error) -> AmError {
     AmError::new(
         ErrorCode::Internal,

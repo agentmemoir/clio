@@ -31,12 +31,15 @@ chacha20poly1305 = { workspace = true }
 # reached through. The platform store is installed once per process, lazily on
 # the first entry, by `secret_key_store`, from the target-scoped crate below.
 keyring-core = { workspace = true }
-# Only its `O_NOFOLLOW` and `O_NONBLOCK` constants: the token store is opened
-# without following a link and without blocking on a FIFO. This crate forbids
-# unsafe code, so no `libc` function is called.
+# Only its `O_NOFOLLOW`, `O_NONBLOCK`, and `ELOOP` constants: the token store and
+# the sync key files are opened without following a link, without blocking on a
+# FIFO, and with the error that names a refused link. This crate forbids unsafe
+# code, so no `libc` function is called. Unconditional because the workspace
+# already carries it, and the `cfg(unix)` uses below pick it up from here.
 libc = { workspace = true }
-# The effective uid of the process, compared against the token store's owner.
-# A safe wrapper, unlike a direct `libc` call, which this crate cannot make.
+# The effective uid of the process, compared against the token store's and the
+# sync key files' owner. A safe wrapper, unlike a direct `libc` call, which this
+# crate cannot make.
 rustix = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
