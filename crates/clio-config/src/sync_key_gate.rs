@@ -21,9 +21,7 @@
 //!
 //! ## Does not own
 //! - Where these files live, what they are called, or what they hold (see
-//!   `sync_key_file` and `sync_key_rotation`)
-//! - The path-based owner-only rule the encryption key read still uses (see
-//!   `sync_key_file::owner_only_refusal`)
+//!   `sync_key_file`, `sync_key_rotation`, and `secret_key_file`)
 //!
 //! ## Boundary
 //!
@@ -65,11 +63,10 @@ use clio_types::{AmError, ErrorCode};
 
 /// Refuse an already-open file that is not a regular owner-only file.
 ///
-/// [`crate::sync_key_file::owner_only_refusal`] asks the path, and a path can
-/// lead to a file another account chose. This asks the descriptor, so it judges
-/// the file the caller is about to read or write whatever the path pointed at
-/// when it was opened. `subject` labels the message, on the same rule as
-/// `owner_only_refusal`, so the path in it is what names the file.
+/// A path can lead to a file another account chose. This asks the descriptor, so
+/// it judges the file the caller is about to read or write whatever the path
+/// pointed at when it was opened. `subject` labels the message, so the path in it
+/// is what names the file.
 ///
 /// The owner check is explicit — the file's uid against the effective uid of this
 /// process — because a successful open does not imply ownership: root opens and

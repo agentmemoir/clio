@@ -257,45 +257,6 @@ pub(crate) fn write_created(key_file: Option<&Path>, stamp: &str) -> Result<(), 
         .map_err(|err| io_error(&path, "write", &err))
 }
 
-/// Refuse a key file whose mode grants anything to group or other.
-///
-/// `subject` is the label the message opens with, not the file's identity: the
-/// archive reuses the sync key file label, so the path is what names the file.
-///
-/// # Errors
-/// [`ErrorCode::Forbidden`] naming the path; never the host's mode value.
-#[cfg(unix)]
-pub(crate) fn owner_only_refusal(path: &Path, subject: &str) -> Result<(), AmError> {
-    use std::os::unix::fs::PermissionsExt;
-    let mode = fs::metadata(path)
-        .map_err(|err| {
-            AmError::new(
-                ErrorCode::Internal,
-                format!("cannot read the Clio {subject} {}: {err}", path.display()),
-            )
-        })?
-        .permissions()
-        .mode();
-    if mode.trailing_zeros() >= 6 {
-        return Ok(());
-    }
-    Err(AmError::new(
-        ErrorCode::Forbidden,
-        format!(
-            "{subject} {}: refused because it is not owner-only; restrict it to the owner \
-             (0600) and run again",
-            path.display()
-        ),
-    ))
-}
-
-/// Non-Unix platforms have no mode bits to check; the owner-only rule is a
-/// no-op there, matching `persist::restrict_dir`.
-#[cfg(not(unix))]
-pub(crate) fn owner_only_refusal(_path: &Path, _subject: &str) -> Result<(), AmError> {
-    Ok(())
-}
-
 /// Open `path` for reading once, judged on the descriptor that open returned.
 ///
 /// The gate in [`crate::sync_key_gate`] does the open without following a link or

@@ -97,9 +97,9 @@ where
 ///
 /// `create_new` plus the mode in the same `open` call is the shape the generated
 /// `.env` already uses: no window exists in which another user can read the key,
-/// and a file that appeared since the existence check is never clobbered. The
-/// write is flushed before returning, so a key that has been reported as created
-/// is on disk.
+/// and a file that appeared since the key was found missing is never clobbered.
+/// The write is flushed before returning, so a key that has been reported as
+/// created is on disk.
 ///
 /// # Errors
 /// The directory could not be created, or the file could not be opened or written.
