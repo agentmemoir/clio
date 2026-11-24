@@ -63,6 +63,7 @@ fn guard_accepts_the_file_it_checked() {
         .expect("the path still names the checked file");
 }
 
+#[cfg(unix)]
 #[test]
 fn guard_refuses_a_path_swapped_after_the_check() {
     let scratch = Scratch::new("swapped");
@@ -89,6 +90,27 @@ fn guard_refuses_a_path_swapped_after_the_check() {
         swapped,
         "the swapped file must keep its bytes"
     );
+}
+
+#[cfg(not(unix))]
+#[test]
+fn guard_accepts_a_replaced_file_where_identity_is_unavailable() {
+    // This platform has no device and inode numbers, so the guard cannot tell
+    // one regular file from another and accepts a replacement. The refusal of
+    // a symbolic link and of a non-file entry still runs here.
+    let scratch = Scratch::new("replaced");
+    let path = scratch.config();
+    fs::write(&path, r#"{"log.level":"info"}"#).expect("seed");
+    let guard = check_overwritable(&path).expect("a loadable file passes");
+
+    let other = scratch.0.join("other.json");
+    fs::write(&other, r#"{"log.level":"debug"}"#).expect("replacement");
+    fs::remove_file(&path).expect("remove");
+    fs::rename(&other, &path).expect("replace the entry");
+
+    guard
+        .ensure_unchanged(&path)
+        .expect("a replaced regular file is accepted without file identity");
 }
 
 #[test]

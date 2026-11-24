@@ -77,6 +77,7 @@ fn overlay(pairs: &[(&str, &str)]) -> Overlay {
         .collect()
 }
 
+#[cfg(unix)]
 #[test]
 fn checked_save_refuses_a_file_swapped_after_the_check() {
     let scratch = Scratch::new("swapped");
