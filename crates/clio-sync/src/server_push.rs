@@ -229,6 +229,28 @@ fn decode_push(body: &str) -> Result<(String, Vec<SyncMutation>), AmError> {
     Ok((bank, mutations))
 }
 
+/// Every bank one push can write, sorted and deduplicated.
+///
+/// The envelope bank is here because a refused mutation is quarantined under
+/// it. Each mutation's own bank is here because that mutation's item, apply
+/// guard, journal, and dead-letter effects land in that bank, whatever bank the
+/// envelope names. Each covered bank of a denial carrier is here because the
+/// serve markers for that bank are written when the carrier applies. Sorting
+/// and deduplicating the set means every push acquires its locks in one global
+/// order, so two pushes that overlap on any bank cannot deadlock.
+fn banks_to_lock(envelope: &str, mutations: &[SyncMutation]) -> Vec<String> {
+    let mut banks = vec![envelope.to_owned()];
+    for m in mutations {
+        banks.push(m.bank.clone());
+        if let Ok(Some(carrier)) = crate::denial::denial_carrier(m) {
+            banks.extend(carrier.covered_banks().iter().cloned());
+        }
+    }
+    banks.sort_unstable();
+    banks.dedup();
+    banks
+}
+
 pub(crate) fn handle_push(
     options: &ServeOptions,
     stream: TcpStream,
@@ -245,16 +267,32 @@ pub(crate) fn handle_push(
     }
     // The apply path below is check-then-act over the item row, the apply
     // guard, and the journal, and this server runs one worker per accepted
-    // connection. Taking the bank's lock before the first apply makes the
-    // dedupe checks and the LWW resolution mean what they say, whatever order
-    // two pushes for the same bank arrive in; banks never wait on each other.
+    // connection. A mutation writes its own bank, not the envelope bank, so
+    // this push holds a lock for every bank it can write rather than for the
+    // envelope bank alone: without that, two pushes naming different envelope
+    // banks but reaching the same bank would race on that bank's item row and
+    // an older last-writer-wins stamp could land last. Several locks are taken
+    // in one global sorted order, so overlapping pushes cannot deadlock.
     //
     // A poisoned lock means a previous apply panicked mid-push; the apply
     // steps are transactional, so the next push proceeds.
-    let bank_lock = options.bank_locks.for_bank(&bank);
-    let _bank_guard = bank_lock
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    //
+    // Both vectors outlive the apply loop and the ack write: the handles are
+    // named without a leading underscore because the guards are built from
+    // them, and the guards are named with one because holding them is their
+    // whole purpose.
+    let lock_handles: Vec<_> = banks_to_lock(&bank, &mutations)
+        .iter()
+        .map(|name| options.bank_locks.for_bank(name))
+        .collect();
+    let _guards: Vec<_> = lock_handles
+        .iter()
+        .map(|handle| {
+            handle
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        })
+        .collect();
     let engine = ApplyEngine {
         store: options.store.as_ref(),
         sync: options.sync.as_ref(),
@@ -358,3 +396,7 @@ mod server_push_stale_tests;
 #[cfg(test)]
 #[path = "server_push_sealed_tests.rs"]
 mod server_push_sealed_tests;
+
+#[cfg(test)]
+#[path = "server_push_lock_tests.rs"]
+mod server_push_lock_tests;
