@@ -123,3 +123,7 @@ pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
     })?;
     Ok(Some(target))
 }
+
+#[cfg(test)]
+#[path = "backup_tests.rs"]
+mod backup_tests;
