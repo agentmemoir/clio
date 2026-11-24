@@ -156,18 +156,16 @@ pub(crate) fn append_entry(
                 ),
             )
         })?;
+        crate::config::restrict_dir(parent);
     }
     let exists = path.exists();
     let mut file = if exists {
-        // The read path refuses an archive that is not owner-only, and the
-        // append must refuse it too: the entry is raw key material, so writing
-        // it next to whatever could already read the file discloses the key
-        // before the next read could refuse.
-        file_store::owner_only_refusal(&path, "sync key file")?;
-        std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .map_err(|err| archive_io_error(&path, &err))?
+        // The open refuses a link at the archive path and judges the descriptor
+        // it opened, because a mode check that asks the path can be answered by
+        // whatever the path resolved to between the check and the open. The
+        // archive reports under the same label its read path uses, so the path
+        // in the message is what names the file.
+        file_store::open_append_no_follow(&path, "sync key file")?
     } else {
         file_store::open_new_owner_only(&path).map_err(|err| archive_io_error(&path, &err))?
     };

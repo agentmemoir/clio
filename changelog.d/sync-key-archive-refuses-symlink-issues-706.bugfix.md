@@ -1,0 +1,1 @@
+Clio now refuses to append to the sync key archive when a symbolic link sits at the archive path, and it creates the archive directory owner-only (0700) even when the directory already existed with a looser mode.

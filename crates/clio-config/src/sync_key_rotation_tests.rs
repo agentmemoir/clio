@@ -195,8 +195,7 @@ fn an_archive_that_cannot_be_opened_for_writing_is_refused() {
 
     assert_eq!(err.code, clio_types::ErrorCode::Internal);
     assert!(
-        err.message
-            .contains("cannot write the Clio sync key archive"),
+        err.message.contains("cannot open the Clio sync key file"),
         "{}",
         err.message
     );
@@ -284,5 +283,76 @@ fn an_unreadable_archive_is_refused_not_read_as_empty() {
             .contains("cannot read the Clio sync key archive"),
         "{}",
         err.message
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_appended_key_refuses_a_link_at_the_archive_path() {
+    // A link at the archive path that resolves to an owner-only file passes any
+    // check that asks the path, so the refusal has to come from the open and the
+    // descriptor. The target stays empty, which is the leak this guards.
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let dir = TempDir::new("archive-symlink");
+    let target = dir.path().join("target");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&target)
+        .expect("seed an owner-only target");
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    std::os::unix::fs::symlink(&target, dir.path().join(ARCHIVE_NAME)).expect("plant the link");
+
+    let err = append_entry(
+        Some(&dir.key()),
+        &ArchivedSyncKey {
+            key_b64: "AAAA".to_owned(),
+            created_at: None,
+        },
+    )
+    .expect_err("a link is not the archive file");
+
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+    let expected = format!(
+        "sync key file {}: refused because it is a symbolic link; replace it with the file \
+         itself and run again",
+        dir.path().join(ARCHIVE_NAME).display()
+    );
+    assert_eq!(
+        err.message, expected,
+        "the refusal names the path an operator has to replace, and what is wrong with it"
+    );
+    let received = std::fs::read_to_string(&target).expect("read the target back");
+    assert!(
+        received.is_empty(),
+        "the refused append wrote nothing into the target: {received:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_existing_archive_directory_becomes_owner_only_on_append() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("archive-dir-mode");
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    append_entry(
+        Some(&dir.key()),
+        &ArchivedSyncKey {
+            key_b64: "AAAA".to_owned(),
+            created_at: None,
+        },
+    )
+    .expect("append");
+
+    let mode = std::fs::metadata(dir.path())
+        .expect("metadata")
+        .permissions()
+        .mode();
+    assert_eq!(
+        mode & 0o777,
+        0o700,
+        "the directory holds key material, so it is owner-only even though it already existed"
     );
 }

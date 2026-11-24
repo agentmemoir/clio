@@ -395,6 +395,7 @@ dependencies = [
  "clio-types",
  "dbus-secret-service-keyring-store",
  "keyring-core",
+ "libc",
  "rand",
  "serde",
  "serde_json",

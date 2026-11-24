@@ -38,6 +38,11 @@ unicode-normalization = { workspace = true }
 sha2 = { workspace = true }
 zeroize = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+# `O_NOFOLLOW` and the `ELOOP` it reports are Unix-only, so the dependency is
+# target-scoped rather than carried by every build.
+libc = { workspace = true }
+
 # One platform store per target, each gated to the target that has it, so no
 # build compiles a backend it cannot run.
 [target.'cfg(target_os = "macos")'.dependencies]

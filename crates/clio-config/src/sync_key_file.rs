@@ -11,7 +11,9 @@
 //! - The sync key file path resolution (`CLIO_SYNC_KEY_FILE`, else beside the
 //!   encryption key file)
 //! - Creating and reading the raw 32-byte sync key file
-//! - The owner-only refusal on read, and the `sync-key-created` sidecar
+//! - The owner-only refusal on read, the descriptor refusal and no-follow
+//!   append opener the archive writes through, and the `sync-key-created`
+//!   sidecar
 //!
 //! ## Does not own
 //! - Which store holds the sync key (see `sync_key` and `secret_key_source`)
@@ -141,6 +143,7 @@ pub(crate) fn write_key(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), AmError>
     if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .map_err(|err| io_error(path, "create the directory for", &err))?;
+        crate::config::restrict_dir(parent);
     }
     let mut file = open_new_owner_only(path).map_err(|err| io_error(path, "create", &err))?;
     file.write_all(key)
@@ -226,6 +229,7 @@ pub(crate) fn write_created(key_file: Option<&Path>, stamp: &str) -> Result<(), 
     if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .map_err(|err| io_error(&path, "create the directory for", &err))?;
+        crate::config::restrict_dir(parent);
     }
     match fs::remove_file(&path) {
         Ok(()) => {}
@@ -284,6 +288,112 @@ pub(crate) fn owner_only_refusal(path: &Path, subject: &str) -> Result<(), AmErr
 #[cfg(not(unix))]
 pub(crate) fn owner_only_refusal(_path: &Path, _subject: &str) -> Result<(), AmError> {
     Ok(())
+}
+
+/// Refuse an already-open file that is not a regular owner-only file.
+///
+/// [`owner_only_refusal`] asks the path, and a path can lead to a file another
+/// account chose. This asks the descriptor, so it judges the file the caller is
+/// about to write to whatever the path pointed at when it was opened. `subject`
+/// labels the message on the same rule as [`owner_only_refusal`].
+///
+/// The owner check is the mode bits plus the open's own permission check, not a
+/// read of the effective uid: a 0600 file another account owns cannot be opened
+/// for append by this process, so a successful open plus an owner-only mode
+/// already means the caller owns the file. Reading the effective uid would need
+/// `unsafe` and could not change the outcome.
+///
+/// # Errors
+/// [`ErrorCode::Forbidden`] naming the path when the file is not regular or
+/// grants group or other access.
+#[cfg(unix)]
+pub(crate) fn descriptor_refusal(
+    file: &fs::File,
+    path: &Path,
+    subject: &str,
+) -> Result<(), AmError> {
+    use std::os::unix::fs::PermissionsExt;
+    let meta = file.metadata().map_err(|err| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!("cannot read the Clio {subject} {}: {err}", path.display()),
+        )
+    })?;
+    let refusal = if !meta.is_file() {
+        "it is not a regular file"
+    } else if meta.permissions().mode() & 0o077 != 0 {
+        "it is not owner-only; restrict it to the owner (0600) and run again"
+    } else {
+        return Ok(());
+    };
+    Err(AmError::new(
+        ErrorCode::Forbidden,
+        format!("{subject} {}: refused because {refusal}", path.display()),
+    ))
+}
+
+/// Non-Unix platforms have no mode bits to check on a descriptor, so the rule is
+/// a no-op there like [`owner_only_refusal`].
+#[cfg(not(unix))]
+pub(crate) fn descriptor_refusal(
+    _file: &fs::File,
+    _path: &Path,
+    _subject: &str,
+) -> Result<(), AmError> {
+    Ok(())
+}
+
+/// Open an existing file for appending without following a link at the path.
+///
+/// `O_NOFOLLOW` makes the open itself refuse a link, so the descriptor returned
+/// here is the file the path names. It is then judged by [`descriptor_refusal`]
+/// before the caller writes key material through it.
+///
+/// # Errors
+/// The path is a link ([`ErrorCode::Forbidden`]), the open failed
+/// ([`ErrorCode::Internal`]), or [`descriptor_refusal`] refused the descriptor.
+#[cfg(unix)]
+pub(crate) fn open_append_no_follow(path: &Path, subject: &str) -> Result<fs::File, AmError> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let open_error = |err: std::io::Error| {
+        if err.raw_os_error() == Some(libc::ELOOP) {
+            return AmError::new(
+                ErrorCode::Forbidden,
+                format!(
+                    "{subject} {}: refused because it is a symbolic link; replace it with the \
+                     file itself and run again",
+                    path.display()
+                ),
+            );
+        }
+        AmError::new(
+            ErrorCode::Internal,
+            format!("cannot open the Clio {subject} {}: {err}", path.display()),
+        )
+    };
+    let file = fs::OpenOptions::new()
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(open_error)?;
+    descriptor_refusal(&file, path, subject)?;
+    Ok(file)
+}
+
+/// Non-Unix platforms have no `O_NOFOLLOW` and nothing for
+/// [`descriptor_refusal`] to judge, so an append opens the path as it always
+/// has.
+#[cfg(not(unix))]
+pub(crate) fn open_append_no_follow(path: &Path, subject: &str) -> Result<fs::File, AmError> {
+    fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .map_err(|err| {
+            AmError::new(
+                ErrorCode::Internal,
+                format!("cannot open the Clio {subject} {}: {err}", path.display()),
+            )
+        })
 }
 
 /// A sync-key file that could not be created or written.
