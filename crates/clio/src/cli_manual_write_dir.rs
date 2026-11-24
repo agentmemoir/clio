@@ -12,9 +12,11 @@
 //! - The component walk: a missing directory is created, a symlink or non-directory is refused
 //! - The per-page target check, the same-directory temp, and the promote, as bare names
 //! - The plain-name guard keeping a page name to one file in that directory
+//! - The refusal and failure messages both forms of this module share
 //!
 //! ## Does not own
 //! - The manual's render, write order, and incomplete-manual error shape (see `cli_manual_write`)
+//! - The path-based form, used where the platform keeps no descriptor-relative call (see `path_mode`)
 //! - The `--markdown`/`--out` argument validation (see `cli_top_level`)
 //!
 //! ## Boundary
@@ -24,8 +26,14 @@
 //! written through resolves its ancestors twice, so a component swapped for a symlink in between
 //! redirects the write; one walk into a descriptor, then bare names, share one inode.
 
+#[cfg(not(unix))]
+#[path = "cli_manual_write_dir_path.rs"]
+mod path_mode;
+
 use crate::cli_error::CliError;
-use crate::cli_manual_write::{GENERATED_MARKER, incomplete};
+use crate::cli_manual_write::GENERATED_MARKER;
+#[cfg(unix)]
+use crate::cli_manual_write::incomplete;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -38,14 +46,26 @@ use rustix::{
     },
     io::Errno,
 };
-#[cfg(not(unix))]
-use std::fs;
 #[cfg(unix)]
 use std::os::fd::OwnedFd;
 
 /// The target whose promote step fails while the test seam is armed. Test-only.
 #[cfg(test)]
 pub(crate) static FAILED_PROMOTE_TARGET: std::sync::Mutex<Option<PathBuf>> =
+    std::sync::Mutex::new(None);
+
+/// The place the checked directory is moved to, and the decoy directory that
+/// takes its name, for the seam swapping a component between the walk and the
+/// promote. Test-only, and armed at most once.
+#[cfg(all(test, unix))]
+static SWAP_BEFORE_PROMOTE: std::sync::Mutex<Option<(PathBuf, PathBuf)>> =
+    std::sync::Mutex::new(None);
+
+/// The page name a symlink is planted at, and the file outside `--out` it
+/// points at, for the seam planting a target between the check and the write.
+/// Test-only, and armed at most once.
+#[cfg(all(test, unix))]
+static PLANT_AFTER_CHECK: std::sync::Mutex<Option<(PathBuf, OsString)>> =
     std::sync::Mutex::new(None);
 
 /// The manual's output directory, resolved once and held. `shown` is `--out` as the caller
@@ -95,28 +115,11 @@ impl OutDir {
         })
     }
 
-    /// Resolve `out_dir` through the path where that form is kept: every component must be a real
-    /// directory, then the directory is created.
+    /// Resolve `out_dir` through the path-based form.
     #[cfg(not(unix))]
     pub(crate) fn open(out_dir: &Path) -> Result<Self, CliError> {
-        let mut walked = PathBuf::new();
-        for component in out_dir.components() {
-            walked.push(component);
-            let meta = match fs::symlink_metadata(&walked) {
-                Ok(meta) => meta,
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(err) => return Err(io_error("inspect", &walked, &err)),
-            };
-            if meta.file_type().is_symlink() {
-                return Err(symlink_component(&walked));
-            }
-            if !meta.is_dir() {
-                return Err(not_a_directory(&walked));
-            }
-        }
-        fs::create_dir_all(out_dir).map_err(|err| io_error("create", out_dir, &err))?;
         Ok(Self {
-            path: out_dir.to_path_buf(),
+            path: path_mode::open(out_dir)?,
             shown: out_dir.to_path_buf(),
         })
     }
@@ -149,44 +152,24 @@ impl OutDir {
         Ok(())
     }
 
-    /// Check one page target through the path, where that form is kept.
+    /// Check one page target through the path-based form.
     #[cfg(not(unix))]
     pub(crate) fn check_target(&self, file: &str) -> Result<(), CliError> {
-        page_file_name(file)?;
-        let target = self.path.join(file);
-        let meta = match fs::symlink_metadata(&target) {
-            Ok(meta) => meta,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(err) => return Err(io_error("inspect", &target, &err)),
-        };
-        if meta.file_type().is_symlink() {
-            return Err(symlink_target(&target));
-        }
-        if meta.is_dir() {
-            return Err(directory_target(&target));
-        }
-        if !meta.file_type().is_file() {
-            return Err(special_target(&target));
-        }
-        let opened = fs::File::open(&target).map_err(|err| io_error("inspect", &target, &err))?;
-        if !generated(opened, &target)? {
-            return Err(unmarked_target(&target));
-        }
-        Ok(())
+        path_mode::check_target(&self.path, file)
     }
 
     /// Write `bytes` to a fresh temp sibling of `file` in the held directory and return its bare name.
     /// The temp takes the target's mode, or `0o644` for a new page, and is created owner-only so it never
     /// exists wider. A target swapped for a symlink after its check is never followed: the create requires
     /// a new name. A failure once the temp exists removes it and reports the manual incomplete.
+    /// A test-only seam can plant a target at the page name before the create.
+    #[cfg(unix)]
     pub(crate) fn write_temp(&self, file: &str, bytes: &[u8]) -> Result<OsString, CliError> {
+        armed_plant_after_check(&self.shown);
         // Read without following a link; a link leaves the new page's default mode.
-        #[cfg(unix)]
         let mode = statat(&self.fd, file, AtFlags::SYMLINK_NOFOLLOW)
             .ok()
             .map_or(0o644, |stat| stat.st_mode & 0o7777);
-        #[cfg(not(unix))]
-        let mode = existing_mode(&self.shown.join(file)).unwrap_or(0o644);
         let (tmp, mut staged) = self.create_temp(file)?;
         let shown = self.shown.join(&tmp);
         if let Err(err) = write_and_sync(&mut staged, bytes, mode, &shown) {
@@ -194,6 +177,12 @@ impl OutDir {
             return Err(incomplete(&self.shown, &err));
         }
         Ok(tmp)
+    }
+
+    /// Write `bytes` to a fresh temp sibling of `file` through the path-based form.
+    #[cfg(not(unix))]
+    pub(crate) fn write_temp(&self, file: &str, bytes: &[u8]) -> Result<OsString, CliError> {
+        path_mode::write_temp(&self.path, &self.shown, file, bytes)
     }
 
     /// Open a fresh temp sibling of `file`; a leftover name from a crashed run is skipped.
@@ -212,38 +201,25 @@ impl OutDir {
         Err(temp_exhausted(&self.shown.join(file)))
     }
 
-    /// Open a fresh temp sibling of `file` through the path, where that form is kept.
-    #[cfg(not(unix))]
-    fn create_temp(&self, file: &str) -> Result<(OsString, fs::File), CliError> {
-        for _ in 0..10 {
-            let tmp = temp_name(file);
-            let shown = self.path.join(&tmp);
-            match open_new(&shown) {
-                Ok(temp) => return Ok((tmp, temp)),
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(err) => return Err(io_error("create", &shown, &err)),
-            }
-        }
-        Err(temp_exhausted(&self.shown.join(file)))
-    }
-
     /// Remove a temp sibling this module created, best effort.
     #[cfg(unix)]
     pub(crate) fn remove_temp(&self, tmp: &OsStr) {
         let _ = unlinkat(&self.fd, tmp, AtFlags::empty());
     }
 
-    /// Remove a temp sibling this module created, best effort, through the path.
+    /// Remove a temp sibling this module created, best effort, through the path-based form.
     #[cfg(not(unix))]
     pub(crate) fn remove_temp(&self, tmp: &OsStr) {
-        let _ = fs::remove_file(self.path.join(tmp));
+        path_mode::remove_temp(&self.path, tmp);
     }
 
     /// Rename the temp sibling over its target: the promote step. Both names are bare and sit in the
     /// held directory, so the rename cannot leave it or be redirected by a component that changed
-    /// after the walk. A test-only seam can make this one step fail for one exact target.
+    /// after the walk. Test-only seams can swap the directory at its name, or make this one step
+    /// fail for one exact target.
     #[cfg(unix)]
     pub(crate) fn promote(&self, tmp: &OsStr, file: &str) -> Result<(), CliError> {
+        armed_swap_before_promote(&self.shown);
         let target = self.shown.join(file);
         if let Some(err) = armed_promote_failure(&target) {
             return Err(err);
@@ -251,14 +227,10 @@ impl OutDir {
         renameat(&self.fd, tmp, &self.fd, file).map_err(|err| errno_error("promote", &target, err))
     }
 
-    /// Rename the temp sibling over its target through the path, where that form is kept.
+    /// Rename the temp sibling over its target through the path-based form.
     #[cfg(not(unix))]
     pub(crate) fn promote(&self, tmp: &OsStr, file: &str) -> Result<(), CliError> {
-        let target = self.path.join(file);
-        if let Some(err) = armed_promote_failure(&target) {
-            return Err(err);
-        }
-        fs::rename(self.path.join(tmp), &target).map_err(|err| io_error("promote", &target, &err))
+        path_mode::promote(&self.path, tmp, file)
     }
 }
 
@@ -362,6 +334,7 @@ fn generated(mut file: std::fs::File, target: &Path) -> Result<bool, CliError> {
 }
 
 /// Write `bytes` to the open temp file, apply `mode` in case the mask narrowed it, and sync.
+#[cfg(unix)]
 fn write_and_sync(
     temp: &mut std::fs::File,
     bytes: &[u8],
@@ -378,27 +351,6 @@ fn write_and_sync(
     #[cfg(not(unix))]
     set_mode(shown, mode).map_err(|err| io_error("set permissions on", shown, &err))?;
     temp.sync_all().map_err(|err| io_error("sync", shown, &err))
-}
-
-/// The `target`'s existing mode, where the path-based form is kept.
-#[cfg(not(unix))]
-fn existing_mode(_target: &Path) -> Option<u32> {
-    None
-}
-
-/// Create a new temp file at `tmp`, where the path-based form is kept.
-#[cfg(not(unix))]
-fn open_new(tmp: &Path, _mode: u32) -> std::io::Result<fs::File> {
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(tmp)
-}
-
-/// Apply `mode` to `path`, where the path-based form is kept.
-#[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
-    Ok(())
 }
 
 /// A hidden temp sibling name beside `file`, unique across threads and processes, and bare.
@@ -432,6 +384,43 @@ fn armed_promote_failure(target: &Path) -> Option<CliError> {
     None
 }
 
+/// Move the checked directory to the armed place and put a symlink to the armed decoy directory at
+/// its name, once per test that arms it; always a no-op in production.
+#[cfg(unix)]
+fn armed_swap_before_promote(shown: &Path) {
+    #[cfg(test)]
+    {
+        let armed = SWAP_BEFORE_PROMOTE
+            .lock()
+            .expect("the swap seam lock is not poisoned")
+            .take();
+        if let Some((aside, decoy)) = armed {
+            let _ = std::fs::rename(shown, aside);
+            let _ = std::os::unix::fs::symlink(decoy, shown);
+        }
+    }
+    #[cfg(not(test))]
+    let _ = shown;
+}
+
+/// Plant a symlink to the armed file outside `--out` at the armed page name, once per test that arms
+/// it; always a no-op in production.
+#[cfg(unix)]
+fn armed_plant_after_check(shown: &Path) {
+    #[cfg(test)]
+    {
+        let armed = PLANT_AFTER_CHECK
+            .lock()
+            .expect("the plant seam lock is not poisoned")
+            .take();
+        if let Some((outside, page)) = armed {
+            let _ = std::os::unix::fs::symlink(outside, shown.join(page));
+        }
+    }
+    #[cfg(not(test))]
+    let _ = shown;
+}
+
 pub(crate) fn unix_nanos() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -448,3 +437,7 @@ fn io_error(action: &str, path: &Path, err: &std::io::Error) -> CliError {
     let message = format!("failed to {action} {}: {err}", path.display());
     CliError::operational("manual_write", message)
 }
+
+#[cfg(test)]
+#[path = "cli_manual_write_dir_tests.rs"]
+mod tests;

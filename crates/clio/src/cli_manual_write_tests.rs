@@ -274,13 +274,13 @@ fn write_manual_refuses_a_fifo_in_a_pages_place() {
 
 #[cfg(unix)]
 #[test]
-fn write_manual_rechecks_the_targets_after_creating_the_output() {
+fn write_manual_refuses_an_unmarked_file_reached_through_a_created_component() {
     let scratch = Scratch::new("late-resolution");
     fs::write(scratch.path("index.md"), "hand written").expect("the unrelated file");
-    // Creating `missing` changes how `missing/..` resolves: only after the
-    // creation do the targets and the writes both name the scratch root, so
-    // the check has to run once more before the first write can replace the
-    // unrelated file the pre-creation check could not see.
+    // The walk creates `missing` with a directory create on the held descriptor, then opens
+    // `..` there, which is the scratch root. `missing` did not exist when the caller wrote
+    // the path, so the unrelated file it now resolves to is seen for the first time by the
+    // check that runs after the walk, and it is refused rather than replaced.
     let out = scratch.path("missing").join("..");
     let error = write_manual(&out).expect_err("the unrelated file is refused");
     assert_eq!(error.code(), "usage");
