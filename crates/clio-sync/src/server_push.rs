@@ -34,6 +34,7 @@
 
 use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation_guarded_relaying, quarantine};
 use crate::credential::AuthOutcome;
+use crate::crypto::SyncCipherKey;
 use crate::denial::DenialAck;
 use crate::denial_guard::CarrierAuthority;
 use crate::protocol::{PushAck, SyncContent, SyncMutation, encode_cursor};
@@ -229,6 +230,63 @@ fn decode_push(body: &str) -> Result<(String, Vec<SyncMutation>), AmError> {
     Ok((bank, mutations))
 }
 
+/// The bank set one push must hold before it applies anything, sorted and
+/// deduplicated.
+///
+/// The envelope bank is here because a refused mutation — one for a bank this
+/// credential cannot reach, or one carrying content the route refuses — is
+/// quarantined under it. Each mutation's own bank is here because that
+/// mutation's item row, apply guard, and journal effects land in that bank,
+/// whatever bank the envelope names. Each covered bank of a denial carrier is
+/// here because the serve marker for that bank is written when the carrier
+/// applies.
+///
+/// A carrier's covered banks are read from the CONTENT THIS PEER OPENS, not
+/// from the ciphertext: a sealed carrier is refused by the plaintext decode, so
+/// a set built from the row as it arrived would miss every bank whose marker
+/// the apply path then writes unlocked. `sync_key` is the key the apply path
+/// opens with, so both read the same banks.
+///
+/// The shared dead-letter status row (`__status`, a compile-time constant) is
+/// deliberately NOT locked: it is one cross-bank slot written by a keyed
+/// upsert, not a per-bank read-then-write item row, and locking that single
+/// slot would serialize every push on the node. So this is not "every bank a
+/// push can write"; it is every authorized per-bank item state a mutation
+/// writes, plus every covered bank of a carrier it can record.
+///
+/// Sorting and deduplicating the set means every push acquires its locks in one
+/// global order, so two pushes that overlap on any bank cannot deadlock.
+fn banks_to_lock(
+    envelope: &str,
+    mutations: &[SyncMutation],
+    sync_key: Option<&SyncCipherKey>,
+) -> Vec<String> {
+    let mut banks = vec![envelope.to_owned()];
+    for m in mutations {
+        banks.push(m.bank.clone());
+        // The effective mutation for carrier inspection: the content this peer
+        // opens under its own key, decoded exactly as `apply_and_record` opens
+        // it, so the lock set and the writes it guards cannot disagree.
+        let opened;
+        let effective = match sync_key.and_then(|key| crate::denial_guard::sealed_content(key, m)) {
+            Some(content) => {
+                opened = SyncMutation {
+                    content: SyncContent::Plain(content),
+                    ..m.clone()
+                };
+                &opened
+            }
+            None => m,
+        };
+        if let Ok(Some(carrier)) = crate::denial::denial_carrier(effective) {
+            banks.extend(carrier.covered_banks().iter().cloned());
+        }
+    }
+    banks.sort_unstable();
+    banks.dedup();
+    banks
+}
+
 pub(crate) fn handle_push(
     options: &ServeOptions,
     stream: TcpStream,
@@ -245,16 +303,44 @@ pub(crate) fn handle_push(
     }
     // The apply path below is check-then-act over the item row, the apply
     // guard, and the journal, and this server runs one worker per accepted
-    // connection. Taking the bank's lock before the first apply makes the
-    // dedupe checks and the LWW resolution mean what they say, whatever order
-    // two pushes for the same bank arrive in; banks never wait on each other.
+    // connection. A mutation writes its own bank, not the envelope bank, so
+    // this push holds a lock for the envelope bank and for every authorized
+    // bank a mutation writes item state to, plus every covered bank of a
+    // carrier it can record: without that, two pushes naming different envelope
+    // banks but reaching the same bank would race on that bank's item row and
+    // an older last-writer-wins stamp could land last. Several locks are taken
+    // in one global sorted order, so overlapping pushes cannot deadlock. The
+    // shared `__status` dead-letter slot is the one write deliberately not
+    // covered: it is a single cross-bank keyed upsert, and locking it would
+    // serialize every push on the node.
+    //
+    // Banks the credential cannot reach are filtered out first. A mutation for
+    // one is quarantined under the envelope bank and never writes its own, so
+    // locking it would stall unrelated pushes and grow the lock map for no
+    // reason. `bank_authorized` requires both that the credential allows the
+    // bank and that the server lists it, so this filter bounds the lock map to
+    // the server's fixed configured bank list and no separate cap is needed.
     //
     // A poisoned lock means a previous apply panicked mid-push; the apply
     // steps are transactional, so the next push proceeds.
-    let bank_lock = options.bank_locks.for_bank(&bank);
-    let _bank_guard = bank_lock
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    //
+    // Both vectors outlive the apply loop and the ack write: the handles are
+    // named without a leading underscore because the guards are built from
+    // them, and the guards are named with one because holding them is their
+    // whole purpose.
+    let lock_handles: Vec<_> = banks_to_lock(&bank, &mutations, options.sync_key.as_deref())
+        .into_iter()
+        .filter(|name| bank_authorized(options, auth, name))
+        .map(|name| options.bank_locks.for_bank(&name))
+        .collect();
+    let _guards: Vec<_> = lock_handles
+        .iter()
+        .map(|handle| {
+            handle
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        })
+        .collect();
     let engine = ApplyEngine {
         store: options.store.as_ref(),
         sync: options.sync.as_ref(),
@@ -358,3 +444,7 @@ mod server_push_stale_tests;
 #[cfg(test)]
 #[path = "server_push_sealed_tests.rs"]
 mod server_push_sealed_tests;
+
+#[cfg(test)]
+#[path = "server_push_lock_tests.rs"]
+mod server_push_lock_tests;
