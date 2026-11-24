@@ -35,7 +35,7 @@ use crate::credential_fixtures::{Scratch, record_as, secret};
 use crate::crypto::SyncCipherKey;
 use crate::denial::{DenialCarrier, denial_mutation, denied_bank_marker};
 use crate::denial_fixtures::FakeDenial;
-use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, SyncMutation};
+use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, REASON_UNAUTHORIZED_ACTOR, SyncMutation};
 use crate::server::server_tests::{http, mutation, push_body, serve, sqlite};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve_with_denial};
 use clio_store::{DeadLetterStatus, ErasureDenial, SqliteStore, Store, SyncStore};
@@ -272,6 +272,14 @@ fn a_bank_token_without_erasure_privilege_cannot_record_a_denial() {
             .unwrap(),
         1,
         "the refusal is quarantined for the operator"
+    );
+    let rows = s
+        .store
+        .dead_letter_list("b-a", DeadLetterStatus::Open, 10)
+        .unwrap();
+    assert_eq!(
+        rows[0].reason_code, REASON_UNAUTHORIZED_ACTOR,
+        "the refusal names the actor gate"
     );
     let (status, page) = pull(&addr, &s.wide, "b-a");
     assert_eq!(status, 200, "the bank still serves: {page}");

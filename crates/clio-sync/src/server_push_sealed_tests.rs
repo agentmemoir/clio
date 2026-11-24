@@ -6,17 +6,19 @@
 //! This module tests the push route's sealed-subject guard and its request
 //! gates: a sealed row for a denied subject is quarantined before any write, a
 //! sealed row this peer opens applies while the journal keeps the sealed form,
-//! an envelope bank the token cannot reach answers forbidden, and a body this
-//! route cannot decode is refused with the argument code.
+//! a sealed denial carrier from a bank token is refused before it records
+//! anything, an envelope bank the token cannot reach answers forbidden, and a
+//! body this route cannot decode is refused with the argument code.
 //!
 //! ## Owns
 //! - Behavior coverage for `check_sealed_subject` on a serving peer that holds
 //!   the sync key
 //! - Behavior coverage for the sealed branch of `apply_and_record`
+//! - Behavior coverage for a sealed denial carrier's actor gate
 //! - Behavior coverage for the envelope-bank refusal and `decode_push` failures
 //!
 //! ## Does not own
-//! - The erasure-actor and covered-bank gates of a denial carrier
+//! - The plaintext carrier's erasure-actor and covered-bank gates
 //!   (`server_push_denial_tests`)
 //! - The stale-envelope refusal (`server_push_stale_tests`)
 //!
@@ -31,8 +33,11 @@ use crate::apply_fixtures::{env, item_value};
 use crate::client::client_tests::paired_key;
 use crate::credential_fixtures::{Scratch, record_as, secret};
 use crate::crypto::SyncCipherKey;
+use crate::denial::{DenialCarrier, denial_mutation, denied_bank_marker};
 use crate::denial_fixtures::FakeDenial;
-use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, REASON_ERASED_SUBJECT, SyncMutation};
+use crate::protocol::{
+    ENTITY_KIND_ITEM, OP_UPSERT, REASON_ERASED_SUBJECT, REASON_UNAUTHORIZED_ACTOR, SyncMutation,
+};
 use crate::server::server_tests::{http, push_body, sqlite};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve_with_denial};
 use clio_store::{DeadLetterStatus, ErasureDenial, SqliteStore, Store, SyncStore};
@@ -41,21 +46,27 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// A running server that holds the sync key and an authority, with one
-/// credential scoped to `b-a` alone.
+/// harness credential scoped to `b-a` alone and one agent credential with the
+/// same scope.
 struct Sealed {
     server: SyncServer,
     store: Arc<SqliteStore>,
     denial: Arc<FakeDenial>,
     _scratch: Scratch,
     token: String,
+    agent: String,
 }
 
 /// Build the serving peer: the same shared key the fixtures seal under, an
-/// in-memory authority, and a token that reaches `b-a` alone.
+/// in-memory authority, and two tokens that reach `b-a` alone.
 fn serve_sealed() -> Sealed {
     let scratch = Scratch::new("push-sealed");
     let token = secret("t");
-    scratch.write(&[record_as("client-sealed", &token, Actor::Harness, &["b-a"])]);
+    let agent = secret("g");
+    scratch.write(&[
+        record_as("client-sealed", &token, Actor::Harness, &["b-a"]),
+        record_as("client-agent", &agent, Actor::Agent, &["b-a"]),
+    ]);
     let (store, kms) = sqlite();
     let denial = FakeDenial::new("fp-1");
     let server = sync_serve_with_denial(
@@ -83,6 +94,7 @@ fn serve_sealed() -> Sealed {
         denial,
         _scratch: scratch,
         token,
+        agent,
     }
 }
 
@@ -101,6 +113,24 @@ fn sealed(mid: &str, id: &str, subject: &str, stamp: &str, key: &SyncCipherKey) 
         content.clone(),
     );
     crate::envelope_fixtures::seal_content_for(mutation, key, &content)
+}
+
+/// The one sealed denial carrier a push sends for `subject`, covering `banks`.
+fn sealed_denial(
+    request_ref: &str,
+    subject: &str,
+    banks: &[&str],
+    key: &SyncCipherKey,
+) -> SyncMutation {
+    let op = denial_mutation(
+        "b-a",
+        subject,
+        &DenialCarrier::new(request_ref, banks),
+        "dev-a",
+        &crate::clock::now_utc(),
+    );
+    let content = op.content_value().clone();
+    crate::envelope_fixtures::seal_content_for(op, key, &content)
 }
 
 /// One push of `mutations` under `bank` with the module's token.
@@ -191,6 +221,59 @@ fn a_sealed_row_this_peer_opens_applies_and_journals_sealed() {
     assert!(
         row.client_encrypted,
         "the journal relays the sealed row, never the opened plaintext"
+    );
+    s.server.stop();
+}
+
+/// A sealed denial carrier answers to the same actor gate as a plaintext one:
+/// a bank token's sealed carrier is refused and quarantined before the opened
+/// row can record the subject denial or any bank marker.
+#[test]
+fn a_sealed_denial_carrier_from_a_bank_token_is_refused() {
+    let s = serve_sealed();
+    let addr = s.server.addr().to_owned();
+    let op = sealed_denial("req-sealed-agent", "s-held", &["b-a"], &paired_key());
+    let (status, ack) = push(&addr, &s.agent, "b-a", std::slice::from_ref(&op));
+    assert_eq!(status, 200, "{ack}");
+    assert_eq!(
+        ack["accepted"],
+        json!([]),
+        "a sealed carrier from a bank token is not accepted: {ack}"
+    );
+    assert_eq!(
+        ack["rejected"],
+        json!(["denial:req-sealed-agent"]),
+        "the sender is told the carrier did not land: {ack}"
+    );
+    assert!(
+        ack.get("denial_acks").is_none(),
+        "no proof rides a refusal: {ack}"
+    );
+    assert_eq!(
+        s.denial.records_for("s-held"),
+        0,
+        "no subject denial is recorded"
+    );
+    assert_eq!(
+        s.denial.records_for(&denied_bank_marker("b-a")),
+        0,
+        "the token cannot record a marker for its own bank"
+    );
+    assert!(
+        s.store
+            .journal_get("b-a", &op.sync_mutation_id)
+            .unwrap()
+            .is_none(),
+        "a refused carrier is never journaled"
+    );
+    let rows = s
+        .store
+        .dead_letter_list("b-a", DeadLetterStatus::Open, 10)
+        .unwrap();
+    assert_eq!(rows.len(), 1, "the refusal is inspectable");
+    assert_eq!(
+        rows[0].reason_code, REASON_UNAUTHORIZED_ACTOR,
+        "the refusal names the actor gate"
     );
     s.server.stop();
 }
