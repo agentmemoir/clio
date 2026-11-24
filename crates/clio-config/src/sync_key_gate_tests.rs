@@ -370,7 +370,7 @@ fn a_key_directory_that_is_a_regular_file_is_refused() {
 
 #[cfg(unix)]
 #[test]
-fn a_key_directory_that_cannot_be_read_is_refused_before_it_is_tightened() {
+fn a_missing_key_directory_is_refused_before_it_is_tightened() {
     // The gate reads the parent before it tightens it, so a path that is gone is
     // a reported failure rather than key material kept in a directory no one
     // checked.
@@ -389,6 +389,20 @@ fn a_key_directory_that_cannot_be_read_is_refused_before_it_is_tightened() {
         "the failure names the unreadable directory: {}",
         err.message
     );
+}
+
+#[test]
+fn the_current_directory_is_never_tightened() {
+    // A bare relative key name reaches the gate as `.`, the process directory.
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("gate-current-dir");
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let previous = std::env::current_dir().expect("cwd");
+    std::env::set_current_dir(dir.path()).expect("enter");
+    super::ensure_owner_only_dir(std::path::Path::new(".")).expect("left alone");
+    std::env::set_current_dir(previous).expect("leave");
+    let meta = std::fs::metadata(dir.path()).expect("metadata");
+    assert_eq!(meta.permissions().mode() & 0o777, 0o755, "mode kept");
 }
 
 // ------------------------------------------------------------------- owner

@@ -316,10 +316,17 @@ fn generate() -> Zeroizing<[u8; KEY_LEN]> {
 /// first run tells a missing key file from a damaged one, and it is the only case
 /// that generates a key.
 ///
+/// The parent directory is made owner-only before the open, by the same rule the
+/// write path uses: a read that succeeds also says the directory cannot be left
+/// for another account to swap the entry in. A directory that is missing is not a
+/// refusal, because a first run has no key directory yet; the open below reports
+/// the absent file and the write path creates the directory.
+///
 /// # Errors
-/// [`ErrorCode::Forbidden`] for a link or a file that is not a regular owner-only
-/// file this process owns; [`ErrorCode::Internal`] when the file cannot be opened
-/// or read; [`ErrorCode::ConfigCorrupt`] when its length is wrong.
+/// [`ErrorCode::Forbidden`] for a link, a file that is not a regular owner-only
+/// file this process owns, or a key directory that is a link or not a directory;
+/// [`ErrorCode::Internal`] when the file or its directory cannot be opened, read,
+/// or tightened; [`ErrorCode::ConfigCorrupt`] when the key length is wrong.
 fn read_key_file(path: &Path) -> Result<Option<Zeroizing<[u8; KEY_LEN]>>, AmError> {
     let location = KeyLocation::File(path.to_path_buf());
     let unreadable = |reason: String| {
@@ -332,6 +339,11 @@ fn read_key_file(path: &Path) -> Result<Option<Zeroizing<[u8; KEY_LEN]>>, AmErro
             ),
         )
     };
+    if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty())
+        && parent.exists()
+    {
+        crate::sync_key_gate::ensure_owner_only_dir(parent)?;
+    }
     let opened: Option<fs::File> =
         crate::sync_key_gate::open_read_no_follow(path, "encryption key file", |err| {
             unreadable(err.to_string())

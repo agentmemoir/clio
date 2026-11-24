@@ -11,9 +11,9 @@
 //! - The sync key file path resolution (`CLIO_SYNC_KEY_FILE`, else beside the
 //!   encryption key file)
 //! - Creating and reading the raw 32-byte sync key file
-//! - The path-based owner-only refusal the encryption key read reuses, and the
-//!   `sync-key-created` sidecar (the descriptor gate and the no-follow openers
-//!   live in `sync_key_gate`)
+//! - The `sync-key-created` sidecar and the owner-only directory it is written
+//!   in (the descriptor gate, the no-follow openers, and the directory rule live
+//!   in `sync_key_gate`)
 //!
 //! ## Does not own
 //! - Which store holds the sync key (see `sync_key` and `secret_key_source`)
