@@ -57,6 +57,13 @@ const PLAINTEXT_CONTENT_REFUSAL: &str = "refused plaintext content: this node st
 const SEALED_ERASED_SUBJECT_REFUSAL: &str = "refused sealed content for a subject a recorded erasure denial covers: the \
      person's data was erased, so the row is quarantined instead of applied";
 
+/// The refusal a denial carrier from a credential with no erasure privilege
+/// gets. A bank token proves reach, not the authority to refuse a subject for
+/// every bank on this node, and a recorded denial cannot be removed.
+const DENIAL_ACTOR_REFUSAL: &str = "refused denial carrier: this credential's actor may not record a denial. An \
+     erasure denial refuses a subject for every bank on this node and cannot be undone, so it requires a harness \
+     or system actor";
+
 /// What the sealed subject check allows for one mutation.
 enum SealedCheck {
     /// The row may take the ordinary apply path.
@@ -267,24 +274,40 @@ pub(crate) fn handle_push(
         // A denial carrier records one serve marker per covered bank before
         // the proof exists, so every covered bank must be authorized first:
         // a credential for one bank must never durably refuse another. A
-        // carrier that does not decode is not a carrier, and the plaintext
-        // refusal below quarantines it rather than reading it as one.
-        if let Ok(Some(carrier)) = crate::denial::denial_carrier(&m)
-            && let Some(unauthorized) = carrier
+        // carrier also durably refuses its subject on this whole node, so
+        // only an actor with erasure privilege may send one at all: a bank
+        // token proves reach, not the authority to erase. A carrier that does
+        // not decode is not a carrier, and the plaintext refusal below
+        // quarantines it rather than reading it as one.
+        if let Ok(Some(carrier)) = crate::denial::denial_carrier(&m) {
+            if !auth.may_record_denial() {
+                refuse(
+                    &engine,
+                    &bank,
+                    &m,
+                    &envelope,
+                    crate::protocol::REASON_UNAUTHORIZED_ACTOR,
+                    DENIAL_ACTOR_REFUSAL,
+                    &mut rejected,
+                )?;
+                continue;
+            }
+            if let Some(unauthorized) = carrier
                 .covered_banks()
                 .iter()
                 .find(|covered| !bank_authorized(options, auth, covered))
-        {
-            refuse(
-                &engine,
-                &bank,
-                &m,
-                &envelope,
-                crate::protocol::REASON_UNAUTHORIZED_BANK,
-                &format!("denial carrier covers unauthorized bank {unauthorized}"),
-                &mut rejected,
-            )?;
-            continue;
+            {
+                refuse(
+                    &engine,
+                    &bank,
+                    &m,
+                    &envelope,
+                    crate::protocol::REASON_UNAUTHORIZED_BANK,
+                    &format!("denial carrier covers unauthorized bank {unauthorized}"),
+                    &mut rejected,
+                )?;
+                continue;
+            }
         }
         // Content crosses this route only as client-sealed bytes. A plaintext
         // row carries no authenticated envelope, so whoever holds the bank

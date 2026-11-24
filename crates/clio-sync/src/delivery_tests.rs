@@ -26,14 +26,14 @@
 //! Keep this module focused on the delivery surface.
 
 use crate::client::SyncClientConfig;
-use crate::credential_fixtures::{Scratch, record, secret};
+use crate::credential_fixtures::{Scratch, record_as, secret};
 use crate::delivery::{DeliveryOutcome, DenialTarget, deliver_denial};
 use crate::denial::denied_bank_marker;
 use crate::denial_fixtures::FakeDenial;
 use crate::server::server_tests::{serve, sqlite};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve_with_denial};
 use clio_store::{ErasureDenial, SqliteStore, Store, SyncStore};
-use clio_types::ErrorCode;
+use clio_types::{Actor, ErrorCode};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
@@ -49,7 +49,12 @@ fn serve_denied() -> (
 ) {
     let scratch = Scratch::new("deliver-denial");
     let token = secret("d");
-    scratch.write(&[record("client-a", &token, &["b-a", "b-b"])]);
+    scratch.write(&[record_as(
+        "client-a",
+        &token,
+        Actor::Harness,
+        &["b-a", "b-b"],
+    )]);
     let (store, kms) = sqlite();
     let denial = FakeDenial::new("fp-1");
     let server = sync_serve_with_denial(

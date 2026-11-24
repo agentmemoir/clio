@@ -11,7 +11,7 @@
 //! ## Owns
 //! - `CredentialStore::load`: the fail-closed read of an operator-named store
 //! - `resolve`: digest comparison through the shared constant-time helper
-//! - `Peer`: the per-request bank scope, the record's label and banks
+//! - `Peer`: the per-request bank scope, the record's label, actor, and banks
 //! - `authorize_request`: the one request check the connection layer reads
 //!
 //! ## Does not own
@@ -45,19 +45,19 @@
 //! secret.
 
 use clio_config::auth_tokens::{AuthTokenRecord, ct_eq, digest_hex, load_auth_tokens};
-use clio_types::{AmError, ErrorCode};
+use clio_types::{Actor, AmError, ErrorCode};
 use std::path::Path;
 
-/// One resolved peer: the record's label and the banks it may reach.
+/// One resolved peer: the record's label, actor, and the banks it may reach.
 ///
 /// The label is operator-facing and not secret. No production consumer reads
 /// it yet: tests do today, and audit recording — the planned use — is not
 /// built yet, so nothing in diagnostics identifies the peer through it today.
-/// The record also names an actor, but no sync path is actor-gated, so it is
-/// deliberately not carried here and no caller may rely on one.
+/// The actor decides whether this credential may record an erasure denial.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Peer {
     pub(crate) label: String,
+    pub(crate) actor: Actor,
     /// Exactly the banks the record listed, in the record's order.
     pub(crate) banks: Vec<String>,
 }
@@ -66,6 +66,15 @@ impl Peer {
     /// Whether `bank` is inside this peer's record scope.
     pub(crate) fn allows(&self, bank: &str) -> bool {
         self.banks.iter().any(|b| b == bank)
+    }
+
+    /// Whether this peer's actor may durably record a denial on this node.
+    ///
+    /// The rule matches the compliance erasure privilege table: only a harness
+    /// or system actor may refuse a subject. A bank-scoped token proves reach,
+    /// not the authority to erase.
+    pub(crate) fn may_record_denial(&self) -> bool {
+        matches!(self.actor, Actor::Harness | Actor::System)
     }
 }
 
@@ -131,6 +140,7 @@ impl CredentialStore {
                 .map(|record| StoredCredential {
                     peer: Peer {
                         label: record.label,
+                        actor: record.actor,
                         banks: record.banks,
                     },
                     digest: record.secret_sha256,
@@ -173,6 +183,18 @@ impl AuthOutcome {
     pub(crate) fn allows(&self, bank: &str) -> bool {
         match self {
             Self::Bound(peer) => peer.allows(bank),
+            Self::Unbound => true,
+        }
+    }
+
+    /// Whether this request may durably record an erasure denial.
+    ///
+    /// Only a bound credential whose actor carries the erasure privilege may.
+    /// The unbound answer is the dev-mode server, which configures its own
+    /// bank list and already grants every route anonymously.
+    pub(crate) fn may_record_denial(&self) -> bool {
+        match self {
+            Self::Bound(peer) => peer.may_record_denial(),
             Self::Unbound => true,
         }
     }
