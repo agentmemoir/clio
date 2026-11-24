@@ -65,6 +65,11 @@ sha2 = { workspace = true }
 # `SIG_IGN` at startup, which turns a broken pipe into an `EPIPE` error that
 # `println!` panics on. Unix-only, so the dependency is target-scoped.
 libc = { workspace = true }
+# `clio help --markdown` holds the `--out` directory open and does every later
+# step relative to that descriptor, so a component swapped for a symlink after
+# the check cannot redirect a generated page. A safe wrapper, unlike a direct
+# `libc` call, which this crate cannot make under `unsafe_code = "deny"`.
+rustix = { workspace = true }
 
 [lints]
 workspace = true

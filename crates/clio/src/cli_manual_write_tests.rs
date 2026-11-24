@@ -297,7 +297,7 @@ fn a_page_name_that_leaves_the_output_directory_is_refused() {
     let out = scratch.path("out");
     fs::create_dir_all(&out).expect("the output directory");
     for name in ["../escape.md", "sub/page.md", "..", "."] {
-        let error = check_target(&out, name).expect_err("a traversing name is refused");
+        let error = page_file_name(name).expect_err("a traversing name is refused");
         assert_eq!(error.code(), "usage", "name {name:?}");
     }
 }

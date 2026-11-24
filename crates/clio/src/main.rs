@@ -90,6 +90,7 @@ mod cli_help_request;
 mod cli_help_surfaces;
 mod cli_help_usage;
 mod cli_manual_write;
+mod cli_manual_write_dir;
 mod cli_output;
 mod cli_read;
 mod cli_read_args;
