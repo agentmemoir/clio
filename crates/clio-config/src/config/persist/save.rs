@@ -10,6 +10,8 @@
 //! - The one serialization point, where a secret becomes unreadable on the way out
 //! - Refusing to write a sealed value in plaintext
 //! - The stable flat-file shape a reload expects
+//! - The checked save, which asks the guard to confirm the judged file just
+//!   before the rename replaces the path
 //!
 //! ## Does not own
 //! - Opening sealed values on the way in (see `load`)
@@ -23,7 +25,8 @@
 //!
 //! Keep this module focused on sealing and writing the deployment overlay.
 
-use super::write::write_private_atomic;
+use super::load::CheckedOverwrite;
+use super::write::{write_private_atomic, write_private_atomic_checked};
 use crate::config::merge::Overlay;
 use crate::error::{AmError, ErrorCode};
 use crate::secret_seal;
@@ -46,6 +49,40 @@ use std::path::Path;
 /// that cannot be loaded, never a fallback to plaintext — or I/O failures
 /// creating parent dirs or writing the file.
 pub fn save_overlay_file(path: &Path, overlay: &Overlay) -> Result<(), AmError> {
+    let text = sealed_text(path, overlay)?;
+    write_private_atomic(path, &text).map_err(|e| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!("failed to write deployment config {}: {e}", path.display()),
+        )
+    })
+}
+
+/// Persist overlay like [`save_overlay_file`], but run `check` just before the
+/// rename that replaces the deployment file.
+///
+/// The check refuses the replacement when the path no longer holds the file it
+/// judged. Nothing at the path changes on a refusal, and the temp file is
+/// removed.
+///
+/// # Errors
+/// A sealed value that cannot be sealed, I/O failures creating parent dirs or
+/// writing the file, or the refusal the check returns.
+pub(crate) fn save_overlay_file_checked(
+    path: &Path,
+    overlay: &Overlay,
+    check: &CheckedOverwrite,
+) -> Result<(), AmError> {
+    let text = sealed_text(path, overlay)?;
+    write_private_atomic_checked(path, &text, || check.ensure_unchanged(path))
+}
+
+/// Seal every value and return the bytes to write.
+///
+/// # Errors
+/// A sealed value that cannot be sealed, or a parent directory that cannot be
+/// created.
+fn sealed_text(path: &Path, overlay: &Overlay) -> Result<String, AmError> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent).map_err(|e| {
             AmError::new(
@@ -59,13 +96,7 @@ pub fn save_overlay_file(path: &Path, overlay: &Overlay) -> Result<(), AmError> 
         map.insert(k.clone(), seal_value(k, v, path)?);
     }
     // `Value` always serializes; treat failure as a bug rather than a soft error.
-    let text = serde_json::to_string_pretty(&Value::Object(map)).expect("serialize overlay");
-    write_private_atomic(path, &text).map_err(|e| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!("failed to write deployment config {}: {e}", path.display()),
-        )
-    })
+    Ok(serde_json::to_string_pretty(&Value::Object(map)).expect("serialize overlay"))
 }
 
 /// The stored form of one overlay value: sealed when the path calls for it.
@@ -92,3 +123,7 @@ fn seal_value(path: &str, value: &Value, file: &Path) -> Result<Value, AmError> 
         )
     })
 }
+
+#[cfg(test)]
+#[path = "save_tests.rs"]
+mod save_tests;

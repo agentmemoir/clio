@@ -218,6 +218,9 @@ impl Runtime {
     /// Persist the current in-memory deployment overlay to its resolved path
     /// (no-op when no path is set), writing exactly once.
     ///
+    /// It saves without the overwrite check, because it writes Clio's own
+    /// overlay in a fresh runtime.
+    ///
     /// # Errors
     /// I/O failures creating parents or writing the file.
     pub fn flush_deployment_overlay(&mut self) -> Result<(), AmError> {

@@ -257,6 +257,51 @@ fn config_set_deployment_scope_reports_a_save_failure() {
 }
 
 #[test]
+fn config_set_deployment_refusal_leaves_live_state_unchanged() {
+    let dir = tmp("deploy-refuse");
+    std::fs::create_dir_all(&dir).expect("dir");
+    let path = dir.join("deployment.json");
+    std::fs::write(&path, "{ not json").expect("corrupt file");
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.set_deployment_path(path.clone());
+    let level = rt.effective_raw()["log"]["level"].clone();
+
+    let ToolResult::Err { code, message, .. } =
+        rt.config_set("backend", json!("postgres"), ConfigScope::Deployment)
+    else {
+        panic!("expected a refusal");
+    };
+    assert_eq!(code, ErrorCode::ConfigCorrupt);
+    assert!(
+        message.contains("deployment config parse error"),
+        "the refusal names the parse failure: {message}"
+    );
+    assert_eq!(rt.deployment_field("backend"), None);
+
+    let ToolResult::Err { .. } =
+        rt.config_set("log.level", json!("debug"), ConfigScope::Deployment)
+    else {
+        panic!("expected a refusal");
+    };
+    assert_eq!(rt.effective_raw()["log"]["level"], level);
+
+    let ToolResult::Err { .. } = rt.config_set(
+        "bank.policy",
+        json!({"kind": "fixed", "bank": "fb"}),
+        ConfigScope::Deployment,
+    ) else {
+        panic!("expected a refusal");
+    };
+    assert!(matches!(rt.bank_policy, BankDefaultPolicy::Required));
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read"),
+        "{ not json",
+        "a refusal must not write the file"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn config_set_masks_an_endpoint_url_that_carries_credentials() {
     let mut rt = Runtime::with_env(&|_| None);
     let raw = "https://user:pw@host/v1";

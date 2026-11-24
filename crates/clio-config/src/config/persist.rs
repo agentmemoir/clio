@@ -43,13 +43,14 @@ mod save;
 mod write;
 
 pub use backup::backup_config_file;
-pub(crate) use load::ensure_overwritable;
+pub(crate) use load::check_overwritable;
 pub use load::load_overlay_file;
 pub(crate) use path::resolve_deployment_path_with;
 pub use path::{
     DEPLOYMENT_CONFIG_ENV, DEPLOYMENT_CONFIG_FILE_NAME, default_config_dir, resolve_deployment_path,
 };
 pub use save::save_overlay_file;
+pub(crate) use save::save_overlay_file_checked;
 pub use write::{restrict_dir, write_private_atomic};
 
 // These names were in scope here before the split; the test modules below
