@@ -9,8 +9,8 @@
 //!
 //! ## Owns
 //! - The cases where the *shape* of what sits at a key path is wrong: a FIFO that
-//!   would block a blocking open, a file another user owns, and a parent
-//!   directory that is a link
+//!   would block a blocking open, a file another user owns, a link at the final
+//!   name of the key file or the archive, and a parent directory that is a link
 //!
 //! ## Does not own
 //! - The archive's format, mode on create, and owner-only refusals (see
@@ -125,6 +125,125 @@ fn a_fifo_at_the_key_path_is_refused_without_hanging() {
         err.message.contains("not a regular file"),
         "{}",
         err.message
+    );
+}
+
+// ------------------------------------------------- links at the final name
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_at_the_archive_name_is_refused_without_touching_its_target() {
+    // `O_NOFOLLOW` refuses the link at the archive's final name itself, so the
+    // file it points at is never opened and no record is appended through it.
+    let target = TempDir::new("gate-archive-file-link-target");
+    let target_file = target.join("real-archive.jsonl");
+    std::fs::write(&target_file, b"{\"key_b64\":\"AAAA\"}\n").expect("seed the target");
+    let dir = TempDir::new("gate-archive-file-link");
+    let archive = dir.join(ARCHIVE_NAME);
+    std::os::unix::fs::symlink(&target_file, &archive).expect("plant the file link");
+
+    let err = append_entry(
+        Some(&dir.key()),
+        &ArchivedSyncKey {
+            key_b64: "BBBB".to_owned(),
+            created_at: None,
+        },
+    )
+    .expect_err("a link is not the archive file");
+
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+    let expected = format!(
+        "sync key archive {}: refused because it is a symbolic link; replace it with the file \
+         itself and run again",
+        archive.display()
+    );
+    assert_eq!(err.message, expected);
+    assert_eq!(
+        std::fs::read(&target_file).expect("the target is still readable"),
+        b"{\"key_b64\":\"AAAA\"}\n",
+        "nothing was appended through the link"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_at_the_key_name_is_refused_for_reading() {
+    // The read open uses the same `O_NOFOLLOW`, so a key file that is a link is
+    // refused at its final name and the file it points at is never read.
+    let target = TempDir::new("gate-key-file-link-target");
+    let target_file = target.join("real-key");
+    std::fs::write(&target_file, [1_u8; KEY_LEN]).expect("seed the target");
+    let dir = TempDir::new("gate-key-file-link");
+    let key = dir.key();
+    std::os::unix::fs::symlink(&target_file, &key).expect("plant the file link");
+
+    let err = crate::sync_key_file::read_key(&key).expect_err("a link is not the key file");
+
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+    let expected = format!(
+        "sync key file {}: refused because it is a symbolic link; replace it with the file \
+         itself and run again",
+        key.display()
+    );
+    assert_eq!(err.message, expected);
+    assert_eq!(
+        std::fs::read(&target_file).expect("the target is still readable"),
+        [1_u8; KEY_LEN],
+        "the target of the link was left as it was"
+    );
+}
+
+// ------------------------------------------------------------------ reads
+
+#[cfg(unix)]
+#[test]
+fn an_archive_read_returns_the_record_the_gate_wrote() {
+    // The archive is read as text through the descriptor the gate judged, so the
+    // record the gate wrote comes back as the same archived key.
+    let dir = TempDir::new("gate-archive-readback");
+    let entry = ArchivedSyncKey {
+        key_b64: "AAAA".to_owned(),
+        created_at: None,
+    };
+    append_entry(Some(&dir.key()), &entry).expect("archive one key");
+
+    let entries = crate::sync_key_rotation::read_entries(Some(&dir.key())).expect("read back");
+
+    assert_eq!(
+        entries,
+        vec![entry],
+        "the archive read returned the record it holds"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_directory_at_the_archive_name_is_refused_as_the_wrong_shape() {
+    // A directory planted at the final name has no descriptor this gate can
+    // judge, so the open itself refuses it as a shape that cannot hold a key.
+    let dir = TempDir::new("gate-archive-directory");
+    let archive = dir.join(ARCHIVE_NAME);
+    std::fs::create_dir(&archive).expect("plant the directory");
+
+    let err = append_entry(
+        Some(&dir.key()),
+        &ArchivedSyncKey {
+            key_b64: "AAAA".to_owned(),
+            created_at: None,
+        },
+    )
+    .expect_err("a directory is not the archive file");
+
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+    let expected = format!(
+        "sync key archive {}: refused because it is not a regular file; a directory is not a \
+         file that holds a key, so replace it with the file itself and run again",
+        archive.display()
+    );
+    assert_eq!(err.message, expected);
+    assert!(
+        archive.is_dir(),
+        "the refusal left the directory it refused in place"
     );
 }
 
@@ -246,6 +365,29 @@ fn a_key_directory_that_is_a_regular_file_is_refused() {
         std::fs::read_to_string(&blocker).expect("the blocker is untouched"),
         "not a directory",
         "the refusal neither chmodded nor wrote through the path it refused"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_key_directory_that_cannot_be_read_is_refused_before_it_is_tightened() {
+    // The gate reads the parent before it tightens it, so a path that is gone is
+    // a reported failure rather than key material kept in a directory no one
+    // checked.
+    let holder = TempDir::new("gate-parent-gone");
+    let missing = holder.join("absent");
+
+    let err = super::ensure_owner_only_dir(&missing)
+        .expect_err("a directory that cannot be read is not a place for key material");
+
+    assert_eq!(err.code, clio_types::ErrorCode::Internal);
+    assert!(
+        err.message.starts_with(&format!(
+            "cannot read the Clio sync key directory {}: ",
+            missing.display()
+        )),
+        "the failure names the unreadable directory: {}",
+        err.message
     );
 }
 

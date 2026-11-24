@@ -74,8 +74,7 @@ fn writing_into_a_loose_existing_directory_tightens_it() {
         .expect("the directory mode is set");
     assert_eq!(mode_of(&key_dir), 0o755, "the directory starts loose");
 
-    write_key_file(&key_dir.join("clio.key"), &[9_u8; KEY_LEN])
-        .expect("the key file is written");
+    write_key_file(&key_dir.join("clio.key"), &[9_u8; KEY_LEN]).expect("the key file is written");
 
     assert_eq!(mode_of(&key_dir), 0o700, "the existing directory is 0700");
 }
