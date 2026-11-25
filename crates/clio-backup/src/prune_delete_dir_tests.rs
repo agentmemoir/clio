@@ -3,12 +3,18 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for testing the entry identity the confirming stat
-//! compares, on a real directory held open as the run holds it.
+//! This module is responsible for testing the file-system mechanics on one held
+//! directory: the entry identity the confirming stat compares, a root that
+//! resolves but cannot be opened, an inspection that cannot read the name, and an
+//! unlink the directory refuses.
 //!
 //! ## Owns
 //! - The `same_entry` assertions: one entry compared with itself, two different
 //!   files, and a hard link to one inode
+//! - The `hold` refusals a real path can produce: a regular file in the place of
+//!   the backup directory
+//! - The `remove` refusals a real name can produce: a name too long to inspect,
+//!   and an unlink a read-only directory will not make
 //!
 //! ## Does not own
 //! - The removal rules themselves (see `prune_delete`)
@@ -18,8 +24,11 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use super::super::delete;
+use super::super::tests::{candidate, detail_of, file_len, plan_with, states_of};
 use super::*;
-use crate::fixtures::Scratch;
+use crate::SNAPSHOT_EXTENSION;
+use crate::fixtures::{Scratch, dir_entries, write_is_refused};
 use rustix::fs::{AtFlags, statat};
 
 /// The three names the fixture writes into one held directory.
@@ -73,4 +82,181 @@ fn the_identity_confirm_matches_one_entry_and_separates_two_files() {
         first.st_size, second.st_size,
         "the fixture files differ in size on purpose"
     );
+}
+
+/// A backup directory that resolves but cannot be opened as a directory fails
+/// every candidate, names the reason, and removes nothing.
+///
+/// The path handed in is a regular file, so `canonicalize` succeeds and the open
+/// that demands a directory is what refuses. That is the second refusal `hold`
+/// has and the one a path-value check cannot see: the path exists and resolves,
+/// so only asking the file system for a directory tells the run to stop. Every
+/// candidate fails with the same reason, and none falls back to a path-based
+/// removal, because a run that cannot hold the directory knows nothing about
+/// where the files really are.
+#[test]
+fn a_backup_directory_that_is_a_regular_file_fails_every_candidate() {
+    let scratch = Scratch::new("prune-file-root");
+    let elsewhere = Scratch::new("prune-file-root-kept");
+    let orphan = elsewhere.path().join(format!("orphan{SNAPSHOT_EXTENSION}"));
+    std::fs::write(&orphan, b"a file this run must not touch")
+        .expect("write a file to leave alone");
+    let orphan_bytes = file_len(&orphan);
+    let not_a_directory = scratch.join("not-a-directory");
+    std::fs::write(&not_a_directory, b"a regular file, not a backup directory")
+        .expect("write a regular file where the backup directory was expected");
+    let under_it = not_a_directory.join(format!("under-it{SNAPSHOT_EXTENSION}"));
+    let candidates = vec![
+        candidate("under-it", &under_it, 0),
+        candidate("orphan", &orphan, orphan_bytes),
+    ];
+    let plan = plan_with(candidates, 0);
+
+    let report = delete(&not_a_directory, &plan);
+
+    assert_eq!(
+        states_of(&report),
+        vec![
+            ("under-it", CandidateState::Failed),
+            ("orphan", CandidateState::Failed),
+        ],
+        "a root that is not a directory fails every candidate"
+    );
+    for outcome in &report.candidates {
+        let detail = detail_of(outcome);
+        assert!(
+            detail.contains("could not be opened"),
+            "{outcome:?} must say the directory was not opened"
+        );
+        assert!(
+            detail.contains(&not_a_directory.display().to_string()),
+            "{outcome:?} must name the directory it could not open"
+        );
+        assert!(
+            !detail.contains("could not be resolved"),
+            "{outcome:?} resolved, so it must not claim otherwise"
+        );
+    }
+    assert!(report.has_failures(), "the caller sees the failure");
+    assert_eq!(
+        report.candidates[0].state.label(),
+        "failed",
+        "so a report says so in one word"
+    );
+    assert_eq!(report.reclaimed_bytes, 0, "nothing was unlinked");
+    assert_eq!(
+        report.remaining_bytes, plan.listed_bytes,
+        "every byte is still there"
+    );
+    assert!(
+        not_a_directory.is_file(),
+        "the file the caller named is untouched"
+    );
+    assert!(orphan.is_file(), "and so is the archive it was told about");
+    assert_eq!(file_len(&orphan), orphan_bytes, "which keeps its bytes");
+}
+
+/// A name the file system will not stat is reported as a failure with its
+/// reason, and nothing is removed.
+///
+/// The bare name is longer than the file system's per-component limit, so the
+/// inspection itself is refused and the run never gets as far as a removal. That
+/// is the arm the inspection needs: a stat that fails for a reason other than
+/// "already gone" cannot be read as a skip, because a name nobody could read is
+/// not a name anybody proved absent.
+#[test]
+fn a_candidate_name_too_long_to_inspect_is_reported_as_a_failure() {
+    let scratch = Scratch::new("prune-long-name");
+    let too_long = format!("{}{SNAPSHOT_EXTENSION}", "a".repeat(300));
+    let unreachable = scratch.join(&too_long);
+    let plan = plan_with(vec![candidate("too-long", &unreachable, 0)], 0);
+
+    let report = delete(scratch.path(), &plan);
+
+    let outcome = &report.candidates[0];
+    assert_eq!(outcome.state, CandidateState::Failed);
+    assert_eq!(outcome.state.label(), "failed", "so a report says so");
+    assert!(
+        detail_of(outcome).contains("cannot read the archive"),
+        "{outcome:?} must say the name could not be read"
+    );
+    assert!(
+        detail_of(outcome).contains("too long"),
+        "{outcome:?} must carry the reason the file system gave"
+    );
+    assert_eq!(outcome.reclaimed_bytes, 0, "nothing was credited");
+    assert_eq!(report.reclaimed_bytes, 0, "and the run freed nothing");
+    assert!(report.has_failures(), "the caller sees the failure");
+    assert_eq!(
+        report.remaining_bytes, plan.listed_bytes,
+        "every byte is still there"
+    );
+    assert_eq!(
+        dir_entries(scratch.path()),
+        Vec::<String>::new(),
+        "nothing was written or removed"
+    );
+}
+
+/// An unlink the directory refuses is reported, and the archive keeps its bytes.
+///
+/// The archive is inspected and confirmed like any other, so the refusal comes
+/// from the unlink itself: the directory's own mode stops the removal. That is
+/// the last arm of the sequence and the only one that proves a removal failure is
+/// reported as a failure, with the reason, and never credited as a reclaim.
+///
+/// The refusal is only observable to a process the mode bits restrict. Root, and
+/// any process holding `CAP_DAC_OVERRIDE`, unlinks from the directory anyway, so
+/// the test asks the process's own access which case this is and asserts what
+/// that case allows.
+#[cfg(unix)]
+#[test]
+fn an_unlink_the_directory_refuses_is_reported_and_the_archive_stays() {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = Scratch::new("prune-unlink-refused");
+    let archive = scratch.path().join(format!("stuck{SNAPSHOT_EXTENSION}"));
+    std::fs::write(&archive, b"an archive the directory will not give up")
+        .expect("write the archive");
+    let bytes = file_len(&archive);
+    let plan = plan_with(vec![candidate("stuck", &archive, bytes)], 0);
+    std::fs::set_permissions(scratch.path(), std::fs::Permissions::from_mode(0o500))
+        .expect("make the directory read-only");
+    let refused = write_is_refused(scratch.path());
+
+    let report = delete(scratch.path(), &plan);
+
+    std::fs::set_permissions(scratch.path(), std::fs::Permissions::from_mode(0o700))
+        .expect("restore the mode so the scratch guard can remove the directory");
+
+    let outcome = &report.candidates[0];
+    if refused {
+        assert_eq!(
+            outcome.state,
+            CandidateState::Failed,
+            "a refused unlink is a failure, not a removal: {outcome:?}"
+        );
+        assert!(
+            detail_of(outcome).contains("removing"),
+            "{outcome:?} must name what it could not remove"
+        );
+        assert!(
+            !detail_of(outcome).contains("another process"),
+            "{outcome:?} must not call a refusal an absence"
+        );
+        assert_eq!(outcome.reclaimed_bytes, 0, "nothing was credited");
+        assert_eq!(report.reclaimed_bytes, 0, "and the run freed nothing");
+        assert!(report.has_failures(), "the caller sees the failure");
+        assert_eq!(
+            report.remaining_bytes, plan.listed_bytes,
+            "every byte is still there"
+        );
+        assert!(archive.is_file(), "the archive is still there");
+        assert_eq!(file_len(&archive), bytes, "and it keeps every byte");
+    } else {
+        // This process bypasses the mode bits, so the directory is not the
+        // refusal under test: the archive goes, and the run credits its bytes.
+        assert_eq!(outcome.state, CandidateState::Deleted);
+        assert_eq!(report.reclaimed_bytes, bytes, "the bytes it removed");
+        assert!(!archive.exists(), "a DAC-bypassing process unlinked it");
+    }
 }
