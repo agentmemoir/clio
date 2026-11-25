@@ -131,6 +131,7 @@ mod command_catalog;
 mod compliance_cli;
 mod compliance_request_cli;
 mod compose_assets;
+mod compose_assets_fs;
 mod compose_cli;
 mod compose_docker;
 mod compose_env;
