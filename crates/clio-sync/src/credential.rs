@@ -74,7 +74,7 @@ impl Peer {
     /// or system actor may refuse a subject. A bank-scoped token proves reach,
     /// not the authority to erase.
     pub(crate) fn may_record_denial(&self) -> bool {
-        matches!(self.actor, Actor::Harness | Actor::System)
+        self.actor.is_privileged()
     }
 }
 

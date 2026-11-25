@@ -76,6 +76,17 @@ impl Actor {
         }
     }
 
+    /// Whether this actor carries administrative privilege.
+    ///
+    /// Only [`Self::Harness`] and [`Self::System`] do. This is the one
+    /// definition every privilege gate reads: the compliance verbs, the MCP
+    /// administrative mutations, and the sync denial record all key on it, so
+    /// none of them can drift from the others.
+    #[must_use]
+    pub fn is_privileged(&self) -> bool {
+        matches!(*self, Self::Harness | Self::System)
+    }
+
     /// Parse a caller-supplied actor string.
     ///
     /// # Errors

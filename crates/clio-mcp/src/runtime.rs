@@ -338,15 +338,15 @@ impl McpState {
         let Some(principal) = &self.principal else {
             return Ok(());
         };
-        match principal.actor {
-            Actor::Harness | Actor::System => Ok(()),
-            Actor::Agent | Actor::User => Err(AmError::new(
-                ErrorCode::Forbidden,
-                "this credential is not an administrator; config, ranking, \
-                 deployment-retention, and bundle import changes need a \
-                 harness or system credential",
-            )),
+        if principal.actor.is_privileged() {
+            return Ok(());
         }
+        Err(AmError::new(
+            ErrorCode::Forbidden,
+            "this credential is not an administrator; config, ranking, \
+             deployment-retention, and bundle import changes need a \
+             harness or system credential",
+        ))
     }
 
     /// Override the export root with an explicitly supplied, deployment-owned

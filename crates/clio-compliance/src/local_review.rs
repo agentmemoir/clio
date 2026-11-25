@@ -92,13 +92,13 @@ pub fn review_output_routes() -> [ReviewOutputRoute; 2] {
 
 /// Only harness/system actors carry local review privilege.
 pub(crate) fn authorize(actor: Actor) -> Result<(), AmError> {
-    match actor {
-        Actor::Harness | Actor::System => Ok(()),
-        Actor::Agent | Actor::User => Err(AmError::new(
-            ErrorCode::Forbidden,
-            "local event review requires a harness or system actor with compliance privilege",
-        )),
+    if actor.is_privileged() {
+        return Ok(());
     }
+    Err(AmError::new(
+        ErrorCode::Forbidden,
+        "local event review requires a harness or system actor with compliance privilege",
+    ))
 }
 
 /// Parse the keyset cursor: `None` starts before the first row, and a present
