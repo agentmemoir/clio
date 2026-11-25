@@ -119,9 +119,7 @@ fn clean_call(
                     "try 'clio hygiene clean --file - < candidates.json'",
                 ));
             };
-            std::io::read_to_string(stdin).map_err(|error| {
-                CliError::usage(format!("`hygiene clean --file -` is not readable: {error}"))
-            })?
+            crate::cli_read_cap::read_document(stdin, "`hygiene clean --file -`")?
         }
         other => std::fs::read_to_string(other).map_err(|error| {
             CliError::usage(format!("--file `{other}` is not readable: {error}"))
