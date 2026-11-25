@@ -16,12 +16,36 @@
 //! - Choosing the keep set and the candidates (see `prune`)
 //! - Listing the backup directory (see `inventory`)
 //! - The confirmation gate, the views, and the exit codes (see `clio`)
+//! - The descriptor-relative mechanics on unix (see `prune_delete_dir`)
 //!
 //! ## Boundary
 //!
 //! Changes to how a candidate is removed, or to what a removal reports, should
 //! normally require changes here. Changes to which archives are targeted should
 //! not require changes here.
+//!
+//! ## What a run guarantees
+//!
+//! The backup directory is resolved once and, on unix, held open as a directory
+//! descriptor for the whole run. Every candidate is then examined and removed as
+//! a bare file name in that one descriptor, so no ancestor of the directory can
+//! be swapped under the run and no path is resolved a second time. On unix the
+//! entry is also confirmed by device and inode between the inspection and the
+//! unlink: a name replaced in that gap is refused instead of removed, so a run
+//! never unlinks a file it did not inspect and never credits a size that
+//! describes something else.
+//!
+//! One gap remains, and it is smaller than the one this closes: the confirming
+//! stat and the unlink are not one step, so an attacker able to replace the entry
+//! in the same directory between those two calls still wins. That attacker cannot
+//! reach outside the held directory, because every call names a bare name inside
+//! it, and cannot make the byte count lie, because the bytes credited are the
+//! size the inspection saw and are counted only against an entry the confirm
+//! matched.
+//!
+//! Other platforms have no descriptor to hold and no inode identity to compare,
+//! so they keep the resolved-parent containment plus the path-based
+//! `symlink_metadata`/`remove_file` sequence, unchanged in effect.
 //!
 //! Keep this module focused on removing a selected archive.
 
@@ -174,10 +198,12 @@ pub fn delete(backup_dir: &Path, plan: &PrunePlan) -> PruneReport {
 fn report(backup_dir: &Path, plan: &PrunePlan, remove: bool) -> PruneReport {
     // The root is resolved once, before any candidate is examined, so every
     // containment check and every unlink below answers against the one real
-    // directory. A root that cannot be resolved fails each candidate instead of
-    // falling back to the unresolved path, because an unresolved path cannot
-    // prove that anything is inside it.
-    let root = std::fs::canonicalize(backup_dir);
+    // directory, and on unix it is opened once here so every candidate is
+    // examined and unlinked through that one descriptor. A root that cannot be
+    // resolved, or cannot be opened, fails each candidate instead of falling
+    // back to the unresolved path, because an unresolved path cannot prove that
+    // anything is inside it.
+    let root = prune_delete_dir::hold(backup_dir);
     let candidates = plan
         .candidates
         .iter()
@@ -206,29 +232,36 @@ fn report(backup_dir: &Path, plan: &PrunePlan, remove: bool) -> PruneReport {
 /// What happened to one candidate, in the order the rules apply.
 ///
 /// Containment comes first, so a path that is not a file inside the backup
-/// directory is refused before the filesystem is touched at all. Being inside
-/// means two things together: the caller's own spelling of the parent is exactly
-/// the backup directory with a bare final component, and that parent resolves on
-/// disk to the canonical root the run took once before the loop. Then the entry
-/// is examined with `symlink_metadata`, which does not follow a link: a
-/// symlinked archive is reported and skipped, so a link can never turn "delete a
-/// file in my backup directory" into "delete a file somewhere else". Only a real
-/// file is unlinked, and the unlink names the resolved root plus the bare file
-/// name, so no unresolved or `..`-bearing path reaches the removal.
+/// directory is refused before the entry is examined at all. Being inside means
+/// two things together: the caller's own spelling of the parent is exactly the
+/// backup directory with a bare final component, and that parent resolves on disk
+/// to the canonical root the run took once before the loop. After that every step
+/// names the bare file name and never the candidate's path again.
 ///
-/// What this does not prove is that the entry examined and the entry unlinked are
-/// the same entry: the name can be swapped in the gap between the
-/// `symlink_metadata` and the `remove_file`, and a regular file swapped in there
-/// is the file this run removes. A swap can therefore make the reclaimed figure
-/// describe something other than what went. Removing that gap needs the
-/// directory itself held open for the run and the entry confirmed by device and
-/// inode across the two calls.
+/// The removal itself is `prune_delete_dir`'s, and on unix it holds the resolved
+/// directory open for the whole run. One `statat` of the bare name is the
+/// inspection, without following a link, and that single result decides three
+/// things at once: a symlink is reported and skipped, so a link can never turn
+/// "delete a file in my backup directory" into "delete a file somewhere else"; a
+/// directory is refused; and the size credited to a successful removal is that
+/// entry's own size. Immediately before the `unlinkat` the same bare name is
+/// stat'd again and must still have the same device and inode, so a name replaced
+/// between the inspection and the removal is refused with nothing removed and
+/// nothing credited. Bytes are credited only when the unlink returned success.
 ///
-/// A root that could not be resolved leaves every candidate `Failed`: the run
-/// then knows nothing about where the files really are, so it removes nothing.
+/// The one gap that remains is that the confirming stat and the `unlinkat` are
+/// not one step: an attacker able to replace the entry in the same directory
+/// between those two calls still wins. That attacker cannot reach outside the
+/// held directory, because every call names a bare name in it, and cannot make
+/// the byte count lie, because the bytes credited are the size the inspection saw
+/// and are counted only against an entry the confirm matched.
+///
+/// A root that could not be resolved or opened leaves every candidate `Failed`:
+/// the run then knows nothing about where the files really are, so it removes
+/// nothing.
 fn outcome(
     backup_dir: &Path,
-    root: &Result<PathBuf, std::io::Error>,
+    root: &Result<prune_delete_dir::BackupDir, String>,
     candidate: &ArchiveRef,
     remove: bool,
 ) -> CandidateOutcome {
@@ -243,18 +276,15 @@ fn outcome(
         state: CandidateState::Pending,
         detail: None,
     };
-    let root = match root {
-        Ok(root) => root.as_path(),
-        Err(error) => {
+    let held = match root {
+        Ok(held) => held,
+        Err(reason) => {
             outcome.state = CandidateState::Failed;
-            outcome.detail = Some(format!(
-                "the backup directory {} could not be resolved, so nothing was removed: {error}",
-                backup_dir.display()
-            ));
+            outcome.detail = Some(reason.clone());
             return outcome;
         }
     };
-    let Some(file_name) = inside(backup_dir, root, &candidate.path) else {
+    let Some(file_name) = inside(backup_dir, held.path(), &candidate.path) else {
         outcome.state = CandidateState::OutsideDirectory;
         outcome.detail = Some(format!(
             "{} is not a file inside {}",
@@ -263,56 +293,7 @@ fn outcome(
         ));
         return outcome;
     };
-    let metadata = match std::fs::symlink_metadata(&candidate.path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            outcome.state = CandidateState::AlreadyGone;
-            outcome.detail = Some("another process removed it first".to_owned());
-            return outcome;
-        }
-        Err(error) => {
-            outcome.state = CandidateState::Failed;
-            outcome.detail = Some(format!("cannot read the archive: {error}"));
-            return outcome;
-        }
-    };
-    if metadata.is_symlink() {
-        outcome.state = CandidateState::Symlink;
-        outcome.detail = Some(
-            "a symbolic link is never followed; its target's bytes are not counted".to_owned(),
-        );
-        return outcome;
-    }
-    if metadata.is_dir() {
-        outcome.state = CandidateState::Failed;
-        outcome.detail = Some("the path is a directory, not a snapshot archive".to_owned());
-        return outcome;
-    }
-    if !remove {
-        return outcome;
-    }
-    // The size is measured here, immediately before the unlink, so the reclaimed
-    // figure is the bytes this run freed rather than a number the listing wrote
-    // down earlier. It is counted only after the unlink reports success. The
-    // unlink names the resolved root and the bare file name, so the removal
-    // cannot travel through a symlinked or `..`-bearing parent.
-    let bytes = metadata.len();
-    let removal_path = root.join(file_name);
-    match std::fs::remove_file(&removal_path) {
-        Ok(()) => {
-            outcome.state = CandidateState::Deleted;
-            outcome.reclaimed_bytes = bytes;
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            outcome.state = CandidateState::AlreadyGone;
-            outcome.detail = Some("another process removed it first".to_owned());
-        }
-        Err(error) => {
-            outcome.state = CandidateState::Failed;
-            outcome.detail = Some(format!("removing {}: {error}", candidate.path.display()));
-        }
-    }
-    outcome
+    prune_delete_dir::remove(held, candidate, file_name, remove, outcome)
 }
 
 /// The bare file name of `path` when it is a file directly inside `backup_dir`,
@@ -345,6 +326,11 @@ fn inside<'path>(backup_dir: &Path, root: &Path, path: &'path Path) -> Option<&'
 #[cfg(test)]
 #[path = "prune_delete_tests.rs"]
 mod tests;
+
+/// The descriptor-relative mechanics a removal uses: the directory held open for
+/// the run, the one inspection of a bare name, the identity confirm, the unlink.
+#[path = "prune_delete_dir.rs"]
+mod prune_delete_dir;
 
 /// The containment cases that need a real directory hierarchy: a backup
 /// directory that is a symbolic link, a candidate reached through a linked

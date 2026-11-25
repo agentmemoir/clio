@@ -243,6 +243,31 @@ fn a_symlinked_archive_is_reported_and_its_target_is_never_removed() {
     assert!(link.symlink_metadata().is_ok(), "the link is still there");
     assert_eq!(file_len(&target), target_bytes, "the target is whole");
     assert_eq!(report.reclaimed_bytes, 0, "nothing was unlinked");
+
+    // The same refusal when the plan was built over the real archive and the entry
+    // was replaced by a link only afterwards: the inspection the run makes is the
+    // one that decides, so the swap is seen and the target behind it survives.
+    let swapped = Scratch::new("prune-link-swapped");
+    let stashed = elsewhere.join("stashed.cliobak.tar.gz");
+    let doomed = archive_at(&swapped, 85, "2026-04-04T00:00:00Z", "doomed");
+    let swapped_plan = plan_with(vec![candidate("doomed", &doomed, file_len(&doomed))], 0);
+    std::fs::rename(&doomed, &stashed).expect("move the archive out after the plan was built");
+    let stashed_bytes = file_len(&stashed);
+    std::os::unix::fs::symlink(&stashed, &doomed).expect("a link where the archive was");
+
+    let swapped_report = delete(swapped.path(), &swapped_plan);
+
+    assert_eq!(
+        states_of(&swapped_report),
+        vec![("doomed", CandidateState::Symlink)],
+        "the entry inspected at removal time is the link"
+    );
+    assert_eq!(swapped_report.reclaimed_bytes, 0, "nothing was unlinked");
+    assert_eq!(
+        file_len(&stashed),
+        stashed_bytes,
+        "the link's target keeps every byte"
+    );
 }
 
 /// Unix-gated because it names a linked archive, and only Unix has links. The

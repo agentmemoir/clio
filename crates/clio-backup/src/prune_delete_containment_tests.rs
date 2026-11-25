@@ -54,6 +54,8 @@ fn a_backup_directory_that_is_a_symlink_deletes_nothing_outside_it() {
     std::os::unix::fs::symlink(&real, &link).expect("link to the real directory");
     let plan = plan_over(&link, 1);
     assert_eq!(plan.candidates.len(), 2, "the two older archives");
+    let expected_bytes = file_len(&real.join(second.file_name().expect("a name")))
+        + file_len(&real.join(oldest.file_name().expect("a name")));
 
     let report = delete(&link, &plan);
 
@@ -65,7 +67,22 @@ fn a_backup_directory_that_is_a_symlink_deletes_nothing_outside_it() {
             .collect::<Vec<_>>(),
         "both candidates went through the link"
     );
-    assert!(report.reclaimed_bytes > 0, "the run freed something");
+    assert_eq!(
+        report.reclaimed_bytes, expected_bytes,
+        "the bytes credited are the sizes of the two entries that really went"
+    );
+    for outcome in &report.candidates {
+        assert_eq!(
+            outcome.reclaimed_bytes, outcome.listed_bytes,
+            "each credited size is the entry's own: {outcome:?}"
+        );
+        assert_eq!(detail_of(outcome), "", "a plain removal has no reason");
+    }
+    assert_eq!(
+        report.remaining_bytes,
+        plan.listed_bytes - expected_bytes,
+        "the remaining figure agrees with what was freed"
+    );
     assert!(
         !real.join(second.file_name().expect("a name")).exists(),
         "the second archive went from the real directory"
