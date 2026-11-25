@@ -10,6 +10,7 @@
 //! ## Owns
 //! - The loopback and non-loopback rows of `bind_refusal`
 //! - The rule that a non-loopback bind with no credential needs both opt-outs
+//! - `serves_untrusted_network`, the trust fact a served bind hands its handler
 //!
 //! ## Does not own
 //! - The refusal wording and the transport itself (see `http_start_auth_tests`
@@ -21,7 +22,7 @@
 //! Test-only. Never compiled into production builds.
 
 use crate::http::HttpConfig;
-use crate::http::http_start_guard::{BindRefusal, bind_refusal};
+use crate::http::http_start_guard::{BindRefusal, bind_refusal, serves_untrusted_network};
 use crate::http_auth::CredentialStore;
 use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};
 use clio_types::Actor;
@@ -132,4 +133,39 @@ fn an_empty_store_admits_nothing() {
     };
     assert_eq!(bind_refusal(&cfg, true), Some(BindRefusal::Loopback));
     assert_eq!(bind_refusal(&cfg, false), Some(BindRefusal::NonLoopback));
+}
+
+/// The transport-trust fact: only a bind outside loopback with no credential
+/// source answers peers nobody has vouched for. The address is passed in rather
+/// than bound, so the seam under judgement is the predicate.
+#[test]
+fn only_an_off_machine_credential_free_bind_serves_an_untrusted_network() {
+    let no_source = config(true, true);
+    assert!(
+        serves_untrusted_network(&no_source, false),
+        "a non-loopback bind with no credential source is unauthenticated off-machine"
+    );
+    assert!(
+        !serves_untrusted_network(&no_source, true),
+        "a loopback bind is reachable only from this machine"
+    );
+    let sourced = HttpConfig {
+        credentials: Some(usable_store()),
+        ..config(false, false)
+    };
+    for loopback in [true, false] {
+        assert!(
+            !serves_untrusted_network(&sourced, loopback),
+            "a credential source vouches for whoever reaches it (loopback {loopback})"
+        );
+    }
+    let empty = HttpConfig {
+        credentials: Some(Arc::new(CredentialStore::default())),
+        ..config(false, false)
+    };
+    assert_eq!(
+        bind_refusal(&empty, false),
+        Some(BindRefusal::NonLoopback),
+        "an empty store authorizes nobody, so this bind never serves at all"
+    );
 }

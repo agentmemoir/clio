@@ -350,3 +350,97 @@ fn resource_bounds_are_pinned_to_the_recorded_values() {
     assert_eq!(DEFAULT_DEADLINE_SECS, 30, "30 s total request deadline");
     assert_eq!(MAX_CONNECTIONS, 32, "32 concurrent-connection cap");
 }
+
+/// The fact the transport marks a handler with, read off the address the
+/// listener actually holds: an off-machine wildcard bind with no credential is
+/// untrusted, and the same configuration on loopback is not. No off-machine peer
+/// is contacted; the predicate is the seam under judgement.
+#[test]
+fn the_listener_address_decides_the_transport_trust() {
+    let cfg = HttpConfig {
+        insecure_no_auth: true,
+        insecure_bind_any: true,
+        ..HttpConfig::default()
+    };
+    for (bind, untrusted) in [("127.0.0.1:0", false), ("0.0.0.0:0", true)] {
+        let listener = TcpListener::bind(bind).expect("bind");
+        let loopback = listener.local_addr().expect("addr").ip().is_loopback();
+        assert_eq!(
+            http_start_guard::serves_untrusted_network(&cfg, loopback),
+            untrusted,
+            "a {bind} listener with no credential source"
+        );
+    }
+    let sourced = HttpConfig {
+        credentials: Some(Arc::new(single_record_store())),
+        ..cfg
+    };
+    assert!(
+        !http_start_guard::serves_untrusted_network(&sourced, false),
+        "a credential source vouches for the caller wherever it is served"
+    );
+}
+
+/// Serve the whole-catalog state on `0.0.0.0` with both opt-outs and return the
+/// port: the one admitted unauthenticated off-machine listener.
+fn spawn_untrusted_server() -> u16 {
+    let state = crate::runtime::McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({"mcp": {"tool_profile": "all"}}),
+    )
+    .expect("state");
+    let listener = TcpListener::bind("0.0.0.0:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let cfg = HttpConfig {
+        insecure_no_auth: true,
+        insecure_bind_any: true,
+        ..HttpConfig::default()
+    };
+    std::thread::spawn(move || {
+        let _ = serve_with_listener(state, cfg, listener);
+    });
+    port
+}
+
+/// The triple every actor scenario writes, so the only difference between them
+/// is the actor it declares.
+const TRIPLE_ACTOR_ARGS: &str =
+    r#""subject":"a","predicate":"b","object":"c","epistemic_kind":"fact","bank":"bank-a""#;
+
+/// A listener reachable off this machine with no credential refuses a declared
+/// administrative actor on a tool call, and refuses the administrative verbs on
+/// the same ground, rather than panicking or reading the declaration as fact.
+#[test]
+fn an_untrusted_listener_refuses_a_privileged_actor_over_http() {
+    let port = spawn_untrusted_server();
+    for actor in ["harness", "system"] {
+        let args = format!("{{{TRIPLE_ACTOR_ARGS},\"actor\":\"{actor}\"}}");
+        let res = post_call(port, "triple_add", &args, "");
+        assert_eq!(res.status, 200, "the envelope is served: {}", res.body);
+        let body: Value = serde_json::from_str(&res.body).expect("json");
+        let text = body["result"].to_string();
+        assert_eq!(body["result"]["isError"], json!(true), "{text}");
+        assert!(text.contains("forbidden"), "an authorization error: {text}");
+        assert!(
+            text.contains("unauthenticated"),
+            "the refusal names the transport: {text}"
+        );
+    }
+    let admin = post_call(port, "config_set", r#"{"path":"/mcp","value":{}}"#, "");
+    let body: Value = serde_json::from_str(&admin.body).expect("json");
+    let text = body["result"].to_string();
+    assert_eq!(body["result"]["isError"], json!(true), "{text}");
+    assert!(text.contains("unauthenticated"), "{text}");
+}
+
+/// The loopback listener keeps the contract it always had: the local process
+/// owner's declaration is honoured, so the same call succeeds.
+#[test]
+fn a_loopback_listener_still_honours_a_privileged_actor() {
+    let (port, _) = spawn_all_tools_server(HttpConfig::default());
+    let args = format!("{{{TRIPLE_ACTOR_ARGS},\"actor\":\"harness\"}}");
+    let res = post_call(port, "triple_add", &args, "");
+    assert_eq!(res.status, 200, "{}", res.body);
+    let body: Value = serde_json::from_str(&res.body).expect("json");
+    assert_eq!(body["result"]["isError"], json!(false), "{}", res.body);
+}

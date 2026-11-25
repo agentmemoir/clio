@@ -9,9 +9,9 @@
 //!
 //! ## Owns
 //! - Minimal HTTP/1.1 request parsing and response writing for `/mcp`
-//! - The accept loop, connection cap, and per-request dispatch (`http_candidate`)
-//! - The credential source this server accepts (the operator's token store); the
-//!   bind rule that requires one unless explicitly opted out lives in `http_start_guard`
+//! - The accept loop, connection cap, per-request dispatch (`http_candidate`), and
+//!   the trust fact this listener marks its handler with; the credential source
+//!   it accepts, and the bind rule that requires one (see `http_start_guard`)
 //! - The transport resource bounds (values defined below):
 //!   - 64 KiB head cap (`MAX_HEAD_BYTES`) and 10 MiB body cap (`MAX_BODY`),
 //!     separate because a client controls the header block and body apart
@@ -44,7 +44,7 @@
 //! Keep this module focused on the Streamable HTTP transport.
 
 use crate::conn_pool::{ConnPool, MAX_CONNECTIONS};
-use crate::http::http_start_guard::{BindRefusal, bind_refusal};
+use crate::http::http_start_guard::{BindRefusal, bind_refusal, serves_untrusted_network};
 use crate::http_auth::{CredentialStore, authorize_request};
 use crate::http_candidate::CandidatePost;
 use crate::http_guard::check_origin;
@@ -198,7 +198,9 @@ where
         };
         return Err(std::io::Error::other(message));
     }
-    let handler = Arc::new(McpHandler::new(state));
+    let mut handler = McpHandler::new(state);
+    handler.set_network_untrusted(serves_untrusted_network(&cfg, loopback));
+    let handler = Arc::new(handler);
     let pool = Arc::new(ConnPool::default());
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else { continue };
@@ -343,8 +345,7 @@ where
     }
     // The request-scoped state carries the credential's principal, so dispatch
     // runs through the bound entry point and the shared `Mutex`-held state stays
-    // one instance rather than a per-request fork. `Unbound` is the loopback dev
-    // default: the base state, unchanged.
+    // one instance rather than a per-request fork; this listener marks the rest.
     let request_state = scoped_state(handler, principal);
     post.respond(PostContext {
         state: &request_state,

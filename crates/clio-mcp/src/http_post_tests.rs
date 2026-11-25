@@ -8,7 +8,7 @@
 //!
 //! ## Owns
 //! - The strategy trait's notification, refused-method, and served branches
-//! - `scoped_state` and the principal it carries
+//! - `scoped_state`, the principal it carries, and the listener trust it inherits
 //! - The `Debug` rendering of both body kinds
 //!
 //! ## Does not own
@@ -143,6 +143,47 @@ fn scoped_state_carries_the_request_principal() {
         bound.authorize_admin().is_err(),
         "the bound principal's actor decides the administrative rule"
     );
+}
+
+/// A handler that serves an off-machine listener marks every copy it hands out,
+/// bound or not, so no request served there reads as a local one.
+#[test]
+fn scoped_state_marks_an_untrusted_handler() {
+    let mut handler = McpHandler::new(state());
+    assert!(!handler.network_untrusted(), "a fresh handler is trusted");
+    handler.set_network_untrusted(true);
+    let handler = Arc::new(handler);
+    assert!(handler.network_untrusted(), "the handler records the fact");
+
+    for outcome in [
+        AuthOutcome::Unbound,
+        AuthOutcome::Bound(Principal::new("ops-key".into(), Actor::Harness, Vec::new())),
+    ] {
+        let scoped = scoped_state(&handler, outcome);
+        assert!(
+            scoped.network_untrusted,
+            "every copy of an untrusted handler carries the fact"
+        );
+    }
+    assert!(
+        !handler.state().network_untrusted,
+        "the base state stays as it was opened"
+    );
+}
+
+/// A trusted handler is copied unchanged: the local transports keep the contract
+/// they always had.
+#[test]
+fn scoped_state_leaves_a_trusted_handler_unchanged() {
+    let handler = Arc::new(McpHandler::new(state()));
+    let scoped = scoped_state(&handler, AuthOutcome::Unbound);
+    assert!(
+        !scoped.network_untrusted,
+        "a trusted listener stays trusted"
+    );
+    scoped
+        .resolve_ctx(&json!({"actor": "harness"}))
+        .expect("a trusted listener honours the declaration");
 }
 
 #[test]

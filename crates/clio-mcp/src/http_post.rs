@@ -10,7 +10,8 @@
 //! - The per-request context a strategy reads
 //! - The dispatch strategy trait
 //! - The body a route answers with: complete JSON, or a stream of frames
-//! - The request-scoped state a bound request runs against
+//! - The request-scoped state a bound request runs against, including the trust
+//!   fact it inherits from the listener
 //!
 //! ## Does not own
 //! - The request gates: verbs, Origin, auth, path, and media types (see `http`)
@@ -72,12 +73,20 @@ pub(crate) trait PostRoute {
 /// already behind an `Arc` on `McpState`, so a per-request copy shares the store
 /// engines, the index drain, the retention store, and the config runtime instead
 /// of duplicating them.
+///
+/// A handler that serves a listener reachable off this machine marks every copy
+/// it hands out, bound or not, so a request served there can never be read as
+/// one a local process owner made.
 pub(crate) fn scoped_state(handler: &Arc<McpHandler>, principal: AuthOutcome) -> McpState {
     let base = handler.state();
-    match principal {
+    let mut scoped = match principal {
         AuthOutcome::Bound(principal) => base.with_principal(principal),
         AuthOutcome::Unbound => base.as_ref().clone(),
+    };
+    if handler.network_untrusted() {
+        scoped.mark_network_untrusted();
     }
+    scoped
 }
 
 #[cfg(test)]

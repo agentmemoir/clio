@@ -15,15 +15,15 @@
 //!   path, and the retention-store loader
 //!
 //! ## Does not own
-//! - The `McpState` type and its public `open` API (see `runtime`)
+//! - The `McpState` type and its public `open` API (see `runtime` / `runtime_state`)
 //! - Tool dispatch or handler semantics (see `write_tools` and friends)
 //! - Admission or retrieval math (domain crates own those)
 //!
 //! ## Boundary
 //!
 //! Changes to which engines a store is wired with should normally require
-//! changes here. Changes to the `McpState` field set should keep both modules
-//! in sync.
+//! changes here. Changes to the `McpState` field set should keep this module,
+//! `runtime_state`, and the single struct literal below in sync.
 //!
 //! Keep this module focused on runtime state construction.
 
@@ -308,6 +308,9 @@ impl McpState {
             // Unbound at construction: only a credential-bearing transport ever
             // attaches a principal, and it does so per request.
             principal: None,
+            // Never born untrusted: the fact is a property of the listener, and
+            // only the HTTP boundary marks one (see `http_post::scoped_state`).
+            network_untrusted: false,
             #[cfg(test)]
             test_now: None,
         });

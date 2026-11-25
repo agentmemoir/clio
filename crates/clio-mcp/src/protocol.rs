@@ -9,8 +9,9 @@
 //! ## Owns
 //! - JSON-RPC 2.0 envelope parsing and response shaping
 //! - MCP error-code mapping (tool failures keep machine-readable codes)
-//! - The profile-narrowed tool view that `tools/list` and dispatch share, and
-//!   the bound write+read set the argument contract reads
+//! - The profile-narrowed tool view that `tools/list` and dispatch share, the
+//!   bound write+read set the argument contract reads, and the handler a
+//!   transport dispatches through with the trust fact of its listener
 //!
 //! ## Does not own
 //! - Tool semantics (see `write_tools`/`mutator_tools`)
@@ -46,13 +47,28 @@ pub const ERR_COACTIVATION_HANDOFF: i64 = -32001;
 #[derive(Debug)]
 pub struct McpHandler {
     state: Arc<McpState>,
+    network_untrusted: bool,
 }
 
 impl McpHandler {
-    /// Bind the handler to runtime state.
+    /// Bind the handler to runtime state, trusted until a transport marks it.
     #[must_use]
     pub fn new(state: Arc<McpState>) -> Self {
-        Self { state }
+        Self {
+            state,
+            network_untrusted: false,
+        }
+    }
+
+    /// Record that this handler serves a listener reachable off this machine.
+    pub(crate) fn set_network_untrusted(&mut self, network_untrusted: bool) {
+        self.network_untrusted = network_untrusted;
+    }
+
+    /// Whether this handler serves a listener reachable off this machine.
+    #[must_use]
+    pub(crate) fn network_untrusted(&self) -> bool {
+        self.network_untrusted
     }
 
     /// Runtime state accessor (transports may need defaults).
