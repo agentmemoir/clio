@@ -9,11 +9,12 @@
 //!
 //! ## Owns
 //! - The embedded asset set (build-time `include_str!` of the checked-in files)
-//! - Write-time overwrite/backup guard for user-edited materialized files,
+//! - Write-time overwrite/backup policy for user-edited materialized files,
 //!   with backup failures surfaced as errors (never silent overwrites)
-//! - The bind-mount source existence check with a clear missing-source error
+//! - The bind-mount source check with a clear missing-source error
 //!
 //! ## Does not own
+//! - Confined path resolution and the held descriptor form (see `compose_assets_fs`)
 //! - Compose-root resolution and clobber protection (see `compose_cli`)
 //! - `.env` generation (see `compose_env`)
 //! - The Docker invocation itself (see `compose_docker`)
@@ -26,7 +27,9 @@
 //!
 //! Keep this module focused on embedded-asset materialization.
 
+use crate::compose_assets_fs::{Root, split};
 use crate::compose_docker::ComposeTarget;
+use rustix::fs::FileType;
 use std::path::Path;
 
 /// The base compose file, embedded at build time from the checked-in repo root.
@@ -122,63 +125,81 @@ pub(crate) const BIND_MOUNT_SOURCES: &[&str] = &[
 /// Materialize the asset set into `root`, refusing to silently overwrite a
 /// user-edited file: when an existing file differs from the embedded content
 /// it is first copied to `<name>.bak-<unix-timestamp>` and a warning is
-/// printed. Returns the materialized relative paths.
+/// printed. Returns the materialized relative paths. Each asset is opened once,
+/// so the file that is read is the file the backup copies and the rewrite
+/// replaces; a name that changes under the descriptor stops the run.
 pub(crate) fn materialize(root: &Path, target: ComposeTarget) -> Result<Vec<String>, String> {
+    let opened = Root::open(root)?;
+    let stamp = unix_seconds();
     let mut written = Vec::new();
     for asset in assets(target) {
-        let path = root.join(asset.path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        let relative = Path::new(asset.path);
+        let (parent_path, name) = split(relative)?;
+        let shown = root.join(relative);
+        let parent = opened.parent(parent_path)?;
+        let held = Root::hold(parent, name, &shown)?;
+        let existing = held.read_all(&shown)?;
+        if !held.still_named(&shown)? {
+            return Err(changed_underfoot(&shown));
         }
-        if let Some(backup) = backup_edited(&path, &asset.contents)? {
+        if !held.was_created() && existing.as_slice() != asset.contents.as_bytes() {
+            let backup = held.backup(&existing, stamp, &shown)?;
             eprintln!(
                 "warning: {} was modified by hand; saved the previous version to {}",
                 asset.path,
-                backup.display()
+                shown.with_file_name(&backup).display()
             );
         }
-        std::fs::write(&path, &asset.contents)
-            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        if !held.rewrite(asset.contents.as_bytes(), &shown)? {
+            return Err(changed_underfoot(&shown));
+        }
         written.push(asset.path.to_string());
     }
     Ok(written)
 }
 
-/// If `path` exists with different contents, copy it to a timestamped backup
-/// and return the backup path. Unchanged or unreadable files are not touched
-/// (a file that cannot be read cannot be backed up). A failed backup copy is
-/// an error the caller must surface, never a silent overwrite of user edits.
-fn backup_edited(path: &Path, expected: &str) -> Result<Option<std::path::PathBuf>, String> {
-    let Ok(existing) = std::fs::read(path) else {
-        return Ok(None);
-    };
-    if existing.as_slice() == expected.as_bytes() {
-        return Ok(None);
-    }
-    let backup = path.with_extension(format!(
-        "{}.bak-{}",
-        path.extension().unwrap_or_default().to_string_lossy(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |secs| secs.as_secs())
-    ));
-    std::fs::copy(path, &backup).map_err(|e| format!("cannot back up {}: {e}", path.display()))?;
-    Ok(Some(backup))
+/// The seconds `materialize` passes to the backup name. A test names a backup
+/// with a fixed stamp instead of reading this clock.
+fn unix_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |secs| secs.as_secs())
+}
+
+/// The refusal a name that no longer resolves to the file that was read receives.
+fn changed_underfoot(shown: &Path) -> String {
+    format!(
+        "refuses {}: the entry changed while it was being materialized",
+        shown.display()
+    )
 }
 
 /// Verify every relative bind-mount source the embedded compose file
-/// references exists in the compose root before Docker runs, naming the first
-/// missing source in the error. This is what prevents Docker from creating
-/// empty directories and Postgres coming up without a schema.
+/// references exists in the compose root as a regular file before Docker runs,
+/// naming the first missing source in the error. This is what prevents Docker
+/// from creating empty directories and Postgres coming up without a schema. A
+/// source that is a symlink is not a regular file, so it is refused with its
+/// own message, and an inspection failure is reported with its own cause.
 pub(crate) fn verify_bind_mounts(root: &Path) -> Result<(), String> {
+    let opened = Root::open(root)?;
     for source in BIND_MOUNT_SOURCES {
-        if !root.join(source).exists() {
-            return Err(format!(
-                "missing bind-mount source {source} in {}; `clio compose up` materializes it — \
-                 do not delete it before starting Docker",
-                root.display()
-            ));
+        match opened.entry_type(Path::new(source))? {
+            Some(FileType::RegularFile) => {}
+            Some(_) => {
+                return Err(format!(
+                    "bind-mount source {source} in {} is not a regular file; a symlinked or \
+                     directory mount source is refused — `clio compose up` materializes a \
+                     regular file",
+                    root.display()
+                ));
+            }
+            None => {
+                return Err(format!(
+                    "missing bind-mount source {source} in {}; `clio compose up` materializes \
+                     it — do not delete it before starting Docker",
+                    root.display()
+                ));
+            }
         }
     }
     Ok(())
@@ -201,6 +222,12 @@ pub(crate) const GGUF_FILE_NAME: &str = "numind.NuExtract-tiny-v1.5.Q4_K_M.gguf"
 pub(crate) const GGUF_SHA256: &str =
     "e7a702d86a480e77669679d497ce20c7d8e52b0dc4cb6c828c35090d05472524";
 
+#[cfg(test)]
+#[path = "compose_assets_mount_tests.rs"]
+mod mount_tests;
+#[cfg(test)]
+#[path = "compose_assets_race_tests.rs"]
+mod race_tests;
 #[cfg(test)]
 #[path = "compose_assets_tests.rs"]
 mod tests;
