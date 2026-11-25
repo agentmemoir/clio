@@ -68,4 +68,13 @@ RUN channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' /tmp/rust-toolchain.toml)" \
  && rustup component add $components \
  && rm -f /tmp/rust-toolchain.toml
 
+# Drop root: the build steps above need UID 0, nothing at run time does. The base
+# image ships `ubuntu` at 1000:1000, which matches the common Linux host user, so
+# the read-only checkout bind mount reports no dubious ownership to git.
+# The two Rust trees are handed to that user so cargo can write its registry and
+# rustup its settings; the gain here is losing UID 0 and all capabilities, not a
+# read-only toolchain.
+RUN chown -R ubuntu:ubuntu "${CARGO_HOME}" "${RUSTUP_HOME}"
+USER ubuntu
+
 WORKDIR /workspace
