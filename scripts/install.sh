@@ -149,6 +149,48 @@ verify_manifest() {
         || die "the signature on checksums.txt does not match the key built into this installer. The manifest was changed, or it came from somewhere other than this release. Nothing was installed."
 }
 
+# --- install directory -------------------------------------------------------
+
+# GNU stat and BSD stat disagree on the flag and on the format name for the
+# octal mode, and macOS ships the BSD one. Anything that is not the two fields
+# this expects is an error rather than a mode of zero.
+dir_mode_owner() {
+    if stat -c '%a %u' "$1" >/dev/null 2>&1; then
+        stat_line="$(stat -c '%a %u' "$1")"
+    else
+        stat_line="$(stat -f '%Lp %u' "$1")" || return 1
+    fi
+    case "$stat_line" in
+        [0-7]*" "[0-9]*) printf '%s\n' "$stat_line" ;;
+        *) return 1 ;;
+    esac
+}
+
+# A directory another account can write to lets that account put an entry where
+# this installer is about to write, so it is refused before anything is created.
+# A directory that does not exist yet is judged by the nearest one that does,
+# because that is the one it will be created inside.
+check_install_dir() {
+    probe="$INSTALL_DIR"
+    while [ ! -d "$probe" ]; do
+        case "$probe" in
+            */*) probe="${probe%/*}" ;;
+            *) probe="." ;;
+        esac
+        [ -n "$probe" ] || probe="/"
+    done
+
+    info="$(dir_mode_owner "$probe")" \
+        || die "could not read the permissions of $probe with stat, so this install cannot check that the directory is safe"
+    # The leading 0 makes stat's digits parse as the octal mode they are.
+    perm="$((0${info%% *}))"
+    [ $((perm & 022)) -eq 0 ] \
+        || die "$probe is writable by group or other, so another account could replace what this installer writes. Choose a directory only you can write to and re-run."
+    if [ "${info##* }" != "$(id -u)" ]; then
+        log "warning: $probe is not owned by you, so its owner can change what is installed there"
+    fi
+}
+
 # --- main --------------------------------------------------------------------
 
 main() {
@@ -166,6 +208,8 @@ main() {
     else
         die "HOME is not set, so there is no user directory to install into. Set CLIO_INSTALL_DIR to a directory you own and re-run."
     fi
+
+    check_install_dir
 
     target="$(detect_target)"
     asset="$BIN_NAME-$target"
@@ -225,12 +269,14 @@ release is wrong or the transfer was altered."
         || die "the archive did not contain the expected binary at $BIN_NAME-$target/$BIN_NAME"
 
     mkdir -p "$INSTALL_DIR"
-    # Install to a temporary name in the destination directory and rename, so a
+    # Install to a fresh name in the destination directory and rename, so a
     # download that is interrupted here cannot leave a half-written binary on
-    # the user's PATH under the real name.
-    cp "$workdir/$BIN_NAME-$target/$BIN_NAME" "$INSTALL_DIR/.$BIN_NAME.new"
-    chmod 755 "$INSTALL_DIR/.$BIN_NAME.new"
-    mv "$INSTALL_DIR/.$BIN_NAME.new" "$INSTALL_DIR/$BIN_NAME"
+    # the user's PATH under the real name. mktemp creates that name itself, so
+    # an entry already sitting at a name of this shape is never written through.
+    staging="$(mktemp "$INSTALL_DIR/.$BIN_NAME.new.XXXXXX")"
+    cp "$workdir/$BIN_NAME-$target/$BIN_NAME" "$staging"
+    chmod 755 "$staging"
+    mv "$staging" "$INSTALL_DIR/$BIN_NAME"
 
     log "installed $INSTALL_DIR/$BIN_NAME"
 
