@@ -59,6 +59,25 @@ impl Scratch {
     }
 }
 
+/// Restores a directory's mode when it drops, so a panic cannot leave the
+/// scratch directory unreadable.
+struct ModeGuard<'a> {
+    path: &'a Path,
+    mode: u32,
+}
+
+impl Drop for ModeGuard<'_> {
+    fn drop(&mut self) {
+        let _ = fs::set_permissions(self.path, fs::Permissions::from_mode(self.mode));
+    }
+}
+
+/// A permission refusal is only observable without root, which bypasses the
+/// check. Coverage runs as the runner user.
+fn running_as_root() -> bool {
+    rustix::process::geteuid().is_root()
+}
+
 /// Every `.tmp` sibling in `dir`, sorted.
 fn temp_siblings_in(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = fs::read_dir(dir)
@@ -185,5 +204,216 @@ fn a_new_file_is_written_with_the_default_mode() {
     assert!(
         temp_siblings_in(&scratch.root).is_empty(),
         "a successful write leaves no temp sibling"
+    );
+}
+
+/// The error detail of a refused write, for a message assertion.
+fn io_detail(err: WriteError) -> String {
+    match err {
+        WriteError::Io { detail } => detail,
+        WriteError::Unparseable { .. } => panic!("expected an I/O error"),
+    }
+}
+
+/// A directory at the held entry is refused, and it stays a directory.
+#[test]
+fn a_directory_at_the_target_entry_is_refused() {
+    let scratch = Scratch::new("entry-dir");
+    let target = scratch.path("config.json");
+    fs::create_dir(&target).expect("a directory can be made at the entry");
+
+    let anchored = AnchoredTarget::open(&target).expect("the parent directory opens once");
+    let err = anchored
+        .replace(b"{}")
+        .expect_err("a directory final entry is refused");
+
+    assert!(
+        io_detail(err).contains("not a regular file"),
+        "the refusal names the entry kind"
+    );
+    assert!(target.is_dir(), "the refused entry is left in place");
+    assert!(
+        temp_siblings_in(&scratch.root).is_empty(),
+        "a refused write leaves no temp sibling"
+    );
+}
+
+/// A FIFO at the held entry is refused before any open can block on it.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[test]
+fn a_fifo_at_the_target_entry_is_refused() {
+    let scratch = Scratch::new("entry-fifo");
+    let target = scratch.path("config.json");
+    let dir = rustix::fs::open(&scratch.root, dir_flags(), rustix::fs::Mode::empty())
+        .expect("the scratch directory opens");
+    rustix::fs::mkfifoat(&dir, "config.json", rustix::fs::Mode::from_raw_mode(0o644))
+        .expect("a fifo can be made at the entry");
+    drop(dir);
+
+    let anchored = AnchoredTarget::open(&target).expect("the parent directory opens once");
+    let err = anchored
+        .replace(b"{}")
+        .expect_err("a fifo final entry is refused");
+
+    assert!(io_detail(err).contains("not a regular file"));
+    assert!(
+        temp_siblings_in(&scratch.root).is_empty(),
+        "a refused write leaves no temp sibling"
+    );
+}
+
+/// An existing regular file keeps its own mode, not the default.
+#[test]
+fn an_existing_regular_file_keeps_its_mode() {
+    let scratch = Scratch::new("existing-mode");
+    let target = scratch.write("config.json", "old");
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o600))
+        .expect("the fixture mode can be narrowed");
+
+    let anchored = AnchoredTarget::open(&target).expect("the parent directory opens once");
+    anchored.replace(b"new").expect("the entry is replaced");
+
+    assert_eq!(fs::read(&target).expect("the entry can be read"), b"new");
+    let mode = fs::metadata(&target)
+        .expect("the entry exists")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600, "the entry keeps its own mode");
+}
+
+/// `remove_temp` deletes an existing sibling and tolerates a missing one.
+#[test]
+fn remove_temp_deletes_once_and_tolerates_absence() {
+    let scratch = Scratch::new("remove-temp");
+    let dir = rustix::fs::open(&scratch.root, dir_flags(), rustix::fs::Mode::empty())
+        .expect("the scratch directory opens");
+    let temp = scratch.write("orphan.tmp", "bytes");
+    let name = std::ffi::OsStr::new("orphan.tmp");
+
+    remove_temp(&dir, name);
+    assert!(!temp.exists(), "the temp sibling is removed");
+
+    remove_temp(&dir, name);
+    assert_eq!(
+        fs::read_dir(&scratch.root)
+            .expect("the scratch directory can be read")
+            .count(),
+        0,
+        "a missing temp sibling is tolerated"
+    );
+}
+
+/// A parent directory that does not exist is an open error.
+#[test]
+fn open_fails_when_the_parent_directory_does_not_exist() {
+    let scratch = Scratch::new("open-missing");
+    let target = scratch.path("absent").join("config.json");
+    let err = AnchoredTarget::open(&target)
+        .err()
+        .expect("a missing parent is refused");
+
+    assert!(
+        io_detail(err).contains("failed to open"),
+        "the failure names the open step"
+    );
+}
+
+/// An entry name over the filesystem limit fails the final-entry inspection.
+#[test]
+fn an_entry_name_that_is_too_long_is_an_inspect_error() {
+    let scratch = Scratch::new("long-name");
+    let target = scratch.path(&"x".repeat(300));
+    let anchored = AnchoredTarget::open(&target).expect("the parent directory opens once");
+    let err = anchored
+        .replace(b"{}")
+        .expect_err("an over-long entry name cannot be inspected");
+
+    assert!(
+        io_detail(err).contains("failed to inspect"),
+        "the failure names the inspect step"
+    );
+}
+
+/// A directory that loses write permission fails temp creation, and the mode
+/// is restored whether the assertions pass or not.
+#[test]
+fn replace_fails_when_the_directory_loses_write_permission() {
+    if running_as_root() {
+        return;
+    }
+    let scratch = Scratch::new("read-only-dir");
+    let target = scratch.path("config.json");
+    let anchored = AnchoredTarget::open(&target).expect("the parent directory opens once");
+
+    fs::set_permissions(&scratch.root, fs::Permissions::from_mode(0o500))
+        .expect("the directory can be made read-only");
+    let guard = ModeGuard {
+        path: &scratch.root,
+        mode: 0o755,
+    };
+    let err = anchored
+        .replace(b"{}")
+        .expect_err("a read-only directory cannot hold a temp sibling");
+
+    fs::set_permissions(&scratch.root, fs::Permissions::from_mode(0o755))
+        .expect("the directory mode is restored");
+    drop(guard);
+    assert!(
+        io_detail(err).contains("failed to create"),
+        "the failure names the create step"
+    );
+    assert!(
+        temp_siblings_in(&scratch.root).is_empty(),
+        "a failed create leaves no temp sibling"
+    );
+}
+
+/// A read-only file maps a write failure and returns before the rename.
+#[test]
+fn write_and_sync_at_maps_a_write_failure() {
+    let scratch = Scratch::new("write-fail");
+    let target = scratch.write("read-only.json", "old");
+    let mut file = fs::File::open(&target).expect("the fixture opens read-only");
+    let err = write_and_sync_at(
+        &mut file,
+        b"new",
+        rustix::fs::Mode::from_raw_mode(0o644),
+        &target,
+    )
+    .expect_err("a read-only file cannot be written");
+
+    assert!(
+        io_detail(err).contains("failed to write"),
+        "the failure names the write step"
+    );
+}
+
+/// A FIFO accepts the write and rejects the sync, which maps to the sync step.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[test]
+fn write_and_sync_at_maps_a_sync_failure() {
+    let scratch = Scratch::new("sync-fail");
+    let target = scratch.path("pipe");
+    let dir = rustix::fs::open(&scratch.root, dir_flags(), rustix::fs::Mode::empty())
+        .expect("the scratch directory opens");
+    rustix::fs::mkfifoat(&dir, "pipe", rustix::fs::Mode::from_raw_mode(0o644))
+        .expect("a fifo can be made");
+    drop(dir);
+
+    let fd = rustix::fs::open(&target, rustix::fs::OFlags::RDWR, rustix::fs::Mode::empty())
+        .expect("a fifo opens read-write without blocking");
+    let mut file = std::fs::File::from(fd);
+    let err = write_and_sync_at(
+        &mut file,
+        b"bytes",
+        rustix::fs::Mode::from_raw_mode(0o644),
+        &target,
+    )
+    .expect_err("a fifo cannot be synced");
+
+    assert!(
+        io_detail(err).contains("failed to sync"),
+        "the failure names the sync step"
     );
 }

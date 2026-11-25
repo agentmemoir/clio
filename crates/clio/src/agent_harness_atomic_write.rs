@@ -271,3 +271,7 @@ fn set_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
 #[cfg(all(test, unix))]
 #[path = "agent_harness_atomic_write_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "agent_harness_atomic_write_branch_tests.rs"]
+mod branch_tests;
