@@ -33,7 +33,7 @@ name: CI
 on:
   push:
     branches: [master, main]
-    # This list is identical in all three workflow files and must stay that way.
+    # The shared entries plus `.github/workflows/**`, so an edit to any workflow file runs the workflow-expression check.
     paths:
       - 'crates/**'
       - 'Cargo.toml'
@@ -53,7 +53,7 @@ on:
       - '.github/workflows/**'
   pull_request:
     branches: [master, main]
-    # This list is identical in all three workflow files and must stay that way.
+    # The shared entries plus `.github/workflows/**`, so an edit to any workflow file runs the workflow-expression check.
     paths:
       - 'crates/**'
       - 'Cargo.toml'
