@@ -14,6 +14,8 @@
 //!
 //! ## Does not own
 //! - Which archives are selected (see `prune_tests`)
+//! - The containment cases that need a real directory hierarchy (see
+//!   `containment_tests`)
 //! - The selection itself (see `prune`) and the removal rules (see `prune_delete`)
 //!
 //! ## Boundary
@@ -30,7 +32,7 @@ use std::path::Path;
 
 /// One archive, with its manifest time rewritten so the listing order is
 /// testable without waiting for the clock.
-fn archive_at(scratch: &Scratch, seed: u8, created_at: &str, label: &str) -> PathBuf {
+pub(super) fn archive_at(scratch: &Scratch, seed: u8, created_at: &str, label: &str) -> PathBuf {
     let payload = staged_payload(scratch.path(), seed);
     let mut req = request(scratch.path(), payload);
     req.label = Some(label.to_owned());
@@ -40,7 +42,7 @@ fn archive_at(scratch: &Scratch, seed: u8, created_at: &str, label: &str) -> Pat
 }
 
 /// The plan a prune would really build over `dir`, keep window and all.
-fn plan_over(dir: &Path, keep: usize) -> PrunePlan {
+pub(super) fn plan_over(dir: &Path, keep: usize) -> PrunePlan {
     let rows = list_snapshot_rows(dir, None).expect("list the backup directory");
     select(&rows, &crate::prune_kind::LinkedPaths::among(&rows), keep)
         .expect("a positive keep count is accepted")
@@ -48,7 +50,7 @@ fn plan_over(dir: &Path, keep: usize) -> PrunePlan {
 
 /// One hand-built candidate, for the cases that are about one path rather than
 /// about a keep window.
-fn candidate(id: &str, path: &Path, listed_bytes: u64) -> ArchiveRef {
+pub(super) fn candidate(id: &str, path: &Path, listed_bytes: u64) -> ArchiveRef {
     ArchiveRef {
         id: id.to_owned(),
         path: path.to_path_buf(),
@@ -61,7 +63,7 @@ fn candidate(id: &str, path: &Path, listed_bytes: u64) -> ArchiveRef {
 
 /// A plan whose only targets are `candidates`, plus `kept_bytes` of archives it
 /// keeps, so the listing total covers files this run must not touch.
-fn plan_with(candidates: Vec<ArchiveRef>, kept_bytes: u64) -> PrunePlan {
+pub(super) fn plan_with(candidates: Vec<ArchiveRef>, kept_bytes: u64) -> PrunePlan {
     let reclaimable_bytes = candidates.iter().map(|c| c.listed_bytes).sum();
     PrunePlan {
         keep: 1,
@@ -74,7 +76,7 @@ fn plan_with(candidates: Vec<ArchiveRef>, kept_bytes: u64) -> PrunePlan {
 }
 
 /// The size of a file as it is on disk right now.
-fn file_len(path: &Path) -> u64 {
+pub(super) fn file_len(path: &Path) -> u64 {
     std::fs::metadata(path).map_or(0, |metadata| metadata.len())
 }
 
@@ -88,7 +90,7 @@ fn archives_in(dir: &Path) -> Vec<String> {
 }
 
 /// The report's candidates as `(id, state)`, in the order it lists them.
-fn states_of(report: &PruneReport) -> Vec<(&str, CandidateState)> {
+pub(super) fn states_of(report: &PruneReport) -> Vec<(&str, CandidateState)> {
     report
         .candidates
         .iter()
@@ -97,7 +99,7 @@ fn states_of(report: &PruneReport) -> Vec<(&str, CandidateState)> {
 }
 
 /// The reason an outcome carries, or the empty string when it carries none.
-fn detail_of(outcome: &CandidateOutcome) -> &str {
+pub(super) fn detail_of(outcome: &CandidateOutcome) -> &str {
     outcome.detail.as_deref().unwrap_or_default()
 }
 
@@ -241,6 +243,31 @@ fn a_symlinked_archive_is_reported_and_its_target_is_never_removed() {
     assert!(link.symlink_metadata().is_ok(), "the link is still there");
     assert_eq!(file_len(&target), target_bytes, "the target is whole");
     assert_eq!(report.reclaimed_bytes, 0, "nothing was unlinked");
+
+    // The same refusal when the plan was built over the real archive and the entry
+    // was replaced by a link only afterwards: the inspection the run makes is the
+    // one that decides, so the swap is seen and the target behind it survives.
+    let swapped = Scratch::new("prune-link-swapped");
+    let stashed = elsewhere.join("stashed.cliobak.tar.gz");
+    let doomed = archive_at(&swapped, 85, "2026-04-04T00:00:00Z", "doomed");
+    let swapped_plan = plan_with(vec![candidate("doomed", &doomed, file_len(&doomed))], 0);
+    std::fs::rename(&doomed, &stashed).expect("move the archive out after the plan was built");
+    let stashed_bytes = file_len(&stashed);
+    std::os::unix::fs::symlink(&stashed, &doomed).expect("a link where the archive was");
+
+    let swapped_report = delete(swapped.path(), &swapped_plan);
+
+    assert_eq!(
+        states_of(&swapped_report),
+        vec![("doomed", CandidateState::Symlink)],
+        "the entry inspected at removal time is the link"
+    );
+    assert_eq!(swapped_report.reclaimed_bytes, 0, "nothing was unlinked");
+    assert_eq!(
+        file_len(&stashed),
+        stashed_bytes,
+        "the link's target keeps every byte"
+    );
 }
 
 /// Unix-gated because it names a linked archive, and only Unix has links. The

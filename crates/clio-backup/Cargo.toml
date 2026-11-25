@@ -11,6 +11,11 @@ description = "Backup archive container, manifest, and snapshot inventory for Ag
 clio-config = { workspace = true }
 clio-types = { workspace = true }
 flate2 = { workspace = true }
+# Its posix `openat`, `fstatat`, and `unlinkat` only, all under `cfg(unix)`, so the
+# held directory and the identity confirm have a safe wrapper. Unconditional
+# because the workspace already carries it, and the `cfg(unix)` uses pick it up
+# from here. This crate forbids unsafe code, so no `libc` function is called.
+rustix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
