@@ -86,6 +86,15 @@
       "candidate_sha256": "4580e1a598ed2996226b3af163084ba8b3850be8332668e42b0fd93564f33b2f",
       "max_bytes": 139124,
       "max_tokens": 29744
+    },
+    {
+      "decision_id": "mcp-sync-serve-public-bind-description-2026-11-25",
+      "date": "2026-11-25",
+      "reason": "The sync_serve description now states that a non-loopback bind requires the sync.allow_public_bind setting and a credential store in every mode, dev included, so the canonical tools array grows to 139225 bytes and 29767 cl100k_base tokens. This record covers the new candidate digest at exactly the measured size.",
+      "base_commit": "44fd7d12db23683cc047925cd41dcd8c7533e9b3",
+      "candidate_sha256": "8040ae472d76d5c6e1513ae6455ae3f4da5506411691d81625199dd8ba65c10c",
+      "max_bytes": 139225,
+      "max_tokens": 29767
     }
   ]
 }
