@@ -272,8 +272,8 @@ fn checksum(bank: &str, seq: i64) -> String {
     digest[..12].to_owned()
 }
 
-/// Deterministic LWW comparison: the later writer-stamp instant wins, whichever
-/// encoding carries it; ties compare origin admission scores, then `device_id`.
+/// Deterministic LWW: the later writer-stamp instant wins whichever encoding
+/// carries it; an unplaceable side falls back to bytes; then score, then `device_id`.
 #[must_use]
 pub fn lww_compare(
     a_time: &str,

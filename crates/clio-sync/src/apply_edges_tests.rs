@@ -25,8 +25,8 @@ use crate::apply::ApplyOutcome;
 use crate::apply_fixtures::{apply, assoc, edge_value, env, fixture, item};
 use crate::crypto::SyncCipherKey;
 use crate::protocol::{
-    ENTITY_KIND_ASSOC, ENTITY_KIND_TRIPLE, OP_INVALIDATE, OP_PRUNE, OP_UPSERT, SyncContent,
-    SyncMutation,
+    ENTITY_KIND_ASSOC, ENTITY_KIND_TRIPLE, OP_INVALIDATE, OP_PRUNE, OP_UPSERT,
+    REASON_MALFORMED_STAMP, SyncContent, SyncMutation,
 };
 use clio_store::Store as _;
 use clio_store::SyncStore as _;
@@ -140,6 +140,50 @@ fn assoc_upsert_then_stale_writer_loses_then_prune_removes() {
         ApplyOutcome::Applied
     );
     assert!(store.get_assoc_edge(bank, "edge-1").unwrap().is_none());
+}
+
+/// The edge counterpart of the item payload rule: a peer-supplied
+/// `last_updated_at` this build cannot place must be refused before the edge
+/// write, so the stored edge never carries a stamp no later write can beat.
+#[test]
+fn a_peer_payload_edge_stamp_must_be_placeable_before_it_is_stored() {
+    let (store, _kms) = fixture();
+    let bank = "b-edge-payload";
+    seed_endpoints(&store, bank);
+    let canonical = env(
+        "m-e-canonical",
+        bank,
+        ENTITY_KIND_ASSOC,
+        "edge-1",
+        OP_UPSERT,
+        "2026-02-02T00:00:00Z",
+        "dev-a",
+        edge_value(bank, "edge-1", "n-1", "n-2", "2026-02-02T00:00:00Z"),
+    );
+    assert_eq!(apply(&store, None, &canonical), ApplyOutcome::Applied);
+    let mut value = edge_value(bank, "edge-1", "n-1", "n-2", "2026-02-03T00:00:00Z");
+    value["last_updated_at"] = json!("zzzzzzzzzzzzzzzzzzzz");
+    let poison = env(
+        "m-e-poison",
+        bank,
+        ENTITY_KIND_ASSOC,
+        "edge-1",
+        OP_UPSERT,
+        "2026-02-03T00:00:00Z",
+        "dev-z",
+        value,
+    );
+    assert_eq!(
+        apply(&store, None, &poison),
+        ApplyOutcome::DeadLettered {
+            reason_code: REASON_MALFORMED_STAMP.into()
+        }
+    );
+    let stored = store
+        .get_assoc_edge(bank, "edge-1")
+        .unwrap()
+        .expect("the canonical edge stays");
+    assert_eq!(stored.last_updated_at, "2026-02-02T00:00:00Z");
 }
 
 #[test]

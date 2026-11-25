@@ -165,7 +165,7 @@ pub(crate) fn canonical_writer_stamp(raw: &str) -> Result<String, AmError> {
 /// The frame around the value in [`refused_stamp`]'s sentence, in one place so
 /// the writer and the reader beside it cannot drift apart.
 const REFUSAL_BEFORE: &str = "transaction_time `";
-const REFUSAL_AFTER: &str = "` is not a timestamp this build can place";
+const REFUSAL_AFTER: &str = "` is not in a writer-stamp form this build accepts";
 
 /// The refusal [`canonical_writer_stamp`] raises for a stamp no clock reading
 /// can place: `InvalidArgument` naming the field and the value.

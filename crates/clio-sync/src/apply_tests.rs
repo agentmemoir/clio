@@ -24,7 +24,7 @@
 
 use crate::apply::ApplyOutcome;
 use crate::apply_fixtures::{apply, apply_at_epoch, env, fixture, item_value, receipt, upsert};
-use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT};
+use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, REASON_MALFORMED_STAMP};
 use clio_store::{DeadLetterStatus, SqliteStore, Store, SyncStore};
 use serde_json::json;
 
@@ -83,6 +83,47 @@ fn t24_03_lww_later_stamp_wins_loser_conflict_recorded() {
         .expect("journaled");
     assert!(row.content_sealed.is_some());
     assert!(!row.client_encrypted);
+}
+
+/// The store keeps the payload's `updated_at` verbatim as the row's stamp, so a
+/// peer-supplied value this build cannot place must be refused before any
+/// write: otherwise it becomes the stored side of every later comparison.
+#[test]
+fn a_peer_payload_updated_at_must_be_placeable_before_it_is_stored() {
+    let (store, _kms) = fixture();
+    let bank = "b-payload";
+    let canonical = upsert(
+        "m-canonical",
+        bank,
+        "2026-01-01T00:00:00Z",
+        "dev-a",
+        "canonical",
+    );
+    assert_eq!(apply(&store, None, &canonical), ApplyOutcome::Applied);
+    let mut value = item_value(bank, "i-1", "s1", "2026-01-02T00:00:00Z", "poison");
+    value["updated_at"] = json!("zzzzzzzzzzzzzzzzzzzz");
+    let poison = env(
+        "m-poison",
+        bank,
+        ENTITY_KIND_ITEM,
+        "i-1",
+        OP_UPSERT,
+        "2026-01-02T00:00:00Z",
+        "dev-z",
+        value,
+    );
+    assert_eq!(
+        apply(&store, None, &poison),
+        ApplyOutcome::DeadLettered {
+            reason_code: REASON_MALFORMED_STAMP.into()
+        }
+    );
+    let row = store
+        .get_memory_item(bank, "i-1")
+        .unwrap()
+        .expect("the canonical row stays");
+    assert_eq!(row.gist.as_deref(), Some("canonical"));
+    assert_eq!(row.updated_at, "2026-01-01T00:00:00Z");
 }
 
 #[test]
