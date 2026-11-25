@@ -60,10 +60,14 @@ ureq = { workspace = true }
 sha2 = { workspace = true }
 # `clio help --markdown` holds the `--out` directory open and does every later
 # step relative to that descriptor, so a component swapped for a symlink after
-# the check cannot redirect a generated page. A safe wrapper, unlike a direct
-# `libc` call, which this crate cannot make under `unsafe_code = "deny"`. Named
-# unconditionally: the held descriptor is the only form of that write, and a
-# target without descriptor-relative calls has no held directory to name.
+# the check cannot redirect a generated page. The foreign-config write opens
+# the target's parent directory once and does every later step through that
+# descriptor, so the entry it judges is the entry it replaces. `openat`,
+# `statat`, `renameat`, and `unlinkat` are the whole surface; std has no
+# descriptor-relative form. A safe wrapper, unlike a direct `libc` call, which
+# this crate cannot make under `unsafe_code = "deny"`. Named unconditionally:
+# the held descriptor is the only form of these writes, and a target without
+# descriptor-relative calls has no held directory to name.
 rustix = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

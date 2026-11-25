@@ -11,15 +11,15 @@
 //! ## Owns
 //! - Timestamped same-directory backup of a config before it is edited
 //! - Parse-refusal: an unparseable file is left byte-identical, with a snippet
-//! - Atomic replace through a same-directory temp sibling and rename
 //! - Removing one named server entry under every caller-supplied key prefix
 //!   that holds it
-//! - Atomic replace through a same-directory temp sibling and rename: the
-//!   temp file is created with the target mode, synced, then renamed
+//! - Resolving a symlinked target once, so the link itself survives the edit
 //!
 //! ## Does not own
 //! - Which harness uses which config file or key prefix; the caller decides
 //! - Parsing or writing a non-JSON format; only JSON is handled
+//! - Judging and replacing one entry through a directory descriptor; see
+//!   `agent_harness_atomic_write`
 //! - Deciding when an edit runs, or reporting its result to the user
 //!
 //! ## Boundary
@@ -33,7 +33,8 @@
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::agent_harness_atomic_write::AnchoredTarget;
 
 /// Why a config edit did not happen.
 #[derive(Debug)]
@@ -117,36 +118,46 @@ pub(crate) fn remove_server_entry(
     removed
 }
 
-/// Write `value` to `path` atomically, keeping `path`'s permission bits.
+/// Write `value` to `path` atomically, keeping the target's permission bits.
 ///
-/// The whole file is re-serialized with `serde_json`, so key order and
-/// whitespace in the source may change: every value and entry is preserved by
-/// parsed value, not byte-identical. The temp file is a sibling, so the rename
-/// stays on one filesystem. It is created with `path`'s mode before any byte
-/// is written, then synced to disk before the rename, so the file never exists
-/// with wider permissions. A new file gets mode `0o644`. When `path` is a
-/// symlink, its target is edited and the link itself is kept. On a rename
-/// failure the temp file is removed.
+/// The file is re-serialized with `serde_json`, so key order and whitespace may
+/// change while every value is preserved by parsed value. The temp sibling is
+/// created with the target's mode before any byte is written and synced before
+/// the rename, so the file never exists with wider permissions. A new file gets
+/// mode `0o644`; a symlinked path edits its target and keeps the link; a final
+/// entry that is not a regular file is refused; a failed write leaves no temp.
 ///
 /// # Errors
-/// Serializing, creating the temp file, writing it, setting its mode,
-/// syncing it, or the rename fails.
+/// Serializing, opening the parent directory, inspecting the final entry,
+/// creating the temp file, writing it, setting its mode, syncing it, or the
+/// rename fails.
 pub(crate) fn write_json_atomic(path: &Path, value: &Value) -> Result<(), WriteError> {
-    let path = effective_path(path)?;
+    write_json_atomic_resolved(&effective_path(path)?, value)
+}
+
+/// Write `value` to `path`, which already has its symlinks resolved.
+///
+/// The resolved target is held once: on Unix the parent directory descriptor
+/// plus the final entry name, elsewhere the path. On Unix every step after the
+/// open uses the descriptor and the entry name, so the entry that is judged is
+/// the entry that is replaced. A swap of a parent component before the open is
+/// out of scope: it needs write access above the target directory, and it gains
+/// no privilege the attacker does not already hold.
+///
+/// # Errors
+/// Serializing the value fails, or the atomic write fails.
+fn write_json_atomic_resolved(path: &Path, value: &Value) -> Result<(), WriteError> {
+    let target = AnchoredTarget::open(path)?;
+    write_value(&target, path, value)
+}
+
+/// Serialize `value` and write it through `target`, the entry already held
+/// open.
+fn write_value(target: &AnchoredTarget, path: &Path, value: &Value) -> Result<(), WriteError> {
     let text = serde_json::to_string_pretty(value).map_err(|e| WriteError::Io {
         detail: format!("failed to serialize {}: {e}", path.display()),
     })?;
-    let mode = existing_mode(&path).unwrap_or(0o644);
-    let (tmp, file) = create_temp(&path, mode)?;
-    if let Err(err) = write_and_sync(file, text.as_bytes(), mode, &tmp) {
-        let _ = fs::remove_file(&tmp);
-        return Err(err);
-    }
-    if let Err(e) = fs::rename(&tmp, &path) {
-        let _ = fs::remove_file(&tmp);
-        return Err(io_error("replace", &path, &e));
-    }
-    Ok(())
+    target.replace(text.as_bytes())
 }
 
 /// Remove Clio's entry from a JSON config file.
@@ -157,9 +168,11 @@ pub(crate) fn write_json_atomic(path: &Path, value: &Value) -> Result<(), WriteE
 /// atomically: a parseable file is re-serialized, so key order and whitespace
 /// may change while every value and entry is preserved by parsed value, not
 /// byte-identical. A symlinked config is followed to its target, so the link
-/// itself survives. An unparseable file is refused byte-identical and its
-/// refusal combines the caller's manual `snippet` with the offending line's
-/// number, never the line's bytes.
+/// itself survives; the final entry is resolved once and replaced through the
+/// handle opened for it (a directory descriptor on Unix), so an entry swapped
+/// in after the resolution cannot redirect the write. An unparseable file is
+/// refused byte-identical and its refusal combines the caller's manual
+/// `snippet` with the offending line's number, never the line's bytes.
 ///
 /// # Errors
 /// A read, backup, or write failure, or an unparseable file.
@@ -187,10 +200,11 @@ pub(crate) fn remove_server_from_file(
     if !remove_server_entry(&mut value, key_prefixes, server_name) {
         return Ok(RemoveOutcome::Absent);
     }
+    let target = AnchoredTarget::open(&path)?;
     let backup = backup_file(&path)?.ok_or_else(|| WriteError::Io {
         detail: format!("{} vanished before it could be backed up", path.display()),
     })?;
-    write_json_atomic(&path, &value)?;
+    write_value(&target, &path, &value)?;
     Ok(RemoveOutcome::Removed { backup })
 }
 
@@ -225,27 +239,19 @@ fn offending_line_note(line: usize) -> String {
     format!("(offending line: {line})")
 }
 
-fn file_name(path: &Path) -> String {
+/// The base name of `path`, for naming a backup or a temp sibling beside it.
+pub(crate) fn file_name(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("config.json")
         .to_owned()
 }
 
-fn unix_nanos() -> u128 {
+/// The current time in nanoseconds since the Unix epoch, or zero before it.
+pub(crate) fn unix_nanos() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos())
-}
-
-/// A hidden temp sibling beside `path`, unique across threads and processes.
-fn temp_sibling(path: &Path) -> PathBuf {
-    static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
-    let name = file_name(path);
-    let pid = std::process::id();
-    let nanos = unix_nanos();
-    let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    path.with_file_name(format!(".{name}.{pid}.{nanos}.{seq}.tmp"))
 }
 
 /// The file `path` names with symlinks resolved: when `path` itself is a
@@ -279,89 +285,17 @@ fn effective_path(path: &Path) -> Result<PathBuf, WriteError> {
     })
 }
 
-/// Create a new temp sibling of `path` with `mode` already applied, so the
-/// file never exists with wider permissions. The name is unique across threads
-/// and processes; a leftover name from a crashed run is skipped.
-fn create_temp(path: &Path, mode: u32) -> Result<(PathBuf, std::fs::File), WriteError> {
-    for _ in 0..10 {
-        let tmp = temp_sibling(path);
-        match open_new(&tmp, mode) {
-            Ok(file) => return Ok((tmp, file)),
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(err) => return Err(io_error("create", &tmp, &err)),
-        }
-    }
-    Err(WriteError::Io {
-        detail: format!("failed to create a temp file beside {}", path.display()),
-    })
-}
-
-#[cfg(unix)]
-fn open_new(tmp: &Path, mode: u32) -> std::io::Result<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(mode)
-        .open(tmp)
-}
-
-#[cfg(not(unix))]
-fn open_new(tmp: &Path, _mode: u32) -> std::io::Result<std::fs::File> {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(tmp)
-}
-
-/// Write `bytes` to the temp `file`, restore the exact mode in case the
-/// process mask narrowed it at creation, and sync to disk before the caller
-/// renames the temp file over its target.
-fn write_and_sync(
-    file: std::fs::File,
-    bytes: &[u8],
-    mode: u32,
-    tmp: &Path,
-) -> Result<(), WriteError> {
-    use std::io::Write;
-    let mut file = file;
-    file.write_all(bytes)
-        .map_err(|e| io_error("write", tmp, &e))?;
-    set_mode(tmp, mode).map_err(|e| io_error("set permissions on", tmp, &e))?;
-    file.sync_all().map_err(|e| io_error("sync", tmp, &e))?;
-    Ok(())
-}
-
-fn io_error(action: &str, path: &Path, err: &std::io::Error) -> WriteError {
+/// A filesystem error named with the path it concerns.
+pub(crate) fn io_error(action: &str, path: &Path, err: &std::io::Error) -> WriteError {
     WriteError::Io {
         detail: format!("failed to {action} {}: {err}", path.display()),
     }
 }
 
-#[cfg(unix)]
-fn existing_mode(path: &Path) -> Option<u32> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::metadata(path)
-        .ok()
-        .map(|meta| meta.permissions().mode() & 0o7777)
-}
-
-#[cfg(not(unix))]
-fn existing_mode(_path: &Path) -> Option<u32> {
-    None
-}
-
-#[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))
-}
-
-#[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
-    Ok(())
-}
-
 #[cfg(test)]
 #[path = "agent_harness_write_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "agent_harness_write_toctou_tests.rs"]
+mod toctou_tests;
