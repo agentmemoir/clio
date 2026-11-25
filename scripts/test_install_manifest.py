@@ -14,7 +14,9 @@ Two groups of cases. The first calls the verifier on its own, through the
 installer against a fixture release: a stub `curl` and `wget` serve files by
 basename from a temp release directory and a stub `uname` fixes the target, so
 `main` runs for real, with no network, and a deleted `verify_manifest` call in
-`main` fails these cases.
+`main` fails these cases. That same harness pins the install step the signature
+guards: a staging name another account planted is not written through, and a
+directory other users can write to is refused before anything is downloaded.
 
 Each case makes a throwaway keypair and copies the installer with its embedded
 key replaced by the throwaway public key, so nothing here depends on the host's
@@ -306,6 +308,104 @@ class ManifestSignatureTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("library mode, so nothing was installed", done.stderr)
         self.assert_nothing_installed(done)
+
+    # --- the install directory and the staging file --------------------------
+
+    def test_a_planted_staging_entry_is_not_followed(self) -> None:
+        release = build_release(self.base, self.key)
+        self.install_dir.mkdir(parents=True)
+        self.install_dir.chmod(0o755)
+        # The fixed name the installer used to write, and a name of the shape it
+        # now asks mktemp for.
+        planted = []
+        for index, name in enumerate((".clio.new", ".clio.new.AAAAAA")):
+            victim = self.base / f"victim-{index}"
+            victim.write_text("original profile\n", encoding="utf-8")
+            victim.chmod(0o600)
+            (self.install_dir / name).symlink_to(victim)
+            planted.append((self.install_dir / name, victim))
+
+        done = self.install(release)
+
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        for entry, victim in planted:
+            self.assertEqual(victim.read_text(encoding="utf-8"), "original profile\n")
+            self.assertEqual(victim.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(entry.is_symlink(), f"{entry.name} was replaced")
+        installed = self.install_dir / "clio"
+        self.assertFalse(
+            installed.is_symlink(), "the installed entry is a link to something else"
+        )
+        self.assertTrue(os.access(installed, os.X_OK), done.stdout + done.stderr)
+
+    def test_a_shared_install_dir_is_refused_before_downloading(self) -> None:
+        release = build_release(self.base, self.key)
+        self.install_dir.mkdir(parents=True)
+        self.install_dir.chmod(0o777)
+
+        done = self.install(release)
+
+        self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("is writable by group or other", done.stderr)
+        self.assertNotIn("downloading", done.stderr)
+        self.assert_nothing_installed(done)
+        self.assertEqual(list(self.install_dir.iterdir()), [])
+
+    def check_install_dir(
+        self, path: Path, prelude: str = ""
+    ) -> subprocess.CompletedProcess[str]:
+        """Source the installer and run its install-directory check on one path."""
+        script = f'. "$1"\nINSTALL_DIR="$2"\n{prelude}check_install_dir\n'
+        env = dict(os.environ)
+        env["CLIO_INSTALL_LIB_ONLY"] = "1"
+        return subprocess.run(
+            [SH, "-c", script, "sh", str(self.installer), str(path)],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+    def test_a_mode_other_users_can_write_to_is_refused(self) -> None:
+        cases = (
+            (0o700, False),
+            (0o750, False),
+            (0o755, False),
+            (0o775, True),
+            (0o777, True),
+        )
+        for mode, refused in cases:
+            shared = self.base / f"mode-{mode:o}"
+            shared.mkdir()
+            shared.chmod(mode)
+            done = self.check_install_dir(shared)
+            self.assertEqual(
+                done.returncode != 0,
+                refused,
+                f"mode {mode:o}: " + done.stdout + done.stderr,
+            )
+
+    def test_stat_output_is_read_as_octal_or_refused(self) -> None:
+        # macOS stat has no -c and spells the mode %Lp, so the digits arrive as
+        # octal text either way, and output that is not a mode and an owner is
+        # an error rather than a directory that passes.
+        for mode, refused in (("700", False), ("775", True), ("not-a-mode", True)):
+            prelude = (
+                f"mode={mode}\n"
+                'stat() { case "$1" in -c) return 1 ;;'
+                ' -f) printf "%s %s\\n" "$mode" "$(id -u)" ;; esac; }\n'
+            )
+            done = self.check_install_dir(self.base / "directory", prelude)
+            self.assertEqual(
+                done.returncode != 0,
+                refused,
+                f"stat output {mode!r}: " + done.stdout + done.stderr,
+            )
+
+    def test_a_directory_owned_by_another_account_warns(self) -> None:
+        done = self.check_install_dir(self.base, 'id() { printf "0\\n"; }\n')
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("is not owned by you", done.stderr)
 
 
 if __name__ == "__main__":

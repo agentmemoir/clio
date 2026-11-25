@@ -10,7 +10,7 @@ name: scoped coverage
 on:
   push:
     branches: [master, main]
-    # This list is identical in all three workflow files and must stay that way.
+    # This list holds the shared entries and does not match `.github/workflows/**`.
     paths:
       - 'crates/**'
       - 'Cargo.toml'
@@ -29,7 +29,7 @@ on:
       - '.github/workflows/secret-service.yml'
   pull_request:
     branches: [master, main]
-    # This list is identical in all three workflow files and must stay that way.
+    # This list holds the shared entries and does not match `.github/workflows/**`.
     paths:
       - 'crates/**'
       - 'Cargo.toml'

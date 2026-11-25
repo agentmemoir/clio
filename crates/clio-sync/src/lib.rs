@@ -156,10 +156,12 @@ pub const SERVE_TTL_DEFAULT_SECS: u64 = 30 * 60;
 /// Default age bound for an applied envelope, in seconds: how far in the past a
 /// writer stamp may sit before this node refuses it.
 ///
-/// `0` bounds nothing, and that is the shipped default on purpose. A sync log is
-/// store-and-forward, so a legitimate backlog outlives any wall-clock window: a
-/// node offline for a day, a restored backup, and a new device replaying a whole
-/// journal all arrive older than five minutes. An age bound cannot tell those
-/// rows from a replay, so it would drop them. An always-online fleet that wants
-/// one sets `sync.max_envelope_skew_secs` to a positive value.
+/// `0` disables the age and future distance bounds, and that is the shipped
+/// default on purpose; a writer stamp this build cannot place is still refused.
+/// A sync log is store-and-forward, so a legitimate backlog outlives any
+/// wall-clock window: a node offline for a day, a restored backup, and a new
+/// device replaying a whole journal all arrive older than five minutes. An age
+/// bound cannot tell those rows from a replay, so it would drop them. An
+/// always-online fleet that wants one sets `sync.max_envelope_skew_secs` to a
+/// positive value.
 pub const ENVELOPE_SKEW_DEFAULT_SECS: u64 = 0;

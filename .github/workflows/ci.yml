@@ -33,7 +33,7 @@ name: CI
 on:
   push:
     branches: [master, main]
-    # This list is identical in all three workflow files and must stay that way.
+    # The shared entries plus `.github/workflows/**`, so an edit to any workflow file runs the workflow-expression check.
     paths:
       - 'crates/**'
       - 'Cargo.toml'
@@ -50,9 +50,10 @@ on:
       - '.github/workflows/ci.yml'
       - '.github/workflows/scoped-coverage.yml'
       - '.github/workflows/secret-service.yml'
+      - '.github/workflows/**'
   pull_request:
     branches: [master, main]
-    # This list is identical in all three workflow files and must stay that way.
+    # The shared entries plus `.github/workflows/**`, so an edit to any workflow file runs the workflow-expression check.
     paths:
       - 'crates/**'
       - 'Cargo.toml'
@@ -69,6 +70,7 @@ on:
       - '.github/workflows/ci.yml'
       - '.github/workflows/scoped-coverage.yml'
       - '.github/workflows/secret-service.yml'
+      - '.github/workflows/**'
 
 env:
   CARGO_TERM_COLOR: always
@@ -345,6 +347,13 @@ jobs:
       - name: Toolchain pin check
         if: always()
         run: make scripts-check-toolchain-pin
+
+      # Whether a `run:` body holds a `${{ ... }}` expression. The engine expands
+      # one before the shell sees the line, so the command the runner executes is
+      # not the command in the file; this step answers before the push.
+      - name: Workflow expression check
+        if: always()
+        run: make scripts-check-workflow-expressions
 
       - name: Span grounding self-check
         if: always()

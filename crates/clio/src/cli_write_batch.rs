@@ -28,7 +28,14 @@ use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
 use crate::cli_read::{CliIo, base_args};
 use crate::cli_write_group::{Refusal, WriteCall, WriteGroup};
+use clio_store::MAX_BATCH_OPS;
 use serde_json::Value;
+
+/// What a caller can do about an operations document that is too large for this
+/// command. The batch commits as one transaction, so splitting the document
+/// across runs would apply it in pieces rather than atomically: the honest
+/// alternative is fewer operations in this batch, not two batches.
+const TOO_LARGE: &str = "send fewer operations in this batch: a batch commits as one transaction, so splitting it across runs would not apply it atomically";
 
 /// The atomic batch write command.
 pub(crate) struct BatchWriteGroup;
@@ -103,15 +110,30 @@ fn batch_call(
                     "try 'clio batch --file - < ops.json'",
                 ));
             };
-            std::io::read_to_string(stdin).map_err(|error| {
-                CliError::usage(format!("`batch --file -` is not readable: {error}"))
-            })?
+            crate::cli_read_cap::read_document(stdin, "`batch --file -`", TOO_LARGE)?
         }
-        other => std::fs::read_to_string(other).map_err(|error| {
-            CliError::usage(format!("--file `{other}` is not readable: {error}"))
-        })?,
+        other => {
+            let what = format!("--file `{other}`");
+            crate::cli_read_cap::read_document_file(other, &what, TOO_LARGE)?
+        }
     };
     let operations = parse_operations(&raw)?;
+    // The batch tool refuses more than `MAX_BATCH_OPS` operations itself, but
+    // only after the document reaches it. Refuse the same count here, so the
+    // oversized document is not carried any further. `MAX_BATCH_OPS` is the
+    // right bound for this command: it is the atomic executor's own cap, and a
+    // second, looser number here would let a document through that the executor
+    // must then refuse. It is also far below the shared entry cap, so that cap
+    // needs no separate check on this path.
+    if operations.len() > MAX_BATCH_OPS {
+        return Err(CliError::usage_hint(
+            format!(
+                "`batch` carries {} operations, over the {MAX_BATCH_OPS}-operation cap",
+                operations.len()
+            ),
+            TOO_LARGE,
+        ));
+    }
     let mut args = base_args(parsed);
     args.insert("operations".into(), Value::Array(operations));
     if parsed.has("dry-run") {
@@ -167,8 +189,11 @@ fn parse_operations(raw: &str) -> Result<Vec<Value>, CliError> {
     })?;
     match value {
         Value::Array(operations) => Ok(operations),
-        Value::Object(fields) => match fields.get("operations") {
-            Some(Value::Array(operations)) => Ok(operations.clone()),
+        // The map is owned here, so the array is taken out of it instead of
+        // copied: a second copy of every operation is exactly the memory the
+        // input cap exists to bound.
+        Value::Object(mut fields) => match fields.remove("operations") {
+            Some(Value::Array(operations)) => Ok(operations),
             Some(_) => Err(CliError::usage(
                 "--file `operations` must be a JSON array of `{tool, params}` operations",
             )),

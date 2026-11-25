@@ -143,7 +143,7 @@ pub(crate) fn quarantine_stale(
         None => (
             REASON_MALFORMED_STAMP,
             format!(
-                "refused malformed stamp: writer stamp {:?} names no instant this build can place, at {at}",
+                "refused malformed stamp: writer stamp {:?} is not in a writer-stamp form this build accepts, at {at}",
                 m.transaction_time
             ),
         ),
@@ -158,6 +158,34 @@ pub(crate) fn quarantine_stale(
         reason_code,
     )?;
     Ok(outcome)
+}
+
+/// Quarantine an item or edge whose payload stamp is not in a writer-stamp form
+/// this build accepts, before the value can be stored as the row's stamp.
+///
+/// The refusal names the field and the value, so an operator can see which
+/// payload carried it.
+///
+/// # Errors
+/// Storage failures.
+pub(crate) fn malformed_payload_stamp(
+    engine: &ApplyEngine<'_>,
+    m: &SyncMutation,
+    envelope_json: &str,
+    field: &str,
+    value: &str,
+) -> Result<ApplyOutcome, AmError> {
+    let detail = format!(
+        "refused malformed stamp: {field} {value:?} is not in a writer-stamp form this build accepts"
+    );
+    quarantine(
+        engine,
+        &m.bank,
+        m,
+        envelope_json,
+        REASON_MALFORMED_STAMP,
+        &detail,
+    )
 }
 
 /// Bump the bank's refusal count and write the last-refusal line. The count is

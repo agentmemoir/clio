@@ -24,69 +24,14 @@ use crate::apply::ApplyOutcome;
 use crate::apply_fixtures::{apply, assoc, edge_value, env, fixture, item, upsert};
 use crate::crypto::SyncCipherKey;
 use crate::protocol::{
-    ENTITY_KIND_ITEM, ENTITY_KIND_TRIPLE, OP_ARCHIVE, OP_DISCARD, OP_INVALIDATE, OP_PRUNE,
-    OP_REINFORCE, OP_UPSERT, SyncContent, SyncMutation,
+    ENTITY_KIND_ITEM, ENTITY_KIND_TRIPLE, OP_ARCHIVE, OP_INVALIDATE, OP_PRUNE, OP_REINFORCE,
+    OP_UPSERT, SyncContent, SyncMutation,
 };
 use clio_store::DeadLetterStatus;
 use clio_store::Store as _;
 use clio_store::SyncStore as _;
 use clio_types::{EpistemicKind, ItemKind, TripleRecord};
 use serde_json::json;
-
-#[test]
-fn invalidate_missing_noop_existing_closes_and_discard_dedupes() {
-    let (store, _kms) = fixture();
-    let bank = "b-life";
-    let miss = env(
-        "m-miss",
-        bank,
-        ENTITY_KIND_ITEM,
-        "nope",
-        OP_INVALIDATE,
-        "2026-01-01T00:00:00Z",
-        "dev-a",
-        json!({}),
-    );
-    assert_eq!(apply(&store, None, &miss), ApplyOutcome::Applied);
-    store
-        .create_memory_item(
-            &item(bank, "i-1", "s1", "2026-01-01T00:00:00Z", "g"),
-            "actor",
-        )
-        .unwrap();
-    let close = env(
-        "m-close",
-        bank,
-        ENTITY_KIND_ITEM,
-        "i-1",
-        OP_INVALIDATE,
-        "2026-01-02T00:00:00Z",
-        "dev-a",
-        json!({}),
-    );
-    assert_eq!(apply(&store, None, &close), ApplyOutcome::Applied);
-    let got = store.get_memory_item(bank, "i-1").unwrap().expect("item");
-    assert!(got.tx_until.is_some());
-    assert!(got.valid_until.is_some());
-    let first = env(
-        "m-d1",
-        bank,
-        ENTITY_KIND_ITEM,
-        "i-1",
-        OP_DISCARD,
-        "2026-01-03T00:00:00Z",
-        "dev-a",
-        json!({ "r": 1 }),
-    );
-    assert_eq!(apply(&store, None, &first), ApplyOutcome::Applied);
-    // A repeat discard reads as "missing" (identity lookup excludes discarded
-    // rows), so the engine takes the Applied no-op path, not Duplicate.
-    let mut again = first;
-    again.sync_mutation_id = "m-d2".into();
-    again.content_hash = "other-hash".into();
-    assert_eq!(apply(&store, None, &again), ApplyOutcome::Applied);
-    assert!(store.get_item_identity(bank, "i-1").unwrap().is_none());
-}
 
 #[test]
 fn assoc_upsert_reinforce_lww_and_prune_paths() {

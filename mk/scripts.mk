@@ -2,12 +2,13 @@
 #
 # One target per suite, and one CI step per suite in each job, because `make` stops at the first failing command. A single target running all of them reports one failure even when three suites are broken, and the check list shows one status where there is one per suite. A suite may run in a second job when that job checks it on another operating system, and `scripts/ci_parity_check.py` lists those suites in one place, so a new one has to be added on purpose. Three of them had no step in CI on master and nothing ran them there; the others were steps of their own, and kept their names.
 #
-# What each one is, taken from its own file. `gate.py` answers whether to run a heavy command and what verdict to store, so its suite is the one that matters most here. `lint_scope_check.py` reads the Makefile, `mk/*.mk`, the workflows and the root manifest, and refuses a clippy run that could select fewer crates than the file claims it selects. `toolchain_pin_check.py` refuses a workflow that installs a compiler other than the pin. The two are separate files because they answer unrelated questions and a reader debugging one should not have to read the other to find out which file to open. `span_verify.py` is not machinery: it is the reference span-grounding check that `extract_quality.py` imports, and running it directly executes the self-check in its `__main__`. `test_phase_timer.py` and the `test_precommit*.py` files are suites for the phase timer and the pre-commit runner. `coverage_surface_check.py` reads the coverage commands in the Makefile and `mk/*.mk`, the workflows and the gate's own two command builders, and refuses a shape that could no longer measure one run and report it once: a per-package run nothing keeps inside its selection, one command doing both jobs at once, and a report step whose merge one malformed buffer can end. `gate_boundary_check.py` is the admission tripwire: its subject is every crate, so it runs here rather than as a `#[test]` a scoped closure may not reach. `env_mutation_check.py` is the same shape of tripwire for process-global environment mutation in any crate.
+# What each one is, taken from its own file. `gate.py` answers whether to run a heavy command and what verdict to store, so its suite is the one that matters most here. `lint_scope_check.py` reads the Makefile, `mk/*.mk`, the workflows and the root manifest, and refuses a clippy run that could select fewer crates than the file claims it selects. `toolchain_pin_check.py` refuses a workflow that installs a compiler other than the pin. The two are separate files because they answer unrelated questions and a reader debugging one should not have to read the other to find out which file to open. `workflow_expression_check.py` refuses a `run:` body that holds a `${{ ... }}` expression, which the engine expands before the shell sees the line, so the command text is not the text in the file. `span_verify.py` is not machinery: it is the reference span-grounding check that `extract_quality.py` imports, and running it directly executes the self-check in its `__main__`. `test_phase_timer.py` and the `test_precommit*.py` files are suites for the phase timer and the pre-commit runner. `coverage_surface_check.py` reads the coverage commands in the Makefile and `mk/*.mk`, the workflows and the gate's own two command builders, and refuses a shape that could no longer measure one run and report it once: a per-package run nothing keeps inside its selection, one command doing both jobs at once, and a report step whose merge one malformed buffer can end. `gate_boundary_check.py` is the admission tripwire: its subject is every crate, so it runs here rather than as a `#[test]` a scoped closure may not reach. `env_mutation_check.py` is the same shape of tripwire for process-global environment mutation in any crate.
 #
 #  make scripts-check                   all of them, stopping at the first failure
 #  make scripts-check-precommit         one of them, named
 scripts-check: scripts-check-gate scripts-check-scoped-runner \
-	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
+	scripts-check-lint-scope scripts-check-toolchain-pin \
+	scripts-check-workflow-expressions scripts-check-span \
 	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
 	scripts-check-coverage-policy scripts-check-gate-boundary \
@@ -38,6 +39,10 @@ scripts-check-toolchain-pin:
 	python3 scripts/toolchain_pin_check.py --self-test
 	python3 scripts/toolchain_pin_check.py
 
+scripts-check-workflow-expressions:
+	python3 scripts/workflow_expression_check.py --self-test
+	python3 scripts/workflow_expression_check.py
+
 scripts-check-span:
 	python3 scripts/span_verify.py
 
@@ -61,7 +66,7 @@ scripts-check-coverage-policy:
 	python3 scripts/coverage_policy_check.py --self-test
 	python3 scripts/coverage_policy_check.py
 
-# Whether the gate installer tells the truth about a shim it just linked. A symlink that comes after the real tool on PATH never runs, and the installer used to print a success line for it. This pins the NOT ACTIVE message and the non-zero exit, with a controlled PATH so the answer is the same on any host. The third command covers the release installer with a generated keypair swapped into a copy of the script: it drives `main` end to end against a fixture release, installs only when the signature verifies, and refuses a signature over other bytes or a missing, empty, or non-regular signature file. That key is not the tree key; the release job is what compares the signing secret with the key built into `scripts/install.sh`.
+# Whether the gate installer tells the truth about a shim it just linked. A symlink that comes after the real tool on PATH never runs, and the installer used to print a success line for it. This pins the NOT ACTIVE message and the non-zero exit, with a controlled PATH so the answer is the same on any host. The third command covers the release installer with a generated keypair swapped into a copy of the script: it drives `main` end to end against a fixture release, installs only when the signature verifies, and refuses a signature over other bytes or a missing, empty, or non-regular signature file. That key is not the tree key; the release job is what compares the signing secret with the key built into `scripts/install.sh`. It also covers the step that writes the binary: an entry planted where the install stages the file is left untouched, a directory group or other can write to is refused before anything is downloaded, and both the GNU and the BSD `stat` output are read as the octal mode. A keypair is generated for every case, so this runs with no network and no host key material.
 scripts-check-gate-install:
 	python3 scripts/test_gate_install.py
 	python3 scripts/test_gate_install_profiles.py

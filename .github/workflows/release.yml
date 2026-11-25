@@ -137,11 +137,27 @@ jobs:
       # leaves assembly alone, because `cc` would otherwise hand the flag to the
       # assembler and ring's hand-written .S would not build. Full explanation
       # in scripts/musl-cc.sh.
+      # The target comes from the environment and is checked against an allowlist
+      # before any later step uses it.
+      - name: Check the release target is expected
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          case "$TARGET" in
+            aarch64-apple-darwin|x86_64-unknown-linux-musl|aarch64-unknown-linux-musl) ;;
+            *)
+              echo "unexpected release target: $TARGET" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Route the musl C build through the header wrapper
         if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           chmod +x scripts/musl-cc.sh
-          case "${{ matrix.target }}" in
+          case "$TARGET" in
             x86_64-unknown-linux-musl)
               echo "CC_x86_64_unknown_linux_musl=$PWD/scripts/musl-cc.sh" >> "$GITHUB_ENV"
               ;;
@@ -157,7 +173,9 @@ jobs:
           esac
 
       - name: Build
-        run: cargo build --locked --release --bin clio --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --locked --release --bin clio --target "$TARGET"
 
       # Every runner is native for its own target, so the artifact this job is
       # about to publish is one it can actually execute. `version` is a pure
@@ -168,8 +186,9 @@ jobs:
           # The value reaches the shell through the environment, not through
           # text interpolation, so no expansion of the string can form a command.
           EXPECTED_VERSION: clio ${{ needs.verify.outputs.version }}
+          TARGET: ${{ matrix.target }}
         run: |
-          bin="target/${{ matrix.target }}/release/clio"
+          bin="target/$TARGET/release/clio"
           "$bin" version
           test "$("$bin" version)" = "$EXPECTED_VERSION"
 
@@ -182,8 +201,10 @@ jobs:
       # looked for one fixed phrase would pass a broken build.
       - name: Assert the musl binaries need no shared libraries
         if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
-          bin="target/${{ matrix.target }}/release/clio"
+          bin="target/$TARGET/release/clio"
           file "$bin"
           # `ldd` on a static binary prints a status line and no library list.
           # Any line naming a .so file means the binary is dynamically linked.
@@ -197,12 +218,15 @@ jobs:
       # Flat archive: the installer knows the binary is at the root, and no
       # user has to care which target directory it came out of.
       - name: Package
+        env:
+          TARGET: ${{ matrix.target }}
+          ASSET: ${{ matrix.asset }}
         run: |
-          mkdir -p dist/clio-${{ matrix.target }}
-          cp "target/${{ matrix.target }}/release/clio" "dist/clio-${{ matrix.target }}/clio"
-          cp LICENSE README.md "dist/clio-${{ matrix.target }}/"
-          tar -C dist -czf "dist/${{ matrix.asset }}.tar.gz" "clio-${{ matrix.target }}"
-          rm -rf dist/clio-${{ matrix.target }}
+          mkdir -p "dist/clio-$TARGET"
+          cp "target/$TARGET/release/clio" "dist/clio-$TARGET/clio"
+          cp LICENSE README.md "dist/clio-$TARGET/"
+          tar -C dist -czf "dist/$ASSET.tar.gz" "clio-$TARGET"
+          rm -rf "dist/clio-$TARGET"
 
       - name: Upload the archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
