@@ -29,6 +29,7 @@
 
 use crate::compose_assets_fs::{Root, split};
 use crate::compose_docker::ComposeTarget;
+use rustix::fs::FileType;
 use std::path::Path;
 
 /// The base compose file, embedded at build time from the checked-in repo root.
@@ -177,20 +178,28 @@ fn changed_underfoot(shown: &Path) -> String {
 /// references exists in the compose root as a regular file before Docker runs,
 /// naming the first missing source in the error. This is what prevents Docker
 /// from creating empty directories and Postgres coming up without a schema. A
-/// source that is a symlink is not a regular file, so it fails the same check.
+/// source that is a symlink is not a regular file, so it is refused with its
+/// own message, and an inspection failure is reported with its own cause.
 pub(crate) fn verify_bind_mounts(root: &Path) -> Result<(), String> {
-    let opened = Root::open(root);
+    let opened = Root::open(root)?;
     for source in BIND_MOUNT_SOURCES {
-        let present = match &opened {
-            Ok(opened) => opened.regular_file(Path::new(source)).unwrap_or(false),
-            Err(_) => false,
-        };
-        if !present {
-            return Err(format!(
-                "missing bind-mount source {source} in {}; `clio compose up` materializes it — \
-                 do not delete it before starting Docker",
-                root.display()
-            ));
+        match opened.entry_type(Path::new(source))? {
+            Some(FileType::RegularFile) => {}
+            Some(_) => {
+                return Err(format!(
+                    "bind-mount source {source} in {} is not a regular file; a symlinked or \
+                     directory mount source is refused — `clio compose up` materializes a \
+                     regular file",
+                    root.display()
+                ));
+            }
+            None => {
+                return Err(format!(
+                    "missing bind-mount source {source} in {}; `clio compose up` materializes \
+                     it — do not delete it before starting Docker",
+                    root.display()
+                ));
+            }
         }
     }
     Ok(())

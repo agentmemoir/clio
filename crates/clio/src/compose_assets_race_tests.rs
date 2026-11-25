@@ -119,6 +119,95 @@ fn bind_mount_check_refuses_a_symlinked_source() {
 
     let err = verify_bind_mounts(&root).expect_err("a symlinked source must fail");
     assert!(err.contains("sql/001_core.sql"), "{err}");
+    assert!(
+        err.contains("is not a regular file"),
+        "a present source is not reported as missing: {err}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&outside);
+}
+
+#[cfg(unix)]
+#[test]
+fn bind_mount_check_names_a_directory_source_as_not_a_regular_file() {
+    let root = temp_root("race-mount-directory");
+    materialize(&root, ComposeTarget::MacArm64).expect("materialize");
+    let source = root.join("sql/001_core.sql");
+    std::fs::remove_file(&source).expect("remove the materialized source");
+    std::fs::create_dir(&source).expect("plant a directory at the source");
+
+    let err = verify_bind_mounts(&root).expect_err("a directory source must fail");
+
+    assert!(err.contains("sql/001_core.sql"), "{err}");
+    assert!(err.contains("is not a regular file"), "{err}");
+    assert!(
+        !err.contains("missing bind-mount source"),
+        "a present source is not reported as missing: {err}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn bind_mount_check_reports_a_parent_it_cannot_walk_with_its_own_cause() {
+    let root = temp_root("race-mount-inspect");
+    materialize(&root, ComposeTarget::MacArm64).expect("materialize");
+    std::fs::remove_dir_all(root.join("sql")).expect("remove the sql directory");
+    std::fs::write(root.join("sql"), b"not a directory").expect("plant a file at the parent name");
+
+    let err = verify_bind_mounts(&root).expect_err("a parent that is a file must fail");
+
+    assert!(err.contains("sql"), "{err}");
+    assert!(
+        !err.contains("missing bind-mount source"),
+        "a walk failure is not reported as a missing source: {err}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn bind_mount_check_reports_a_root_it_cannot_open_with_its_own_cause() {
+    let missing = std::env::temp_dir().join(format!(
+        "am-compose-assets-race-mount-absent-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&missing);
+
+    let err = verify_bind_mounts(&missing).expect_err("an absent root must fail");
+
+    assert!(err.contains("cannot create"), "{err}");
+    assert!(
+        !err.contains("missing bind-mount source"),
+        "an unopenable root is not reported as a missing source: {err}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn materialize_refuses_a_hard_link_to_a_file_outside_the_root() {
+    let root = temp_root("race-hard-link");
+    let outside = temp_root("race-hard-link-outside");
+    let victim = outside.join("victim");
+    std::fs::write(&victim, b"outside bytes").expect("write the outside file");
+    if let Err(err) = std::fs::hard_link(&victim, root.join("compose.yml")) {
+        eprintln!("skipping the hard-link case: this filesystem refused hard_link: {err}");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        return;
+    }
+
+    let err = materialize(&root, ComposeTarget::MacArm64)
+        .expect_err("a hard-linked asset must be refused");
+
+    assert!(err.contains("2 hard links"), "{err}");
+    assert_eq!(
+        std::fs::read(&victim).unwrap(),
+        b"outside bytes",
+        "the file outside the root keeps its bytes"
+    );
+    assert!(
+        !root.join("compose.arm64.yml").exists(),
+        "the run stops at the refused asset"
+    );
     let _ = std::fs::remove_dir_all(&root);
     let _ = std::fs::remove_dir_all(&outside);
 }

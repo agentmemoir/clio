@@ -310,25 +310,25 @@ fn a_removed_name_is_not_the_held_file() {
 }
 
 #[test]
-fn regular_file_reports_a_missing_name_as_absent() {
+fn entry_type_reports_a_missing_name_as_absent() {
     let root = temp_root("fs-regular-missing");
     std::fs::write(root.join("present.sql"), b"select 1").expect("write the asset");
     let opened = Root::open(&root).expect("open the root");
 
-    assert!(
-        opened
-            .regular_file(Path::new("present.sql"))
-            .expect("check")
+    assert_eq!(
+        opened.entry_type(Path::new("present.sql")).expect("check"),
+        Some(FileType::RegularFile)
     );
-    assert!(
-        !opened.regular_file(Path::new("absent.sql")).expect("check"),
-        "a missing name is not a regular file"
+    assert_eq!(
+        opened.entry_type(Path::new("absent.sql")).expect("check"),
+        None,
+        "a missing name has no entry"
     );
     let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
-fn regular_file_refuses_a_directory_and_a_symlink() {
+fn entry_type_names_a_directory_and_a_symlink() {
     let root = temp_root("fs-regular-refuse");
     std::fs::create_dir(root.join("models")).expect("plant a directory");
     std::fs::write(root.join("real.sql"), b"select 1").expect("write the target file");
@@ -336,104 +336,15 @@ fn regular_file_refuses_a_directory_and_a_symlink() {
         .expect("plant the symlink");
     let opened = Root::open(&root).expect("open the root");
 
-    assert!(
-        !opened.regular_file(Path::new("models")).expect("check"),
+    assert_eq!(
+        opened.entry_type(Path::new("models")).expect("check"),
+        Some(FileType::Directory),
         "a directory is not a regular file"
     );
-    assert!(
-        !opened.regular_file(Path::new("linked.sql")).expect("check"),
-        "a symlink to a regular file is not a regular file"
+    assert_eq!(
+        opened.entry_type(Path::new("linked.sql")).expect("check"),
+        Some(FileType::Symlink),
+        "a symlink is inspected without being followed"
     );
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-// The refusals below come from the kernel's permission check, so these tests
-// need the non-root runner every CI workflow uses.
-fn set_mode(path: &Path, mode: u32) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).expect("set the mode");
-}
-
-#[test]
-fn a_leaf_that_cannot_be_created_is_reported() {
-    let root = temp_root("fs-leaf-unwritable");
-    let locked = root.join("locked");
-    std::fs::create_dir(&locked).expect("create the directory");
-    set_mode(&locked, 0o500);
-    let opened = Root::open(&root).expect("open the root");
-    let parent = opened
-        .parent(Path::new("locked"))
-        .expect("hold the read-only directory");
-    let shown = locked.join("new.sql");
-
-    let err = Root::hold(parent, OsStr::new("new.sql"), &shown)
-        .map(|_| ())
-        .expect_err("a file cannot be created in a read-only directory");
-
-    assert!(err.contains("cannot write"), "{err}");
-    assert!(
-        !shown.exists(),
-        "the refused hold creates nothing at the asset name"
-    );
-    set_mode(&locked, 0o755);
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
-fn a_missing_parent_component_that_cannot_be_created_is_reported() {
-    let root = temp_root("fs-parent-unwritable");
-    let locked = root.join("locked");
-    std::fs::create_dir(&locked).expect("create the directory");
-    set_mode(&locked, 0o500);
-    let opened = Root::open(&root).expect("open the root");
-
-    let err = opened
-        .parent(Path::new("locked/sql"))
-        .map(|_| ())
-        .expect_err("a missing component cannot be created without write permission");
-
-    assert!(err.contains("cannot create"), "{err}");
-    assert!(
-        !locked.join("sql").exists(),
-        "the refused walk creates nothing behind the read-only directory"
-    );
-    set_mode(&locked, 0o755);
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
-fn a_parent_component_that_cannot_be_read_is_refused() {
-    let root = temp_root("fs-parent-unreadable");
-    let locked = root.join("locked");
-    std::fs::create_dir(&locked).expect("create the directory");
-    set_mode(&locked, 0o300);
-    let opened = Root::open(&root).expect("open the root");
-
-    let err = opened
-        .parent(Path::new("locked"))
-        .map(|_| ())
-        .expect_err("a directory that cannot be opened is refused");
-
-    assert!(err.contains("cannot create"), "{err}");
-    set_mode(&locked, 0o755);
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
-fn regular_file_reports_a_name_it_cannot_inspect() {
-    let root = temp_root("fs-regular-unreadable");
-    let locked = root.join("locked");
-    std::fs::create_dir(&locked).expect("create the directory");
-    std::fs::write(locked.join("001.sql"), b"select 1").expect("write the asset");
-    set_mode(&locked, 0o400);
-    let opened = Root::open(&root).expect("open the root");
-
-    let err = opened
-        .regular_file(Path::new("locked/001.sql"))
-        .map(|_| ())
-        .expect_err("a name inside a directory with no search permission cannot be inspected");
-
-    assert!(err.contains("cannot inspect"), "{err}");
-    set_mode(&locked, 0o755);
     let _ = std::fs::remove_dir_all(&root);
 }

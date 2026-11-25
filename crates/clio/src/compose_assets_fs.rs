@@ -123,6 +123,13 @@ impl Root {
                 shown.display()
             ));
         }
+        if stat.st_nlink != 1 {
+            return Err(format!(
+                "refuses {}: it has {} hard links, so another name outside the root shares the file",
+                shown.display(),
+                stat.st_nlink
+            ));
+        }
         Ok(HeldFile {
             fd,
             parent,
@@ -132,14 +139,15 @@ impl Root {
         })
     }
 
-    /// Whether `relative` names a regular file, checked without following a link at the
-    /// leaf and without following a link at any parent component.
-    pub(crate) fn regular_file(&self, relative: &Path) -> Result<bool, String> {
+    /// The type of the entry `relative` names, or `None` when nothing is named there. The
+    /// parents are walked without following a link and the leaf is inspected without
+    /// following one, so the answer is the entry a later operation would reach.
+    pub(crate) fn entry_type(&self, relative: &Path) -> Result<Option<FileType>, String> {
         let (parent_path, name) = split(relative)?;
         let parent = self.parent(parent_path)?;
         match statat(&parent, name, AtFlags::SYMLINK_NOFOLLOW) {
-            Ok(stat) => Ok(FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile),
-            Err(Errno::NOENT) => Ok(false),
+            Ok(stat) => Ok(Some(FileType::from_raw_mode(stat.st_mode))),
+            Err(Errno::NOENT) => Ok(None),
             Err(err) => Err(format!("cannot inspect {}: {err}", relative.display())),
         }
     }
@@ -307,6 +315,9 @@ fn write_all(fd: &OwnedFd, mut bytes: &[u8], action: &str, shown: &Path) -> Resu
     Ok(())
 }
 
+#[cfg(test)]
+#[path = "compose_assets_fs_permissions_tests.rs"]
+mod permissions_tests;
 #[cfg(test)]
 #[path = "compose_assets_fs_tests.rs"]
 mod tests;
