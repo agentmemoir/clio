@@ -97,11 +97,8 @@ impl ArmedComponentSwap {
     fn arm(out: &Path, aside: &Path, decoy: &Path) -> Self {
         *SWAP_BEFORE_PROMOTE
             .lock()
-            .expect("the swap seam lock is not poisoned") = Some((
-            out.to_path_buf(),
-            aside.to_path_buf(),
-            decoy.to_path_buf(),
-        ));
+            .expect("the swap seam lock is not poisoned") =
+            Some((out.to_path_buf(), aside.to_path_buf(), decoy.to_path_buf()));
         Self
     }
 }
