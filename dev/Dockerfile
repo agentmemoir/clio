@@ -72,8 +72,11 @@ RUN channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' /tmp/rust-toolchain.toml)" \
 # image ships `ubuntu` at 1000:1000, which matches the common Linux host user, so
 # the read-only checkout bind mount reports no dubious ownership to git.
 # Cargo and rustup need to write some state, so hand them that state only.
-# Executable directories stay root-owned: a writable bin on PATH is how a
-# process in the box could replace the toolchain a later command runs.
+# Closed: nothing on PATH and no toolchain is writable, so a process in the box
+# cannot replace a binary a later command runs.
+# Remains: the crate cache is writable by design, so a process in the box could
+# alter cached crate sources that a later `cargo build` in the same box compiles.
+# This is a dev box: the container is discarded per run and the checkout is :ro.
 RUN set -eux; \
     for dir in \
       "${CARGO_HOME}/registry" \
@@ -85,8 +88,13 @@ RUN set -eux; \
       mkdir -p "${dir}"; \
       chown -R ubuntu:ubuntu "${dir}"; \
     done; \
-    touch "${CARGO_HOME}/.package-cache" "${RUSTUP_HOME}/settings.toml"; \
+    touch "${CARGO_HOME}/.package-cache"; \
+    test -s "${RUSTUP_HOME}/settings.toml"; \
     chown ubuntu:ubuntu "${CARGO_HOME}/.package-cache" "${RUSTUP_HOME}/settings.toml"
+
+# Fail the build if a base-digest bump changes the account this change depends on.
+RUN test "$(id -u ubuntu)" = 1000 && test "$(id -g ubuntu)" = 1000
+
 USER ubuntu
 
 WORKDIR /workspace
