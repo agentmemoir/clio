@@ -46,11 +46,11 @@
 //!   long-running service unit explicitly via `ttl_secs`.
 //! - Pushing does NOT require a local `sync_serve` on the pushing host:
 //!   `sync_push` talks directly to the remote endpoint.
-//! - Outside dev mode the server refuses to bind without auth material,
-//!   and every request must present a valid bearer token.
-//! - A bind outside loopback is refused unless the operator setting
-//!   `sync.allow_public_bind` allows it, and an admitted one still warns about
-//!   what crosses the network in the clear.
+//! - Outside loopback the server refuses to bind without a credential store,
+//!   in every mode, dev included.
+//! - A bind outside loopback needs both the operator setting
+//!   `sync.allow_public_bind` and a credential store, and an admitted one warns
+//!   about what crosses the network in the clear.
 //! - `sync_status` and logs never carry tokens or DEK material (masked).
 
 #![forbid(unsafe_code)]

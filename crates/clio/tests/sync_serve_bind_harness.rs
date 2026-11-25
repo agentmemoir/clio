@@ -147,20 +147,23 @@ fn kill_and_collect_stderr(mut child: Child) -> Vec<u8> {
     bytes
 }
 
-/// A public bind admits on the operator setting, then warns on stderr — naming
-/// the routing fields, the fields that cross in the clear in a keyed form, the
-/// sealed pair, and the residual — in dev mode, and stdout stays a parseable
-/// json document. Which side of the line each name sits on is checked against
-/// the shared table, not by substring presence; this harness checks that a real
-/// binary's stderr carries the names at all.
+/// A public bind admits on the operator setting with a credential store, then
+/// warns on stderr — naming the routing fields, the fields that cross in the
+/// clear in a keyed form, the sealed pair, and the residual — in dev mode, and
+/// stdout stays a parseable json document. Which side of the line each name
+/// sits on is checked against the shared table, not by substring presence; this
+/// harness checks that a real binary's stderr carries the names at all.
 #[test]
 fn a_public_dev_bind_warns_on_stderr_and_keeps_stdout_json() {
     let scratch = NodeDir::new("bind-public-dev");
+    let store = write_credential_store(&scratch);
     let mut child = spawn_serve(
         &scratch,
         &[
             "--bind",
             "0.0.0.0:0",
+            "--token-file",
+            store.to_str().expect("utf-8 scratch path"),
             "--dev",
             "--ttl-secs",
             "30",
@@ -206,6 +209,43 @@ fn a_public_dev_bind_warns_on_stderr_and_keeps_stdout_json() {
             .unwrap_or("")
             .starts_with("0.0.0.0:"),
         "the public bind proceeded: {parsed}"
+    );
+}
+
+/// A public dev bind with no credential store is refused on stderr, naming the
+/// address and the missing token file, and stdout stays empty. The operator
+/// setting and dev mode are both explicit, so only the credential rule can
+/// refuse this start.
+#[test]
+fn a_public_dev_bind_without_a_credential_is_refused() {
+    let scratch = NodeDir::new("bind-public-dev-refused");
+    let mut child = spawn_serve(
+        &scratch,
+        &[
+            "--bind",
+            "0.0.0.0:0",
+            "--dev",
+            "--ttl-secs",
+            "30",
+            "--db",
+            "sqlite::memory:",
+        ],
+        &[(ALLOW_PUBLIC_BIND_ENV, "true")],
+    );
+    let stderr = stderr_until(&mut child, REFUSAL_PREFIX);
+    assert!(
+        stderr.contains(REFUSAL_PREFIX),
+        "the public dev bind must be refused, naming the address: {stderr:?}"
+    );
+    assert!(
+        stderr.contains("--token-file"),
+        "the refusal must name the missing token file: {stderr:?}"
+    );
+    let stdout = kill_and_collect_stdout(child);
+    assert!(
+        stdout.is_empty(),
+        "a refused bind must not answer: {:?}",
+        String::from_utf8_lossy(&stdout)
     );
 }
 
