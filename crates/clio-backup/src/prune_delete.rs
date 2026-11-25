@@ -26,6 +26,7 @@
 //! Keep this module focused on removing a selected archive.
 
 use crate::prune::{ArchiveRef, KeptArchive, PrunePlan, UnreadableArchive};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 /// What a prune did, or would do, with one candidate.
@@ -171,10 +172,16 @@ pub fn delete(backup_dir: &Path, plan: &PrunePlan) -> PruneReport {
 /// The one implementation both entry points share, with the confirmed run as a
 /// parameter rather than as a second copy of the per-candidate rules.
 fn report(backup_dir: &Path, plan: &PrunePlan, remove: bool) -> PruneReport {
+    // The root is resolved once, before any candidate is examined, so every
+    // containment check and every unlink below answers against the one real
+    // directory. A root that cannot be resolved fails each candidate instead of
+    // falling back to the unresolved path, because an unresolved path cannot
+    // prove that anything is inside it.
+    let root = std::fs::canonicalize(backup_dir);
     let candidates = plan
         .candidates
         .iter()
-        .map(|candidate| outcome(backup_dir, candidate, remove))
+        .map(|candidate| outcome(backup_dir, &root, candidate, remove))
         .collect::<Vec<_>>();
     // The reclaimed figure is the sum of what the run really unlinked, so it can
     // never claim a byte that is still on disk. The remaining figure is the
@@ -199,13 +206,32 @@ fn report(backup_dir: &Path, plan: &PrunePlan, remove: bool) -> PruneReport {
 /// What happened to one candidate, in the order the rules apply.
 ///
 /// Containment comes first, so a path that is not a file inside the backup
-/// directory is refused before the filesystem is touched at all. Then the entry
+/// directory is refused before the filesystem is touched at all. Being inside
+/// means two things together: the caller's own spelling of the parent is exactly
+/// the backup directory with a bare final component, and that parent resolves on
+/// disk to the canonical root the run took once before the loop. Then the entry
 /// is examined with `symlink_metadata`, which does not follow a link: a
 /// symlinked archive is reported and skipped, so a link can never turn "delete a
 /// file in my backup directory" into "delete a file somewhere else". Only a real
-/// file is unlinked, and `remove_file` does not resolve the final component, so
-/// the link target is untouched even if the entry is swapped in the gap.
-fn outcome(backup_dir: &Path, candidate: &ArchiveRef, remove: bool) -> CandidateOutcome {
+/// file is unlinked, and the unlink names the resolved root plus the bare file
+/// name, so no unresolved or `..`-bearing path reaches the removal.
+///
+/// What this does not prove is that the entry examined and the entry unlinked are
+/// the same entry: the name can be swapped in the gap between the
+/// `symlink_metadata` and the `remove_file`, and a regular file swapped in there
+/// is the file this run removes. A swap can therefore make the reclaimed figure
+/// describe something other than what went. Removing that gap needs the
+/// directory itself held open for the run and the entry confirmed by device and
+/// inode across the two calls.
+///
+/// A root that could not be resolved leaves every candidate `Failed`: the run
+/// then knows nothing about where the files really are, so it removes nothing.
+fn outcome(
+    backup_dir: &Path,
+    root: &Result<PathBuf, std::io::Error>,
+    candidate: &ArchiveRef,
+    remove: bool,
+) -> CandidateOutcome {
     let mut outcome = CandidateOutcome {
         id: candidate.id.clone(),
         path: candidate.path.clone(),
@@ -217,7 +243,18 @@ fn outcome(backup_dir: &Path, candidate: &ArchiveRef, remove: bool) -> Candidate
         state: CandidateState::Pending,
         detail: None,
     };
-    if !inside(backup_dir, &candidate.path) {
+    let root = match root {
+        Ok(root) => root.as_path(),
+        Err(error) => {
+            outcome.state = CandidateState::Failed;
+            outcome.detail = Some(format!(
+                "the backup directory {} could not be resolved, so nothing was removed: {error}",
+                backup_dir.display()
+            ));
+            return outcome;
+        }
+    };
+    let Some(file_name) = inside(backup_dir, root, &candidate.path) else {
         outcome.state = CandidateState::OutsideDirectory;
         outcome.detail = Some(format!(
             "{} is not a file inside {}",
@@ -225,7 +262,7 @@ fn outcome(backup_dir: &Path, candidate: &ArchiveRef, remove: bool) -> Candidate
             backup_dir.display()
         ));
         return outcome;
-    }
+    };
     let metadata = match std::fs::symlink_metadata(&candidate.path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -256,9 +293,12 @@ fn outcome(backup_dir: &Path, candidate: &ArchiveRef, remove: bool) -> Candidate
     }
     // The size is measured here, immediately before the unlink, so the reclaimed
     // figure is the bytes this run freed rather than a number the listing wrote
-    // down earlier. It is counted only after the unlink reports success.
+    // down earlier. It is counted only after the unlink reports success. The
+    // unlink names the resolved root and the bare file name, so the removal
+    // cannot travel through a symlinked or `..`-bearing parent.
     let bytes = metadata.len();
-    match std::fs::remove_file(&candidate.path) {
+    let removal_path = root.join(file_name);
+    match std::fs::remove_file(&removal_path) {
         Ok(()) => {
             outcome.state = CandidateState::Deleted;
             outcome.reclaimed_bytes = bytes;
@@ -275,18 +315,40 @@ fn outcome(backup_dir: &Path, candidate: &ArchiveRef, remove: bool) -> Candidate
     outcome
 }
 
-/// Whether `path` is a file directly inside `backup_dir`.
+/// The bare file name of `path` when it is a file directly inside `backup_dir`,
+/// and `None` when it is not.
 ///
-/// The comparison is component-wise, so a path that reaches the file through
-/// `..`, through a repeated separator, or from a sibling directory is not
-/// inside and is refused. The check is deliberately strict: a candidate the
-/// listing built as `backup_dir.join(file_name)` passes, and anything else is
-/// reported rather than deleted.
-fn inside(backup_dir: &Path, path: &Path) -> bool {
-    path.parent().is_some_and(|parent| parent == backup_dir)
-        && path.file_name().is_some_and(|name| !name.is_empty())
+/// The spelling is compared component-wise, so a path that reaches the file
+/// through `..`, through a repeated separator, or from a sibling directory is not
+/// inside and is refused. That comparison alone is a path-value test: it says
+/// nothing about where the parent really is, so the parent is then canonicalized
+/// and must equal the canonical root this run took. A parent that cannot be
+/// canonicalized is refused for the same reason, because an unresolvable parent
+/// proves nothing about containment. The check is deliberately strict: a
+/// candidate the listing built as `backup_dir.join(file_name)` passes, and
+/// anything else is reported rather than deleted.
+fn inside<'path>(backup_dir: &Path, root: &Path, path: &'path Path) -> Option<&'path OsStr> {
+    let parent = path.parent()?;
+    if parent != backup_dir {
+        return None;
+    }
+    let name = path.file_name()?;
+    if name.is_empty() {
+        return None;
+    }
+    if std::fs::canonicalize(parent).ok().as_deref() != Some(root) {
+        return None;
+    }
+    Some(name)
 }
 
 #[cfg(test)]
 #[path = "prune_delete_tests.rs"]
 mod tests;
+
+/// The containment cases that need a real directory hierarchy: a backup
+/// directory that is a symbolic link, a candidate reached through a linked
+/// parent, and a root that cannot be resolved at all.
+#[cfg(test)]
+#[path = "prune_delete_containment_tests.rs"]
+mod containment_tests;
