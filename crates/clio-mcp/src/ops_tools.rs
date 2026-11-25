@@ -100,7 +100,12 @@ impl McpState {
 ///
 /// One gate runs for every operator tool: the call resolves its context, and
 /// each arm then asks `McpState::op_scope` for the scope it may reach.
+///
+/// The transport gate runs before any arm, because `repair` and `reindex`
+/// destroy and rebuild state: a caller the transport cannot vouch for never
+/// reaches a whole-store scope, whatever actor it declares.
 fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmError> {
+    state.require_authenticated_transport()?;
     let ctx = state.resolve_ctx(args)?;
     let timestamp = state.resolve_timestamp(args)?;
     match name {
@@ -380,6 +385,10 @@ fn string_array(args: &Value, key: &str) -> Result<Vec<String>, AmError> {
 fn to_value<T: Serialize>(value: &T) -> Value {
     serde_json::to_value(value).expect("operator report serializes")
 }
+
+#[cfg(test)]
+#[path = "destructive_transport_gate_tests.rs"]
+mod destructive_transport_gate_tests;
 
 #[cfg(test)]
 #[path = "ops_tools_grant_tests.rs"]

@@ -114,7 +114,7 @@ impl McpState {
         let actor = match &self.principal {
             Some(principal) => principal.authorize(args, bank)?,
             None => match args.get("actor").and_then(Value::as_str) {
-                Some(raw) => Actor::parse(raw)?,
+                Some(raw) => self.declared_actor(raw)?,
                 None => self.default_actor,
             },
         };
@@ -160,8 +160,9 @@ impl McpState {
     ///
     /// # Errors
     /// [`ErrorCode::Forbidden`] for a declared actor the credential does not
-    /// name, [`ErrorCode::InvalidArgument`] for an unknown `actor` value on the
-    /// unbound path.
+    /// name, for a privileged declaration on an unauthenticated off-machine
+    /// listener, [`ErrorCode::InvalidArgument`] for an unknown `actor` value on
+    /// the unbound path.
     pub(crate) fn resolve_actor(
         &self,
         args: &Value,
@@ -173,10 +174,27 @@ impl McpState {
             ));
         }
         let actor = match args.get("actor").and_then(Value::as_str) {
-            Some(raw) => Actor::parse(raw)?,
+            Some(raw) => self.declared_actor(raw)?,
             None => self.default_actor,
         };
         Ok((actor, None))
+    }
+
+    /// The actor a caller declared, under the one rule that an unauthenticated
+    /// off-machine listener does not honour a privileged declaration. Both
+    /// unbound actor resolutions read this, so a tool that resolves the actor
+    /// itself cannot accept what `resolve_ctx` refuses.
+    ///
+    /// # Errors
+    /// [`ErrorCode::InvalidArgument`] for an unknown actor value,
+    /// [`ErrorCode::Forbidden`] for a privileged declaration on an
+    /// unauthenticated off-machine listener.
+    fn declared_actor(&self, raw: &str) -> Result<Actor, AmError> {
+        let actor = Actor::parse(raw)?;
+        if actor.is_privileged() {
+            self.require_authenticated_transport()?;
+        }
+        Ok(actor)
     }
 
     /// Refuse a bank one sync run may not touch.
@@ -425,3 +443,7 @@ pub fn now_utc() -> String {
 #[cfg(test)]
 #[path = "runtime_context_tests.rs"]
 mod runtime_context_tests;
+
+#[cfg(test)]
+#[path = "runtime_context_transport_tests.rs"]
+mod runtime_context_transport_tests;

@@ -8,7 +8,7 @@
 //!
 //! ## Owns
 //! - The strategy trait's notification, refused-method, and served branches
-//! - `scoped_state` and the principal it carries
+//! - `scoped_state`, the principal it carries, and the listener trust it inherits
 //! - The `Debug` rendering of both body kinds
 //!
 //! ## Does not own
@@ -125,8 +125,10 @@ fn a_stateless_listing_is_served_with_200() {
 #[test]
 fn scoped_state_carries_the_request_principal() {
     let state = state();
-    let handler = Arc::new(McpHandler::new(Arc::clone(&state)));
-    let unbound = scoped_state(&handler, AuthOutcome::Unbound);
+    let mut handler = McpHandler::new(Arc::clone(&state));
+    handler.set_network_trusted(true);
+    let handler = Arc::new(handler);
+    let unbound = scoped_state(&handler, AuthOutcome::Unbound, false);
     assert!(
         unbound.authorize_admin().is_ok(),
         "an unbound state is local"
@@ -138,10 +140,65 @@ fn scoped_state_carries_the_request_principal() {
             Actor::Agent,
             Vec::new(),
         )),
+        false,
     );
     assert!(
         bound.authorize_admin().is_err(),
         "the bound principal's actor decides the administrative rule"
+    );
+}
+
+/// An untrusted handler marks every copy it hands out, bound or not, so no
+/// request served there reads as a local one.
+#[test]
+fn scoped_state_marks_an_untrusted_handler() {
+    let handler = Arc::new(McpHandler::new(state()));
+    for outcome in [
+        AuthOutcome::Unbound,
+        AuthOutcome::Bound(Principal::new("ops-key".into(), Actor::Harness, Vec::new())),
+    ] {
+        let scoped = scoped_state(&handler, outcome, false);
+        assert!(
+            scoped.network_untrusted,
+            "every copy of an untrusted handler carries the fact"
+        );
+    }
+    assert!(
+        !handler.state().network_untrusted,
+        "the base state stays as it was opened"
+    );
+}
+
+/// A trusted handler is copied unchanged for a local caller, and the same
+/// handler marks a remote one: the two branches of the request trust fact.
+#[test]
+fn scoped_state_marks_only_a_remote_caller_of_a_trusted_handler() {
+    let mut handler = McpHandler::new(state());
+    handler.set_network_trusted(true);
+    let handler = Arc::new(handler);
+
+    let local = scoped_state(&handler, AuthOutcome::Unbound, false);
+    assert!(
+        !local.network_untrusted,
+        "a trusted listener serving a local caller stays trusted"
+    );
+    local
+        .resolve_ctx(&json!({"actor": "harness"}))
+        .expect("a trusted listener honours the declaration");
+
+    let remote = scoped_state(&handler, AuthOutcome::Unbound, true);
+    assert!(
+        remote.network_untrusted,
+        "a forwarded caller of the same handler is marked"
+    );
+    let err = remote
+        .resolve_ctx(&json!({"actor": "harness"}))
+        .expect_err("a forwarded request does not inherit the local privilege");
+    assert_eq!(
+        err.code,
+        clio_types::ErrorCode::Forbidden,
+        "{}",
+        err.message
     );
 }
 

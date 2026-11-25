@@ -76,6 +76,17 @@ impl Actor {
         }
     }
 
+    /// Whether this actor carries administrative privilege.
+    ///
+    /// Only [`Self::Harness`] and [`Self::System`] do. This is the one
+    /// definition every privilege gate reads: the compliance verbs, the MCP
+    /// administrative mutations, and the sync denial record all key on it, so
+    /// none of them can drift from the others.
+    #[must_use]
+    pub fn is_privileged(&self) -> bool {
+        matches!(*self, Self::Harness | Self::System)
+    }
+
     /// Parse a caller-supplied actor string.
     ///
     /// # Errors
@@ -361,5 +372,35 @@ mod tests {
         assert_ne!(bound, unbound, "the label is what separates the two");
         assert_eq!(bound.bank, unbound.bank);
         assert_eq!(bound.actor, unbound.actor);
+    }
+
+    /// The privileged set is exactly `harness` and `system`, whatever order the
+    /// actors are asked in.
+    #[test]
+    fn the_privileged_actors_are_exactly_harness_and_system() {
+        let privileged: Vec<Actor> = [Actor::Agent, Actor::User, Actor::Harness, Actor::System]
+            .into_iter()
+            .filter(Actor::is_privileged)
+            .collect();
+        assert_eq!(
+            privileged,
+            vec![Actor::Harness, Actor::System],
+            "only the administrative pair carries privileged-actor reach"
+        );
+    }
+
+    /// One assertion per variant, so a variant added without deciding its
+    /// privilege cannot inherit an answer this test never checks.
+    #[test]
+    fn every_actor_variant_has_its_privilege_decided() {
+        assert!(!Actor::Agent.is_privileged(), "agent is not privileged");
+        assert!(Actor::Harness.is_privileged(), "harness is privileged");
+        assert!(!Actor::User.is_privileged(), "user is not privileged");
+        assert!(Actor::System.is_privileged(), "system is privileged");
+        assert_eq!(
+            Actor::ALL.len(),
+            4,
+            "a new variant needs a decision here and in the privileged set"
+        );
     }
 }

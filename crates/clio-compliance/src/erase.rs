@@ -321,13 +321,13 @@ pub(crate) fn propagate(
 /// the workflow calls it again before its effect, so both gates share one
 /// privilege table.
 pub(crate) fn authorize(actor: Actor) -> Result<(), AmError> {
-    match actor {
-        Actor::Harness | Actor::System => Ok(()),
-        Actor::Agent | Actor::User => Err(AmError::new(
-            ErrorCode::Forbidden,
-            "erase_request requires a harness or system actor with compliance privilege",
-        )),
+    if actor.is_privileged() {
+        return Ok(());
     }
+    Err(AmError::new(
+        ErrorCode::Forbidden,
+        "erase_request requires a harness or system actor with compliance privilege",
+    ))
 }
 
 fn validate(args: &EraseArgs<'_>) -> Result<(), AmError> {

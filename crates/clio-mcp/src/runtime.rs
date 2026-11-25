@@ -3,19 +3,21 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the MCP runtime state: the shared `McpState`
-//! type and its public open API that the transports hand to the tool
+//! This module is responsible for the MCP runtime state's open API and the gates
+//! that run over it: the entry points the transports hand to the tool
 //! dispatchers.
 //!
 //! ## Owns
-//! - The `McpState` type, its field set, and the public `open` entry points
-//! - Effective-config resolution policy (`open` vs `open_with_effective`),
-//!   including the document-named erasure-journal seam
-//! - Bank/actor defaults, the shared-bank permission gate, and the
-//!   administrative-mutation gate
+//! - The public `open` entry points and their effective-config resolution policy
+//!   (`open` vs `open_with_effective`), including the document-named
+//!   erasure-journal seam
+//! - Bank/actor defaults, the shared-bank permission gate, the
+//!   administrative-mutation gate, and the transport-trust gate
+//! - The setters a host or a transport needs over an opened state
 //! - stderr telemetry sink adapters (events never touch stdout)
 //!
 //! ## Does not own
+//! - The `McpState` struct and its field set (see `runtime_state`)
 //! - Store-backend construction and engine wiring (see `runtime_open`)
 //! - Tool dispatch logic (see `write_tools`)
 //! - Admission, storage, or write-path semantics
@@ -24,32 +26,24 @@
 //!
 //! ## Boundary
 //!
-//! Changes to the `McpState` field set or its open API should normally require
-//! changes here. Changes to which engines a store is wired with should not
-//! require changes here.
+//! Changes to the `McpState` field set should normally require changes in
+//! `runtime_state`, and changes to its open API or a gate over it here. Changes
+//! to which engines a store is wired with should not require changes here.
 //!
-//! Keep this module focused on the MCP runtime state and its open API.
+//! Keep this module focused on the MCP runtime state's open API and its gates.
 
-use clio_admission::RankingEnv;
-use clio_config::retention_store::RetentionStore;
-use clio_history::HistoryPolicy;
-use clio_index::Embedder;
-use clio_retrieve::{AssociationEngine, HybridRetriever};
-use clio_store::{
-    BatchStore, BeliefStore, ComplianceStore, ContinuousStore, CopyInventoryStore, DekProvider,
-    DestinationCustodyStore, DurableRequestStore, HistoryStore, HygieneStore, IndexStore,
-    LocalEventStore, OpsStore, PeerActionStore, PersonaStore, Store, SyncStore,
-};
 use clio_types::{Actor, AmError, ErrorCode};
-use clio_write::{HubDistillEngine, LeafIndex, MemForest, MemTreeMaint};
 
-use crate::index_drain::IndexDrain;
-use crate::maintenance_trigger::MaintenanceTriggerState;
 pub use crate::ops_embedder::{build_ops_embedder, build_ops_embedder_with};
 use crate::principal::Principal;
 use serde_json::Value;
-use std::sync::{Arc, Condvar};
+use std::sync::Arc;
 
+#[path = "runtime_state.rs"]
+mod runtime_state;
+
+pub use self::runtime_state::McpState;
+pub(crate) use self::runtime_state::UNAUTHENTICATED_TRANSPORT_REFUSAL;
 pub use crate::runtime_sinks::{BatchSignals, NoSignals, StderrSinks, StoreSignals};
 
 /// Pinned protocol revision carried for diagnostics assertions.
@@ -58,180 +52,6 @@ pub const PROTOCOL_REVISION: &str = crate::MCP_PROTOCOL_REVISION;
 /// Dedicated cross-agent shared bank namespace. Access is gated at
 /// bank resolution so no tool can route around the deployment permission.
 pub const SHARED_BANK: &str = "shared";
-
-/// Shared state behind every MCP transport: one store, one engine set.
-///
-/// `Clone` is a shallow copy, and every field that must stay single and
-/// unforked sits behind an `Arc`: the store engines, the index drain, the
-/// retention store, and the config runtime. A clone therefore shares one
-/// instance of each and can differ only in [`Self::principal`], which is what
-/// makes a per-request principal cheap and safe to attach.
-#[derive(Clone)]
-#[expect(clippy::struct_excessive_bools, reason = "deployment flags")]
-pub struct McpState {
-    /// Discrete/episodic repository.
-    pub store: Arc<dyn Store>,
-    /// Operator health view of the same backend (ops surfaces).
-    pub ops_store: Arc<dyn OpsStore>,
-    /// Index backend view (dense + lexical search) for read/retrieve tools.
-    pub index: Arc<dyn IndexStore>,
-    /// Hybrid retriever shared by `retrieve` and `compose_context`.
-    pub retriever: Arc<HybridRetriever>,
-    /// Read-only diagnostic twin of `retriever`: same env, store, index,
-    /// embedder, and reranker, with co-activation reinforcement disabled.
-    pub diagnostic_retriever: Arc<HybridRetriever>,
-    /// Persona repository view of the same backend.
-    pub persona: Arc<dyn PersonaStore>,
-    /// Belief repository view.
-    pub belief: Arc<dyn BeliefStore>,
-    /// Authorized belief-context correction view (concrete-backend
-    /// capability kept out of the shared read trait).
-    pub belief_corrector: Arc<dyn clio_compliance::BeliefContextCorrector>,
-    /// History repository view.
-    pub history: Arc<dyn HistoryStore>,
-    /// Continuous (EMA) repository view.
-    pub continuous: Arc<dyn ContinuousStore>,
-    /// Compliance-erasure persistence view.
-    pub compliance: Arc<dyn ComplianceStore>,
-    /// Hygiene persistence view (flags, archive markers, log).
-    pub hygiene: Arc<dyn HygieneStore>,
-    /// Durable local event writer for protected-action intents and outcomes.
-    pub events: Arc<dyn LocalEventStore>,
-    /// Durable subject-request records for the request service.
-    pub durable: Arc<dyn DurableRequestStore>,
-    /// Peer-action rows for subject requests.
-    pub peer_actions: Arc<dyn PeerActionStore>,
-    /// Copy-inventory rows for subject requests.
-    pub copies: Arc<dyn CopyInventoryStore>,
-    /// Live bank set an erasure fans out to for one data subject.
-    pub bank_scope: Arc<dyn clio_store::BankScopeStore>,
-    /// Export destination-custody persistence.
-    pub custody: Arc<dyn DestinationCustodyStore>,
-    /// Live-store facts, measured once at open; a failed measurement fails the
-    /// open, and only an in-memory store opens with no measurement.
-    pub inventory_facts: Arc<clio_compliance::InventoryFacts>,
-    /// Whether [`Self::inventory_facts`] is a real measurement. A subject
-    /// export refuses (`InvalidArgument`) rather than emit a wrong manifest.
-    pub inventory_measured: bool,
-    /// The store backend [`Self::inventory_facts`] describes.
-    pub inventory_backend: clio_compliance::InventoryBackend,
-    /// Admission/ranking environment snapshot.
-    pub env: RankingEnv,
-    /// Association engine (co-activation + explicit edges).
-    pub assoc: AssociationEngine,
-    /// `MemTree` maintenance engine ([`clio_write::MemTreeMaint`]).
-    pub maint: Arc<MemTreeMaint>,
-    /// Hub distillation engine ([`HubDistillEngine`]; `None` disables hub
-    /// consolidation).
-    pub hub: Option<Arc<HubDistillEngine>>,
-    /// Published leaves for immediate queryability.
-    pub leaves: Arc<LeafIndex>,
-    /// Shared `MemTree` forest (bank-keyed [`clio_write::MemForest`]).
-    pub forest: Arc<std::sync::Mutex<MemForest>>,
-    /// Default bank when args omit one (args win).
-    pub default_bank: String,
-    /// Default actor when args omit one (args win).
-    pub default_actor: Actor,
-    /// Persona token budget for post-mutation truncation.
-    pub budget_tokens: usize,
-    /// Lesson cap / read-bound policy for history tools.
-    pub history_policy: HistoryPolicy,
-    /// Ephemeral scratchpad workspace (never durable, never indexed).
-    ///
-    /// Behind an `Arc` so a per-request state clone shares one scratchpad rather
-    /// than handing each request an empty workspace of its own.
-    pub scratchpad: Arc<clio_compliance::Scratchpad>,
-    /// Atomic batch commit handle for the same backend.
-    pub batch: Arc<dyn BatchStore>,
-    /// Explicit deployment permission for the cross-agent shared bank.
-    pub shared_enabled: bool,
-    /// Process-local repair-plan registry for the ops `doctor`/`repair` surfaces.
-    pub ops_plans: Arc<clio_ops::PlanRegistry>,
-    /// Optional embedding sidecar for the ops `reindex`/`repair` surfaces.
-    ///
-    /// Also the one embedder shared by the index drain and the retrieval dense
-    /// leg: no second embedder and no duplicate config reads.
-    pub ops_embedder: Option<Arc<dyn Embedder>>,
-    /// Background index drain over the durable outbox (always present).
-    pub index_drain: Arc<IndexDrain>,
-    /// Which runtime pipeline legs are live (dense / rerank / extraction).
-    pub pipeline: PipelineStatus,
-    /// Wakes the background index sweeper after a write (non-blocking nudge).
-    pub(crate) index_wake: Arc<(std::sync::Mutex<bool>, Condvar)>,
-    pub(crate) tool_signals: Arc<crate::tool_signals::ToolSignals>,
-    /// Whether a `consolidate` trigger joins its wave instead of queueing it.
-    ///
-    /// False is the long-lived-binding default: the caller gets `accepted` and
-    /// the wave runs in the background. True is for a process that exits as
-    /// soon as the command returns, where a detached wave would be lost.
-    /// It changes when the work is observed, not what the work is.
-    pub(crate) join_consolidate_wave: bool,
-    /// Automatic maintenance-trigger decision state, keyed by bank: the
-    /// background sweeper writes it and the status surfaces read it
-    /// non-blockingly. Behind an `Arc` so every clone reads one record.
-    pub maintenance_trigger: Arc<MaintenanceTriggerState>,
-    /// Sync journal / cursors / conflicts / DLQ view of the same backend
-    /// (multi-host sync surfaces).
-    pub sync: Arc<dyn SyncStore>,
-    /// Local DEK provider shared with the store; sync serve seals journaled
-    /// content with the same keys the local apply path uses.
-    pub kms: Arc<dyn DekProvider>,
-    /// This node's durable sync device id: read from the installation's store
-    /// and minted on first open, overridden by `CLIO_SYNC_DEVICE_ID` when set.
-    pub device_id: String,
-    /// Bank-scoped retention profiles (verbosity and duplicate-tolerance policy).
-    ///
-    /// Behind an `Arc` so every per-request clone locks and writes the same store.
-    pub retention: Arc<std::sync::Mutex<RetentionStore>>,
-    /// Effective-config `Runtime` behind the config/ranking tools.
-    ///
-    /// `McpState::open` keeps the env-aware runtime it already resolved
-    /// providers from, so `config_get` answers with the same document the
-    /// state was built against. `open_with_effective` hosts get a hermetic,
-    /// env-free runtime whose base layer is the document they supplied.
-    ///
-    /// Behind an `Arc` so a per-request clone serves one runtime, not a second document.
-    pub config: Arc<std::sync::Mutex<clio_config::Runtime>>,
-    /// Durable retention store file, when one is configured for this process.
-    pub retention_path: Option<std::path::PathBuf>,
-    /// Owner-only erasure-journal path a host-supplied document named (see
-    /// `erasure_journal_path_from_document`).
-    ///
-    /// `Some` comes only from [`McpState::open_with_effective`], the
-    /// constructor for a host that already resolved its own configuration:
-    /// the erase boundary records the denial there and no ambient environment
-    /// is read. Every other constructor — `open`, `open_one_shot`, and
-    /// `open_with_runtime` — leaves this `None`, so the erase boundary keeps
-    /// the deployment resolution it has always applied: the
-    /// `CLIO_ERASURE_JOURNAL_FILE` override over the resolved data directory.
-    /// Internal configuration, never a caller or MCP argument.
-    pub journal_path: Option<std::path::PathBuf>,
-    /// Deployment-owned root every `export` / `review_export` destination must
-    /// resolve inside, from the export-root precedence chain; never created here.
-    pub export_root: std::path::PathBuf,
-    /// Whether `export_root` is deployment-owned rather than the relative
-    /// fallback tier resolved against a client project's working directory.
-    pub export_root_trusted: bool,
-    /// Monotonic counter for caller-omitted item ids (see `runtime_context`).
-    ///
-    /// Behind an `Arc` because the counter must stay process-wide: a per-request
-    /// clone starting from the same value would mint colliding item ids.
-    pub(crate) id_counter: Arc<std::sync::atomic::AtomicU64>,
-    pub(crate) calls: Arc<crate::call_accounting::DirectCallAccounting>,
-    /// The credential-bound identity for calls dispatched against this state.
-    ///
-    /// `None` is the unbound contract: the caller-declared actor wins, and any
-    /// bank except the deployment-disabled `shared` one is reachable. That is
-    /// what the local transports use, because a local process has no credential
-    /// edge — the process owner already holds the store.
-    pub(crate) principal: Option<Arc<Principal>>,
-    /// A pinned clock for the read handlers, set by tests that compare the
-    /// protocol handler with direct dispatch. `None` (every production build,
-    /// because the field is `cfg(test)`) keeps the engine's system-clock
-    /// fallback. Test-only.
-    #[cfg(test)]
-    pub(crate) test_now: Option<String>,
-}
 
 impl std::fmt::Debug for McpState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -329,24 +149,53 @@ impl McpState {
     /// privilege the config, ranking, deployment-retention, and bundle import
     /// mutations need — the same administrative set the compliance verbs use.
     /// An unbound state is allowed, because the process owner already holds the
-    /// store.
+    /// store, unless the listener is the unauthenticated off-machine one: there
+    /// nobody's declaration of an administrative actor is worth anything, so the
+    /// unbound allowance does not reach it.
     ///
     /// # Errors
     /// [`ErrorCode::Forbidden`] when a bound credential's actor is not an
-    /// administrator.
+    /// administrator, or when the state is unbound and served off this machine
+    /// without a credential.
     pub(crate) fn authorize_admin(&self) -> Result<(), AmError> {
         let Some(principal) = &self.principal else {
-            return Ok(());
+            return self.require_authenticated_transport();
         };
-        match principal.actor {
-            Actor::Harness | Actor::System => Ok(()),
-            Actor::Agent | Actor::User => Err(AmError::new(
-                ErrorCode::Forbidden,
-                "this credential is not an administrator; config, ranking, \
-                 deployment-retention, and bundle import changes need a \
-                 harness or system credential",
-            )),
+        if principal.actor.is_privileged() {
+            return Ok(());
         }
+        Err(AmError::new(
+            ErrorCode::Forbidden,
+            "this credential is not an administrator; config, ranking, \
+             deployment-retention, and bundle import changes need a \
+             harness or system credential",
+        ))
+    }
+
+    /// Refuse when this state is served by a listener that cannot vouch for a
+    /// caller-declared actor.
+    ///
+    /// Only an unbound state is refused: a bound one names its actor from the
+    /// credential, so the transport does not have to be trusted for that.
+    ///
+    /// # Errors
+    /// [`ErrorCode::Forbidden`] on an unauthenticated off-machine listener.
+    pub(crate) fn require_authenticated_transport(&self) -> Result<(), AmError> {
+        if self.principal.is_none() && self.network_untrusted {
+            return Err(AmError::new(
+                ErrorCode::Forbidden,
+                UNAUTHENTICATED_TRANSPORT_REFUSAL,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Mark this state as served by a listener reachable off this machine.
+    ///
+    /// Called by the HTTP transport on the per-request copy (see
+    /// `http_post::scoped_state`), never on a state a local transport shares.
+    pub(crate) fn mark_network_untrusted(&mut self) {
+        self.network_untrusted = true;
     }
 
     /// Override the export root with an explicitly supplied, deployment-owned
@@ -440,6 +289,10 @@ pub use crate::runtime_open::load_retention_store;
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
 mod runtime_tests;
+
+#[cfg(test)]
+#[path = "runtime_transport_tests.rs"]
+mod runtime_transport_tests;
 
 #[cfg(test)]
 #[path = "runtime_sink_tests.rs"]
