@@ -29,19 +29,25 @@
 //! The backup directory is resolved once and, on unix, held open as a directory
 //! descriptor for the whole run. Every candidate is then examined and removed as
 //! a bare file name in that one descriptor, so no ancestor of the directory can
-//! be swapped under the run and no path is resolved a second time. On unix the
-//! entry is also confirmed by device and inode between the inspection and the
-//! unlink: a name replaced in that gap is refused instead of removed, so a run
-//! never unlinks a file it did not inspect and never credits a size that
-//! describes something else.
+//! be swapped under the run and no candidate path is resolved again after the
+//! directory is held open. On unix the entry is also confirmed by device and
+//! inode between the inspection and the unlink: a name replaced in that gap is
+//! refused instead of removed, so a run never unlinks a file it did not inspect
+//! and never credits a size that describes something else.
 //!
 //! One gap remains, and it is smaller than the one this closes: the confirming
 //! stat and the unlink are not one step, so an attacker able to replace the entry
 //! in the same directory between those two calls still wins. That attacker cannot
 //! reach outside the held directory, because every call names a bare name inside
-//! it, and cannot make the byte count lie, because the bytes credited are the
-//! size the inspection saw and are counted only against an entry the confirm
-//! matched.
+//! it, and cannot make the byte count describe another file, because the bytes
+//! credited are the size the inspection saw and are counted only against an entry
+//! the confirm matched.
+//!
+//! A byte is credited only when the unlink really freed it. A file another hard
+//! link still holds occupies its blocks after the unlink, so that removal is
+//! reported `Deleted` with nothing credited and a reason saying so. A run
+//! therefore never claims a byte that is still on disk, and never credits a size
+//! that describes something else.
 //!
 //! Other platforms have no descriptor to hold and no inode identity to compare,
 //! so they keep the resolved-parent containment plus the path-based
@@ -247,14 +253,16 @@ fn report(backup_dir: &Path, plan: &PrunePlan, remove: bool) -> PruneReport {
 /// entry's own size. Immediately before the `unlinkat` the same bare name is
 /// stat'd again and must still have the same device and inode, so a name replaced
 /// between the inspection and the removal is refused with nothing removed and
-/// nothing credited. Bytes are credited only when the unlink returned success.
+/// nothing credited. Bytes are credited only when the unlink returned success and
+/// the inspection saw one link to the file: a file another hard link still holds
+/// keeps its blocks, so that removal is `Deleted` with nothing credited.
 ///
 /// The one gap that remains is that the confirming stat and the `unlinkat` are
 /// not one step: an attacker able to replace the entry in the same directory
 /// between those two calls still wins. That attacker cannot reach outside the
 /// held directory, because every call names a bare name in it, and cannot make
-/// the byte count lie, because the bytes credited are the size the inspection saw
-/// and are counted only against an entry the confirm matched.
+/// the byte count describe another file, because the bytes credited are the size
+/// the inspection saw and are counted only against an entry the confirm matched.
 ///
 /// A root that could not be resolved or opened leaves every candidate `Failed`:
 /// the run then knows nothing about where the files really are, so it removes
@@ -308,6 +316,11 @@ fn outcome(
 /// proves nothing about containment. The check is deliberately strict: a
 /// candidate the listing built as `backup_dir.join(file_name)` passes, and
 /// anything else is reported rather than deleted.
+///
+/// This is the one place a candidate's parent is resolved, once per candidate.
+/// It runs before the candidate is removed and it is what proves the caller's path
+/// still names the directory the run holds open; after it, no candidate path is
+/// resolved again.
 fn inside<'path>(backup_dir: &Path, root: &Path, path: &'path Path) -> Option<&'path OsStr> {
     let parent = path.parent()?;
     if parent != backup_dir {
@@ -338,3 +351,9 @@ mod prune_delete_dir;
 #[cfg(test)]
 #[path = "prune_delete_containment_tests.rs"]
 mod containment_tests;
+
+/// The hard-link case: an archive another name still holds frees no block, so the
+/// removal is reported and credits nothing.
+#[cfg(all(test, unix))]
+#[path = "prune_delete_link_tests.rs"]
+mod link_tests;

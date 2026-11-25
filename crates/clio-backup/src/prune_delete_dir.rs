@@ -40,6 +40,8 @@
 //! have no descriptor to hold and no inode identity to compare, so this module
 //! keeps the path-based `symlink_metadata`/`remove_file` form there (see
 //! `remove`).
+//!
+//! Keep this module focused on the file-system mechanics of one candidate.
 
 use super::{ArchiveRef, CandidateOutcome, CandidateState};
 use std::ffi::OsStr;
@@ -106,7 +108,10 @@ pub(super) fn hold(backup_dir: &Path) -> Result<BackupDir, String> {
 /// credits all come from it. The name is then stat'd a second time and the two
 /// results must share device and inode, so a name replaced after it was inspected
 /// is refused with nothing removed and nothing credited. Bytes are credited only
-/// after `unlinkat` returned success, from the inspection's own size.
+/// after `unlinkat` returned success, from the inspection's own size, and only
+/// when that inspection saw one link to the file: a file another hard link still
+/// holds frees no blocks, so the entry is reported removed and no byte is
+/// credited. A size that does not fit a byte count is a failure, never a zero.
 #[cfg(unix)]
 pub(super) fn remove(
     held: &BackupDir,
@@ -145,6 +150,11 @@ pub(super) fn remove(
     if !remove {
         return outcome;
     }
+    // The one moment a test may act in, so the two refusal arms below are
+    // guarded by a case and not by hope. A test build only: no other build has
+    // the module, the hook, or this call.
+    #[cfg(all(test, unix))]
+    gap::run(&held.dir, file_name);
     // The entry is confirmed before it is removed: a name replaced after the
     // inspection is refused rather than unlinked, so this run never removes a
     // file it did not inspect and never credits a size that describes another
@@ -172,7 +182,30 @@ pub(super) fn remove(
     match unlinkat(&held.dir, file_name, AtFlags::empty()) {
         Ok(()) => {
             outcome.state = CandidateState::Deleted;
-            outcome.reclaimed_bytes = u64::try_from(inspected.st_size).unwrap_or(0);
+            // A size the file system reports but cannot express as a byte count
+            // is a failure, never a silent zero: a run must not report a removal
+            // it cannot measure.
+            let Ok(bytes) = u64::try_from(inspected.st_size) else {
+                outcome.state = CandidateState::Failed;
+                outcome.detail = Some(format!(
+                    "removing {}: its size {} does not fit a byte count",
+                    candidate.path.display(),
+                    inspected.st_size
+                ));
+                return outcome;
+            };
+            // One link means the unlink freed these blocks. More than one means
+            // the entry was removed from this directory while another name still
+            // holds the file, so no byte was freed and none may be credited: the
+            // entry is gone, its bytes are not.
+            if inspected.st_nlink == 1 {
+                outcome.reclaimed_bytes = bytes;
+            } else {
+                outcome.detail = Some(format!(
+                    "{} was removed, but another link to it still holds its {bytes} bytes",
+                    candidate.path.display()
+                ));
+            }
         }
         Err(Errno::NOENT) => return gone(outcome),
         Err(error) => {
@@ -266,6 +299,54 @@ fn same_entry(first: &rustix::fs::Stat, second: &rustix::fs::Stat) -> bool {
 #[cfg(unix)]
 fn io_error(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
+}
+
+/// The one moment a test may act in: the gap between the inspection and the
+/// identity confirm.
+///
+/// Without it the two refusal arms of the confirm would be reached by no test,
+/// and the mechanism that closes the reported bug would be guarded by nothing.
+/// It is a test build only, so a release build has no hook, no module, and no
+/// call into one. The hook is thread local, so two tests running side by side do
+/// not see each other's action, and the guard clears it on drop, so a failing
+/// assertion cannot leave one set for the next test.
+#[cfg(all(test, unix))]
+pub(crate) mod gap {
+    use std::cell::RefCell;
+    use std::ffi::OsStr;
+    use std::os::fd::OwnedFd;
+
+    /// What a test does in the gap: the held directory and the bare name.
+    type Action = Box<dyn Fn(&OwnedFd, &OsStr)>;
+
+    thread_local! {
+        /// The action this thread's run takes in the gap, when one is set.
+        static HOOK: RefCell<Option<Action>> = const { RefCell::new(None) };
+    }
+
+    /// Act in the gap, when this thread has set a hook. Otherwise do nothing.
+    pub(crate) fn run(dir: &OwnedFd, name: &OsStr) {
+        HOOK.with_borrow(|hook| {
+            if let Some(action) = hook {
+                action(dir, name);
+            }
+        });
+    }
+
+    /// Holds one action in the gap until this value is dropped.
+    pub(crate) struct Hook;
+
+    impl Drop for Hook {
+        fn drop(&mut self) {
+            HOOK.with_borrow_mut(|hook| *hook = None);
+        }
+    }
+
+    /// Set this thread's action in the gap, cleared when the returned guard drops.
+    pub(crate) fn set(action: impl Fn(&OwnedFd, &OsStr) + 'static) -> Hook {
+        HOOK.with_borrow_mut(|hook| *hook = Some(Box::new(action)));
+        Hook
+    }
 }
 
 /// The identity assertions of the confirming stat.

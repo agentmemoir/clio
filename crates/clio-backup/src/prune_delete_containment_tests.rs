@@ -26,6 +26,9 @@ use super::*;
 use crate::SNAPSHOT_EXTENSION;
 use crate::fixtures::Scratch;
 
+/// The size of each same-named file the second directory holds.
+const DECOY_BYTES: u64 = 24;
+
 /// A backup directory named by a symbolic link removes the archive inside the
 /// directory the link names, and reaches nothing outside it.
 ///
@@ -139,15 +142,119 @@ fn a_candidate_whose_parent_is_a_symlink_is_refused() {
     assert_eq!(file_len(&archive), bytes, "and it keeps every byte");
 }
 
-/// A backup directory that cannot be resolved fails every candidate, names the
-/// reason, and removes nothing.
+/// A backup directory repointed under the run removes nothing from the new
+/// target.
 ///
-/// The directory passed in does not exist, so the root itself cannot be
-/// resolved. The candidates are varied on purpose: one under the missing name,
-/// one a real file in another directory, one under a regular file. Every one of
-/// them fails, because the run must not fall back to the raw path: a removal
-/// decided against an unresolved path is exactly the removal this check exists to
-/// prevent.
+/// The link is moved in the one gap the held descriptor and the identity confirm
+/// close. The candidate inspected before the move is removed from the directory
+/// the run holds open, which is the directory the plan was built over. The
+/// candidate after it is refused, because the caller's path no longer resolves to
+/// that directory. The pre-fix code compares the parent's spelling only and then
+/// removes the candidate's path, so it follows the repointed link and takes the
+/// same-named file in the second directory instead.
+#[cfg(unix)]
+#[test]
+fn a_backup_directory_repointed_during_the_run_deletes_nothing_from_the_new_target() {
+    use super::prune_delete_dir::gap;
+    use std::cell::Cell;
+    let scratch = Scratch::new("prune-repoint-midrun");
+    let decoys = Scratch::new("prune-repoint-decoys");
+    let real = scratch.join("real");
+    std::fs::create_dir(&real).expect("the directory the link names");
+    let newest = archive_at(&scratch, 95, "2026-05-05T00:00:00Z", "newest");
+    let second = archive_at(&scratch, 96, "2026-04-04T00:00:00Z", "second");
+    let oldest = archive_at(&scratch, 97, "2026-03-03T00:00:00Z", "third");
+    let names: Vec<std::ffi::OsString> = [&newest, &second, &oldest]
+        .iter()
+        .map(|archive| {
+            archive
+                .file_name()
+                .expect("an archive file name")
+                .to_owned()
+        })
+        .collect();
+    for (archive, name) in [&newest, &second, &oldest].iter().zip(&names) {
+        std::fs::rename(archive, real.join(name))
+            .expect("move the archive into the real directory");
+    }
+    let link = scratch.join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("link to the real directory");
+    let plan = plan_over(&link, 1);
+    assert_eq!(
+        plan.candidates.len(),
+        2,
+        "the two older archives are the candidates"
+    );
+    // One same-named file per archive in the second directory, so a removal that
+    // followed the link again would take it and leave the real one behind.
+    for name in &names {
+        let decoy = decoys.path().join(name);
+        std::fs::write(&decoy, [b'x'; DECOY_BYTES as usize]).expect("write the decoy");
+    }
+    // The link moves under the run, in the gap the confirm closes.
+    let spare = scratch.join("spare");
+    std::os::unix::fs::symlink(decoys.path(), &spare).expect("a second link, not yet in place");
+    let fired = Cell::new(false);
+    let link_for_hook = link.clone();
+    let _hook = gap::set(move |_dir, _name| {
+        if !fired.replace(true) {
+            std::fs::rename(&spare, &link_for_hook).expect("repoint the link in the gap");
+        }
+    });
+
+    let report = delete(&link, &plan);
+
+    assert_eq!(
+        states_of(&report),
+        vec![
+            (plan.candidates[0].id.as_str(), CandidateState::Deleted),
+            (
+                plan.candidates[1].id.as_str(),
+                CandidateState::OutsideDirectory
+            ),
+        ],
+        "the held directory removes one, and the repointed path is refused"
+    );
+    assert!(
+        detail_of(&report.candidates[1]).contains("is not a file inside"),
+        "{:?}",
+        report.candidates[1].detail
+    );
+    for (index, name) in names.iter().enumerate().skip(1) {
+        let decoy = decoys.path().join(name);
+        assert!(
+            decoy.is_file(),
+            "candidate {index} must leave the second directory's file alone"
+        );
+        assert_eq!(
+            file_len(&decoy),
+            DECOY_BYTES,
+            "and it keeps every byte of its own"
+        );
+    }
+    assert!(
+        !real.join(&names[1]).exists(),
+        "the removed candidate left the directory the run holds open"
+    );
+    assert!(
+        real.join(&names[2]).is_file(),
+        "the refused candidate is still where it was"
+    );
+    assert!(
+        real.join(&names[0]).is_file(),
+        "the kept archive stays where it was"
+    );
+    assert_eq!(
+        report.reclaimed_bytes, plan.candidates[0].listed_bytes,
+        "only the candidate the held descriptor removed was credited"
+    );
+    assert_eq!(
+        report.remaining_bytes,
+        plan.listed_bytes - report.reclaimed_bytes,
+        "the remaining figure agrees with what was freed"
+    );
+}
+
 #[test]
 fn an_unresolvable_backup_directory_fails_every_candidate_and_removes_nothing() {
     let scratch = Scratch::new("prune-unresolvable-root");

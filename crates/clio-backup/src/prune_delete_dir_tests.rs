@@ -260,3 +260,100 @@ fn an_unlink_the_directory_refuses_is_reported_and_the_archive_stays() {
         assert!(!archive.exists(), "a DAC-bypassing process unlinked it");
     }
 }
+
+/// An entry replaced between the inspection and the unlink is refused, and the
+/// replacement keeps its bytes.
+///
+/// The hook acts in the one moment the confirm exists to close: after the
+/// inspection and before the second stat. The second stat sees a different inode,
+/// so the run refuses instead of unlinking a file it never inspected, and credits
+/// nothing. The replacement itself stays on disk, because the run removed
+/// nothing at all.
+#[cfg(unix)]
+#[test]
+fn an_entry_replaced_between_the_inspection_and_the_unlink_is_refused() {
+    let scratch = Scratch::new("prune-swap-gap");
+    let archive = scratch.path().join(format!("swapped{SNAPSHOT_EXTENSION}"));
+    std::fs::write(&archive, b"the archive the run inspected")
+        .expect("write the archive the plan names");
+    std::fs::write(
+        scratch.join("replacement.bin"),
+        b"a different file entirely",
+    )
+    .expect("write the file that takes its place");
+    let replacement_bytes = file_len(&scratch.join("replacement.bin"));
+    let plan = plan_with(vec![candidate("swapped", &archive, file_len(&archive))], 0);
+    let _hook = gap::set(|dir, name| {
+        rustix::fs::renameat(dir, "replacement.bin", dir, name)
+            .expect("swap the inspected entry for another file in the gap");
+    });
+
+    let report = delete(scratch.path(), &plan);
+
+    let outcome = &report.candidates[0];
+    assert_eq!(
+        outcome.state,
+        CandidateState::Failed,
+        "a swapped entry is refused, not removed: {outcome:?}"
+    );
+    assert!(
+        detail_of(outcome).contains("changed after it was inspected"),
+        "{outcome:?} must say the entry changed"
+    );
+    assert!(
+        !detail_of(outcome).contains("another process"),
+        "{outcome:?} must not call a swap an absence"
+    );
+    assert_eq!(outcome.reclaimed_bytes, 0, "nothing was credited");
+    assert_eq!(report.reclaimed_bytes, 0, "and the run freed nothing");
+    assert!(report.has_failures(), "the caller sees the failure");
+    assert_eq!(
+        report.remaining_bytes, plan.listed_bytes,
+        "every byte is still there"
+    );
+    assert!(archive.is_file(), "the replacement is still there");
+    assert_eq!(
+        file_len(&archive),
+        replacement_bytes,
+        "and it keeps every byte of its own"
+    );
+}
+
+/// An entry removed between the inspection and the unlink is reported as already
+/// gone, because that is what the code does.
+///
+/// The hook removes the entry in the same gap. The confirming stat then finds no
+/// entry at all, and the run reports the state it reports for an absent name: the
+/// desired end state holds, so it is not a failure and nothing is credited. The
+/// state is asserted as the code produces it, not changed to suit the test.
+#[cfg(unix)]
+#[test]
+fn an_entry_removed_between_the_inspection_and_the_unlink_reports_already_gone() {
+    let scratch = Scratch::new("prune-removed-gap");
+    let archive = scratch.path().join(format!("vanished{SNAPSHOT_EXTENSION}"));
+    std::fs::write(&archive, b"the archive the run inspected").expect("write the archive");
+    let bytes = file_len(&archive);
+    let plan = plan_with(vec![candidate("vanished", &archive, bytes)], 0);
+    let _hook = gap::set(|dir, name| {
+        rustix::fs::unlinkat(dir, name, rustix::fs::AtFlags::empty())
+            .expect("remove the inspected entry in the gap");
+    });
+
+    let report = delete(scratch.path(), &plan);
+
+    let outcome = &report.candidates[0];
+    assert_eq!(
+        outcome.state,
+        CandidateState::AlreadyGone,
+        "the confirm finds no entry, which is the already-gone state: {outcome:?}"
+    );
+    assert!(
+        detail_of(outcome).contains("another process"),
+        "{outcome:?} must say why nothing was removed"
+    );
+    assert!(!outcome.state.is_failure(), "the end state already holds");
+    assert_eq!(outcome.reclaimed_bytes, 0, "nothing was credited");
+    assert_eq!(report.reclaimed_bytes, 0, "and the run freed nothing");
+    assert!(!report.has_failures(), "an absent entry is not a failure");
+    assert!(!archive.exists(), "the entry really is gone");
+}
