@@ -1,1 +1,1 @@
-Clio now refuses to remove a sync key file that changed after it was archived, so a rotation cannot delete a different key than the one it stored.
+Clio now refuses to remove a sync key file that changed after it was archived, so a rotation cannot delete a different key than the one it stored, and a platform that cannot confirm the file's identity refuses and leaves the entry in place.

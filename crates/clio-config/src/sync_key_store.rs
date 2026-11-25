@@ -159,7 +159,7 @@ pub fn delete_with(
 ) -> Result<(), AmError> {
     match source {
         KeySource::File => match file {
-            Some(path) => file_store::remove_key(&path),
+            Some(path) => crate::sync_key_file_remove::remove_entry(&path),
             None => Ok(()),
         },
         KeySource::Keystore => store.delete(),

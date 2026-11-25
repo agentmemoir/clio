@@ -296,50 +296,6 @@ fn a_stale_record_that_cannot_be_removed_says_which_step_failed() {
     assert!(err.message.contains(CREATED_NAME), "{}", err.message);
 }
 
-// ----------------------------------------------------------------- removal
-
-#[test]
-fn removal_drops_the_key_file_and_its_sidecar() {
-    let dir = TempDir::new("remove");
-    write_key(&dir.key(), &[7_u8; KEY_LEN]).expect("write");
-    write_created(Some(&dir.key()), "2026-10-01T00:00:00Z").expect("record");
-
-    remove_key(&dir.key()).expect("remove");
-
-    assert!(!dir.key().exists());
-    assert!(!dir.join(CREATED_NAME).exists());
-}
-
-#[test]
-fn removing_what_is_not_there_succeeds() {
-    let dir = TempDir::new("remove-absent");
-
-    remove_key(&dir.key()).expect("deleting nothing is the state the caller asked for");
-}
-
-#[test]
-fn a_bare_path_with_no_directory_still_removes_cleanly() {
-    // The sidecar path is `None` for a bare filename, so the loop skips it and
-    // the file itself is a NotFound, which is the state the caller asked for.
-    let bare = format!("clio-sync-key-absent-{}.key", std::process::id());
-
-    remove_key(std::path::Path::new(&bare)).expect("an absent bare path is not an error");
-}
-
-#[test]
-fn a_removal_that_cannot_finish_names_the_path_it_stuck_on() {
-    let dir = TempDir::new("remove-blocked");
-    write_key(&dir.key(), &[8_u8; KEY_LEN]).expect("write");
-    // A directory where the sidecar goes: `remove_file` refuses it, and the key
-    // is already gone, so the error has to name what was left behind.
-    fs::create_dir(dir.join(CREATED_NAME)).expect("the sidecar path is a directory");
-
-    let err = remove_key(&dir.key()).expect_err("a directory is not removable as a file");
-
-    assert!(err.message.contains("cannot remove"), "{}", err.message);
-    assert!(err.message.contains(CREATED_NAME), "{}", err.message);
-}
-
 #[test]
 fn a_key_path_that_is_a_readable_directory_is_refused_on_read() {
     let dir = TempDir::new("read-is-dir");

@@ -200,11 +200,6 @@ pub(crate) fn write_key(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), AmError>
         .map_err(|err| io_error(path, "write", &err))
 }
 
-/// Remove the sync key file and its sidecar, succeeding when neither exists.
-pub(crate) fn remove_key(path: &Path) -> Result<(), AmError> {
-    crate::sync_key_file_remove::remove_entry(path)
-}
-
 /// Read the creation-time sidecar beside `key_file`.
 ///
 /// An absent sidecar is a missing creation time, never a missing key: the key

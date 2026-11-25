@@ -41,6 +41,17 @@ fn a_held_read_returns_the_bytes_of_the_file_it_opened() {
         KEY_LEN as u64,
         "the descriptor is the key file itself"
     );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let held_meta = held.metadata().expect("held metadata");
+        let path_meta = std::fs::metadata(dir.key()).expect("path metadata");
+        assert_eq!(
+            (held_meta.dev(), held_meta.ino()),
+            (path_meta.dev(), path_meta.ino()),
+            "the descriptor is open on the file the path still names"
+        );
+    }
 }
 
 #[test]

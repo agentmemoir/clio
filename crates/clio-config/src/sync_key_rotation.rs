@@ -284,10 +284,10 @@ pub(crate) fn rotate_existing(
                 file,
                 &ArchivedSyncKey {
                     key_b64: base64::engine::general_purpose::STANDARD.encode(key.as_slice()),
-                    created_at,
+                    created_at: created_at.clone(),
                 },
             )?;
-            crate::sync_key_file_remove::remove_key_holding(path, &held)
+            crate::sync_key_file_remove::remove_key_holding(path, &held, created_at.as_deref())
         }
         KeySource::Keystore => {
             if let Some(path) = file.filter(|path| path.exists()) {
