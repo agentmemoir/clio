@@ -276,10 +276,9 @@ pub(crate) fn rotate_existing(
             let Some(path) = file else {
                 return Ok(());
             };
-            if !path.exists() {
+            let Some((key, held)) = file_store::read_key_holding(path)? else {
                 return Ok(());
-            }
-            let key = file_store::read_key(path)?;
+            };
             let created_at = file_store::read_created(Some(path))?;
             append_entry(
                 file,
@@ -288,7 +287,7 @@ pub(crate) fn rotate_existing(
                     created_at,
                 },
             )?;
-            file_store::remove_key(path)
+            crate::sync_key_file_remove::remove_key_holding(path, &held)
         }
         KeySource::Keystore => {
             if let Some(path) = file.filter(|path| path.exists()) {
