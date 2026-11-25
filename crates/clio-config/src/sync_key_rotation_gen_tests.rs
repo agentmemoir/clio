@@ -67,6 +67,51 @@ fn rotation_archives_the_file_key_before_it_lets_go() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn an_entry_that_changed_after_the_archive_is_refused_and_the_archive_survives() {
+    let dir = TempDir::new("rotate-changed");
+    let archived = [7_u8; KEY_LEN];
+    file_store::write_key(&dir.key(), &archived).expect("seed the key file");
+    file_store::write_created(Some(&dir.key()), "2026-02-02T00:00:00Z").expect("seed the time");
+    let (_key, held) = file_store::read_key_holding(&dir.key())
+        .expect("read")
+        .expect("a key to hold");
+    let replacement = [8_u8; KEY_LEN];
+    std::fs::remove_file(dir.key()).expect("let go of the archived entry");
+    file_store::write_key(&dir.key(), &replacement).expect("write the replacement");
+    let entry = ArchivedSyncKey {
+        key_b64: base64::engine::general_purpose::STANDARD.encode(archived),
+        created_at: Some("2026-02-02T00:00:00Z".to_owned()),
+    };
+    append_entry(Some(&dir.key()), &entry).expect("archive the key that was read");
+
+    let err = crate::sync_key_file_remove::remove_key_holding(
+        &dir.key(),
+        &held,
+        Some("2026-02-02T00:00:00Z"),
+    )
+    .expect_err("the entry at the path is not the key the archive took");
+
+    assert_eq!(
+        err.code,
+        clio_types::ErrorCode::Forbidden,
+        "{}",
+        err.message
+    );
+    assert_eq!(
+        std::fs::read(dir.key()).expect("read the replacement"),
+        replacement,
+        "the replacement is still there, byte for byte"
+    );
+    let entries = read_entries(Some(&dir.key())).expect("read the archive");
+    assert_eq!(
+        entries,
+        vec![entry],
+        "the archive still lists the archived key"
+    );
+}
+
 #[test]
 fn rotation_of_an_absent_key_is_a_quiet_no_op() {
     let dir = TempDir::new("rotate-absent");
