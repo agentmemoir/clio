@@ -18,9 +18,11 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use crate::cli_read_cap::MAX_INPUT_BYTES;
 use crate::cli_read_test_support::{call, json_of, seed_item, state};
 use crate::cli_write_group::WriteGroup;
 use crate::cli_write_test_support::{run_write_resolved, run_write_state, run_write_state_stdin};
+use clio_store::MAX_BATCH_OPS;
 use serde_json::{Value, json};
 use std::io::Cursor;
 use std::process::ExitCode;
@@ -173,6 +175,95 @@ fn batch_reads_operations_from_stdin_with_dash() {
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     assert!(out.contains("batch: 2 operations committed"), "{out}");
     assert_eq!(bank_count(&s, "default"), 2);
+}
+
+#[test]
+fn batch_rejects_stdin_larger_than_the_byte_cap() {
+    let s = state();
+    // The document is a complete, valid batch padded past the cap, so the store
+    // count below can tell "refused before any write" from "committed part of
+    // the document": were the cap not to fire, both operations would commit and
+    // the bank would hold two items rather than none.
+    let mut bytes = json!({
+        "operations": [
+            store_op("itm-cap-1", "prefers terse answers"),
+            store_op("itm-cap-2", "prefers aisle seats")
+        ]
+    })
+    .to_string()
+    .into_bytes();
+    bytes.resize(MAX_INPUT_BYTES + 1, b' ');
+    let mut reader = Cursor::new(bytes);
+    let (code, out, err) = run_write_state_stdin("batch", &["--file", "-"], &mut reader, &s, false);
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    let mebibytes = format!("{} MiB", MAX_INPUT_BYTES / (1024 * 1024));
+    assert!(err.contains("`batch --file -` is larger than the"), "{err}");
+    assert!(err.contains(&mebibytes), "{err}");
+    assert!(err.contains("one transaction"), "{err}");
+    assert!(
+        !err.contains("split the document"),
+        "a batch is atomic, so splitting it is not the alternative: {err}"
+    );
+    assert_eq!(
+        bank_count(&s, "default"),
+        0,
+        "refused before any write: neither operation of the padded document committed"
+    );
+}
+
+#[test]
+fn batch_rejects_more_operations_than_the_operation_cap_before_any_write() {
+    let s = state();
+    let ops: Vec<Value> = (0..=MAX_BATCH_OPS)
+        .map(|i| store_op(&format!("itm-over-{i}"), "prefers terse answers"))
+        .collect();
+    let document = json!({"operations": ops}).to_string();
+    let mut reader = Cursor::new(document.into_bytes());
+    let (code, out, err) = run_write_state_stdin("batch", &["--file", "-"], &mut reader, &s, false);
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(
+        err.contains(&format!("carries {} operations", MAX_BATCH_OPS + 1)),
+        "{err}"
+    );
+    assert!(
+        err.contains(&format!("{MAX_BATCH_OPS}-operation cap")),
+        "{err}"
+    );
+    assert!(err.contains("one transaction"), "{err}");
+    assert_eq!(bank_count(&s, "default"), 0, "refused before any write");
+}
+
+#[test]
+fn batch_rejects_a_file_path_past_the_byte_cap() {
+    let s = state();
+    let mut body = json!({"operations": []}).to_string().into_bytes();
+    body.resize(MAX_INPUT_BYTES + 1, b' ');
+    let path = ops_file("oversized", &String::from_utf8(body).expect("ascii"));
+    let arg = format!("--file={}", path.display());
+    let (code, out, err) = run_write_state("batch", &[&arg], &s, false);
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(
+        err.contains(&format!("--file `{}` is larger than the", path.display())),
+        "{err}"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn batch_accepts_stdin_exactly_at_the_byte_cap() {
+    let s = state();
+    let document = "{\"operations\":[]}";
+    let mut bytes = document.as_bytes().to_vec();
+    bytes.resize(MAX_INPUT_BYTES, b' ');
+    let mut reader = Cursor::new(bytes);
+    let (code, out, err) = run_write_state_stdin("batch", &["--file", "-"], &mut reader, &s, false);
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    let payload = json_of(&out);
+    assert_eq!(
+        payload["operations"].as_array().map(Vec::len),
+        Some(0),
+        "{payload}"
+    );
 }
 
 #[test]

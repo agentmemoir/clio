@@ -18,6 +18,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use crate::cli_read_cap::MAX_INPUT_BYTES;
 use crate::cli_read_test_support::{call, json_of, seed_item, state};
 use crate::cli_write_test_support::{run_write_state, run_write_state_stdin};
 use serde_json::json;
@@ -240,6 +241,37 @@ fn clean_reads_candidates_from_stdin_with_dash() {
     assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
     assert_eq!(json_of(&out)["would_flag"], json!(1), "{out}");
     assert_eq!(stats(&s)["items_active"], json!(1), "dry-run: zero writes");
+}
+
+#[test]
+fn clean_rejects_stdin_larger_than_the_byte_cap() {
+    let s = state();
+    seed_item(&s, "demo", "itm-h9", "stale duplicated note");
+    let mut reader = Cursor::new(vec![b' '; MAX_INPUT_BYTES + 1]);
+    let args = ["--file", "-", "--action", "flag"];
+    let (code, out, err) = run_write_state_stdin("hygiene clean", &args, &mut reader, &s, false);
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    let mebibytes = format!("{} MiB", MAX_INPUT_BYTES / (1024 * 1024));
+    assert!(
+        err.contains("`hygiene clean --file -` is larger than the") && err.contains(&mebibytes),
+        "{err}"
+    );
+    assert_eq!(stats(&s)["items_active"], json!(1), "zero writes");
+}
+
+#[test]
+fn clean_accepts_stdin_exactly_at_the_byte_cap() {
+    let s = state();
+    seed_item(&s, "demo", "itm-h10", "stale duplicated note");
+    let mut bytes = json!({"candidates": [{"item_id": "itm-h10"}]})
+        .to_string()
+        .into_bytes();
+    bytes.resize(MAX_INPUT_BYTES, b' ');
+    let mut reader = Cursor::new(bytes);
+    let args = ["--file", "-", "--action", "flag"];
+    let (code, out, err) = run_write_state_stdin("hygiene clean", &args, &mut reader, &s, false);
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    assert_eq!(json_of(&out)["would_flag"], json!(1), "{out}");
 }
 
 #[test]

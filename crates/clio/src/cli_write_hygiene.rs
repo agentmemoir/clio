@@ -40,6 +40,11 @@ pub(crate) struct HygieneWriteGroup;
 /// each candidate's own suggested action.
 const ACTIONS: &[&str] = &["flag", "archive", "discard", "delete", "apply_suggested"];
 
+/// What a caller can do about a candidates document that is too large for this
+/// command. Clean candidates are independent of one another, so a second run
+/// over the rest of them applies exactly those and nothing else.
+const TOO_LARGE: &str = "split the document across more than one run: each clean candidate is an independent target, so a later run applies only that document's candidates";
+
 impl WriteGroup for HygieneWriteGroup {
     fn verbs(&self) -> &'static [&'static str] {
         &["hygiene clean"]
@@ -119,13 +124,12 @@ fn clean_call(
                     "try 'clio hygiene clean --file - < candidates.json'",
                 ));
             };
-            std::io::read_to_string(stdin).map_err(|error| {
-                CliError::usage(format!("`hygiene clean --file -` is not readable: {error}"))
-            })?
+            crate::cli_read_cap::read_document(stdin, "`hygiene clean --file -`", TOO_LARGE)?
         }
-        other => std::fs::read_to_string(other).map_err(|error| {
-            CliError::usage(format!("--file `{other}` is not readable: {error}"))
-        })?,
+        other => {
+            let what = format!("--file `{other}`");
+            crate::cli_read_cap::read_document_file(other, &what, TOO_LARGE)?
+        }
     };
     let candidates = parse_candidates(&raw)?;
     let action = match parsed.value("action") {
@@ -165,8 +169,11 @@ fn parse_candidates(raw: &str) -> Result<Vec<Value>, CliError> {
     })?;
     let entries = match value {
         Value::Array(entries) => entries,
-        Value::Object(fields) => match fields.get("candidates") {
-            Some(Value::Array(entries)) => entries.clone(),
+        // The map is owned here, so the array is taken out of it instead of
+        // copied: a second copy of every candidate is exactly the memory the
+        // input caps exist to bound.
+        Value::Object(mut fields) => match fields.remove("candidates") {
+            Some(Value::Array(entries)) => entries,
             Some(_) => {
                 return Err(CliError::usage(
                     "--file `candidates` must be a JSON array of candidate objects",
@@ -185,8 +192,25 @@ fn parse_candidates(raw: &str) -> Result<Vec<Value>, CliError> {
             ));
         }
     };
-    let mut candidates = Vec::with_capacity(entries.len());
-    for entry in &entries {
+    let mut candidates = Vec::new();
+    // The entry cap is enforced here, before the copy: it is the count of
+    // candidates this command would build a second tree for. A page never comes
+    // near it, because the audit report this command consumes is bounded by the
+    // scan page rather than by how many items a bank holds.
+    if entries.len() > crate::cli_read_cap::MAX_INPUT_ENTRIES {
+        return Err(CliError::usage_hint(
+            format!(
+                "`hygiene clean` carries {} candidates, over the {}-entry input cap",
+                entries.len(),
+                crate::cli_read_cap::MAX_INPUT_ENTRIES
+            ),
+            TOO_LARGE,
+        ));
+    }
+    candidates.reserve(entries.len());
+    // Each entry is consumed as it is validated, so the parsed document is
+    // replaced candidate by candidate rather than held alongside its copy.
+    for entry in entries {
         candidates.push(candidate(entry)?);
     }
     Ok(candidates)
@@ -196,28 +220,29 @@ fn parse_candidates(raw: &str) -> Result<Vec<Value>, CliError> {
 /// `noise_score`, optional string `suggested_action`. Unknown extra fields
 /// (e.g. the audit report's reasons/preview) are dropped; the tool owns what a
 /// clean target accepts.
-fn candidate(entry: &Value) -> Result<Value, CliError> {
-    let Some(object) = entry.as_object() else {
+fn candidate(entry: Value) -> Result<Value, CliError> {
+    let Value::Object(mut object) = entry else {
         return Err(CliError::usage(
             "--file candidates entries must be JSON objects with a string `item_id`",
         ));
     };
-    let item_id = object
-        .get("item_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| CliError::usage("--file candidates entries require a string `item_id`"))?;
+    let Some(Value::String(item_id)) = object.remove("item_id") else {
+        return Err(CliError::usage(
+            "--file candidates entries require a string `item_id`",
+        ));
+    };
     let mut candidate = serde_json::Map::new();
     candidate.insert("item_id".into(), Value::from(item_id));
-    if let Some(score) = object.get("noise_score") {
+    if let Some(score) = object.remove("noise_score") {
         if !score.is_number() {
             return Err(CliError::usage(
                 "--file candidates `noise_score` must be a number",
             ));
         }
-        candidate.insert("noise_score".into(), score.clone());
+        candidate.insert("noise_score".into(), score);
     }
-    if let Some(action) = object.get("suggested_action") {
-        let Some(action) = action.as_str() else {
+    if let Some(action) = object.remove("suggested_action") {
+        let Value::String(action) = action else {
             return Err(CliError::usage(
                 "--file candidates `suggested_action` must be a string",
             ));
@@ -288,3 +313,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cli_write_hygiene_parse_tests.rs"]
 mod parse_tests;
+
+#[cfg(test)]
+#[path = "cli_write_hygiene_cap_tests.rs"]
+mod cap_tests;

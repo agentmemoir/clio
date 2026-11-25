@@ -96,6 +96,7 @@ mod cli_output;
 mod cli_read;
 mod cli_read_args;
 mod cli_read_belief;
+mod cli_read_cap;
 mod cli_read_core;
 mod cli_read_graph;
 mod cli_read_group;
