@@ -131,11 +131,11 @@ fn the_bounds_decide_every_stamp_by_direction_and_distance() {
             expected: ApplyOutcome::Stale,
         },
         Case {
-            label: "a zero age bound also disables the unplaceable-stamp refusal",
+            label: "a zero age bound still refuses an unplaceable stamp",
             stamp: UNREADABLE,
             now: written,
             skew: 0,
-            expected: ApplyOutcome::Applied,
+            expected: ApplyOutcome::Stale,
         },
         Case {
             label: "an extreme clock reading does not panic",
@@ -167,6 +167,22 @@ fn the_bounds_decide_every_stamp_by_direction_and_distance() {
             case.label
         );
     }
+}
+
+/// At the shipped default window, a stamp this build cannot place must not
+/// win last writer wins against a stored canonical row by sorting above it.
+#[test]
+fn the_default_window_refuses_an_unplaceable_stamp_before_it_can_win_lww() {
+    let (store, _kms) = fixture();
+    let written = parse_utc_epoch(STAMP).expect("the fixture stamp parses");
+    let canonical = upsert("m-canonical", "b-lww", STAMP, "dev-a", "canonical");
+    let at = |m| apply_at(&store, m, written, ENVELOPE_SKEW_DEFAULT_SECS);
+    assert_eq!(at(&canonical), ApplyOutcome::Applied);
+    let mut poison = upsert("m-poison", "b-lww", STAMP, "dev-z", "poison");
+    poison.transaction_time = "zzzzzzzzzzzzzzzzzzzz".into();
+    assert_eq!(at(&poison), ApplyOutcome::Stale);
+    let row = store.get_memory_item("b-lww", "i-1").expect("read item");
+    assert_eq!(row.expect("canonical row stays").gist.as_deref(), Some("canonical"));
 }
 
 /// The shipped default is no age bound, so an ordinary backlog applies. A

@@ -10,7 +10,8 @@
 //! ## Owns
 //! - The past-directed age bound over `transaction_time` and one clock reading
 //! - The separate, larger future allowance that protects LWW integrity
-//! - The disabled window (`0` tolerance checks nothing)
+//! - The disabled window (`0` tolerance checks no distance bound, but a stamp
+//!   the reader cannot place is still refused)
 //! - The refusal of a stamp the reader cannot place, and the documented legacy
 //!   stamp forms this reader places instead of refusing
 //! - The instant-aware order of two writer stamps carried in different
@@ -197,19 +198,19 @@ pub(crate) fn unplaceable_stamp_value(err: &AmError) -> Option<&str> {
 /// the past is refused as an age bound: `max_envelope_skew_secs` seconds, which
 /// is the operator setting. A stamp too far in the future is refused by
 /// [`ENVELOPE_FUTURE_ALLOWANCE_SECS`], which keeps a fast clock from reordering
-/// the merge. A past bound of `0` disables both, so the check answers `false`
-/// for every stamp.
+/// the merge. A past bound of `0` disables both distance bounds, but a stamp
+/// this build cannot place is refused at every bound.
 pub(crate) fn is_stale(engine: &ApplyEngine<'_>, transaction_time: &str) -> bool {
-    let max_age = engine.max_envelope_skew_secs;
-    if max_age == 0 {
-        return false;
-    }
     let Some(written) = writer_stamp_epoch(transaction_time) else {
         // A stamp this crate cannot place says nothing about freshness, so the
         // envelope is refused instead of trusted. The refusal records the
         // stamp as malformed, not as old.
         return true;
     };
+    let max_age = engine.max_envelope_skew_secs;
+    if max_age == 0 {
+        return false;
+    }
     let now = (engine.clock)();
     let max_age = i64::try_from(max_age).unwrap_or(i64::MAX);
     let max_ahead = i64::try_from(ENVELOPE_FUTURE_ALLOWANCE_SECS).unwrap_or(i64::MAX);
