@@ -157,8 +157,11 @@ fn the_serve_description_names_the_admin_gate_the_grant_dev_mode_and_the_bind_ru
         "every served bank must be inside that credential's grant",
         "out-of-grant bank is refused",
         "`dev: true` serves without authentication",
+        "on a loopback bind",
         "exercise/debug path",
-        "non-loopback bind is refused",
+        "a non-loopback bind needs both the operator setting `sync.allow_public_bind`",
+        "the credential store passed as `token_file`",
+        "in every mode, dev included",
         "sync.allow_public_bind",
         "sync.max_envelope_skew_secs",
         "`0` disables the window",
@@ -174,6 +177,13 @@ fn the_serve_description_names_the_admin_gate_the_grant_dev_mode_and_the_bind_ru
     assert!(
         !description.contains("unless dev=true"),
         "dev mode is not the only unauthenticated path any more: {description}"
+    );
+    let dev = tool["inputSchema"]["properties"]["dev"]["description"]
+        .as_str()
+        .expect("a dev description");
+    assert!(
+        dev.contains("on a loopback address only"),
+        "the dev description must limit the anonymous bind to loopback: {dev}"
     );
 }
 

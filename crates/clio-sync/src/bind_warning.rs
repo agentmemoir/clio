@@ -31,8 +31,8 @@
 //! # Why warn an admitted bind rather than refuse it
 //!
 //! Whether a bind outside loopback may serve at all is settled before this
-//! module is reached: without auth material it is refused outside dev mode, and
-//! with the operator setting off it is refused by `bind_admission`. So the
+//! module is reached: without a credential store it is refused in every mode,
+//! and with the operator setting off it is refused by `bind_admission`. So the
 //! warning runs only on the path the operator has explicitly allowed, and its
 //! job there is to name what that admitted bind exposes rather than to argue
 //! about whether it should happen. It fires in every mode, dev included,

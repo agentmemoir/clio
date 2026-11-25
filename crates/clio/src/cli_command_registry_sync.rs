@@ -72,7 +72,7 @@ const SERVE_CREDENTIAL_NOTE: &str = "runs in the foreground for the resolved TTL
 /// The `serve` cleartext note: the bind admission rule, everything a
 /// non-loopback relay can see, what it cannot, and the reverse-proxy rule for a
 /// public bind.
-const SERVE_CLEARTEXT_NOTE: &str = "a bind to a non-loopback address is refused unless the operator setting `sync.allow_public_bind` allows it, and an allowed one warns on stderr, in every mode including --dev: bank scope (which bank a row belongs to), record kind (which shape the peer opens), operation (what the peer applies), transaction time (the order rows win in), and device id (which node wrote a row, and the tie-break when timestamps are equal) cross the network in the clear; the record identifier and the content digest cross in the clear too, in a form derived under a key the relay does not hold, so a relay can neither read them nor confirm a guessed value against them, though it does hold one stable value per row, and an identifier the machine generated is sent unchanged rather than as such a form; a relay also sees the record-kind mix and the device-id stability across time, which are routing-necessary rather than harmless; only the content and the admission score are sealed; this describes rows pushed from a sealing-capable build onward, and rows already on a relay keep their older cleartext identifiers until they are naturally re-pushed; put a TLS-terminating reverse proxy in front of a public bind";
+const SERVE_CLEARTEXT_NOTE: &str = "a bind to a non-loopback address is refused unless the operator setting `sync.allow_public_bind` allows it, and it also needs a credential store (`--token-file`) in every mode including --dev, so a token-less bind is refused even when the setting allows it; an admitted bind with a credential store warns on stderr, in every mode including --dev: bank scope (which bank a row belongs to), record kind (which shape the peer opens), operation (what the peer applies), transaction time (the order rows win in), and device id (which node wrote a row, and the tie-break when timestamps are equal) cross the network in the clear; the record identifier and the content digest cross in the clear too, in a form derived under a key the relay does not hold, so a relay can neither read them nor confirm a guessed value against them, though it does hold one stable value per row, and an identifier the machine generated is sent unchanged rather than as such a form; a relay also sees the record-kind mix and the device-id stability across time, which are routing-necessary rather than harmless; only the content and the admission score are sealed; this describes rows pushed from a sealing-capable build onward, and rows already on a relay keep their older cleartext identifiers until they are naturally re-pushed; put a TLS-terminating reverse proxy in front of a public bind";
 
 /// The `keygen` note: the once-only print, the rotation order, and what a peer
 /// without the new key does.
@@ -262,7 +262,7 @@ pub(crate) const SYNC_SERVE: CommandSpec = CommandSpec {
         },
         Flag::toggle(
             "dev",
-            "Allows a token-less anonymous bind; `sync serve` refuses one without this outside dev mode.",
+            "Allows a token-less anonymous bind on a loopback address only; a non-loopback bind needs a credential store (`--token-file`) in every mode, dev included.",
         ),
         GLOBAL_OUTPUT,
     ],
