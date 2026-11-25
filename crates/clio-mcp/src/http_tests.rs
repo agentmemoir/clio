@@ -350,3 +350,86 @@ fn resource_bounds_are_pinned_to_the_recorded_values() {
     assert_eq!(DEFAULT_DEADLINE_SECS, 30, "30 s total request deadline");
     assert_eq!(MAX_CONNECTIONS, 32, "32 concurrent-connection cap");
 }
+
+/// The fact the transport marks a handler with, read off the address the
+/// listener actually holds: an off-machine wildcard bind with no credential is
+/// untrusted, and the same configuration on loopback is not. No off-machine peer
+/// is contacted; the predicate is the seam under judgement.
+#[test]
+fn the_listener_address_decides_the_transport_trust() {
+    let cfg = HttpConfig {
+        insecure_no_auth: true,
+        insecure_bind_any: true,
+        ..HttpConfig::default()
+    };
+    for (bind, untrusted) in [("127.0.0.1:0", false), ("0.0.0.0:0", true)] {
+        let listener = TcpListener::bind(bind).expect("bind");
+        let loopback = listener.local_addr().expect("addr").ip().is_loopback();
+        assert_eq!(
+            http_start_guard::serves_untrusted_network(&cfg, loopback),
+            untrusted,
+            "a {bind} listener with no credential source"
+        );
+    }
+    let sourced = HttpConfig {
+        credentials: Some(Arc::new(single_record_store())),
+        ..cfg
+    };
+    assert!(
+        !http_start_guard::serves_untrusted_network(&sourced, false),
+        "a credential source vouches for the caller wherever it is served"
+    );
+}
+
+/// The triple every actor scenario writes, so the only difference between them
+/// is the actor it declares.
+const TRIPLE_ACTOR_ARGS: &str =
+    r#""subject":"a","predicate":"b","object":"c","epistemic_kind":"fact","bank":"bank-a""#;
+
+/// The header a reverse proxy, a published container port, or a tunnel adds
+/// when it delivers someone else's request to a loopback socket.
+const FORWARDED: &str = "X-Forwarded-For: 192.0.2.10\r\n";
+
+/// A loopback listener serving a forwarded caller refuses a declared
+/// administrative actor on a tool call, and refuses the administrative verbs on
+/// the same ground, rather than reading the declaration as fact.
+#[test]
+fn a_forwarded_caller_refuses_a_privileged_actor_over_http() {
+    let (port, _) = spawn_all_tools_server(HttpConfig::default());
+    for actor in ["harness", "system"] {
+        let args = format!("{{{TRIPLE_ACTOR_ARGS},\"actor\":\"{actor}\"}}");
+        let res = post_call(port, "triple_add", &args, FORWARDED);
+        assert_eq!(res.status, 200, "the envelope is served: {}", res.body);
+        let body: Value = serde_json::from_str(&res.body).expect("json");
+        let text = body["result"].to_string();
+        assert_eq!(body["result"]["isError"], json!(true), "{text}");
+        assert!(text.contains("forbidden"), "an authorization error: {text}");
+        assert!(
+            text.contains("unauthenticated"),
+            "the refusal names the transport: {text}"
+        );
+    }
+    let admin = post_call(
+        port,
+        "config_set",
+        r#"{"path":"/mcp","value":{}}"#,
+        FORWARDED,
+    );
+    let body: Value = serde_json::from_str(&admin.body).expect("json");
+    let text = body["result"].to_string();
+    assert_eq!(body["result"]["isError"], json!(true), "{text}");
+    assert!(text.contains("unauthenticated"), "{text}");
+}
+
+/// The same request without the forwarding header keeps the contract the
+/// loopback listener always had: the local process owner's declaration is
+/// honoured, so the actor, not the listener address, is what differs.
+#[test]
+fn a_loopback_listener_still_honours_a_privileged_actor() {
+    let (port, _) = spawn_all_tools_server(HttpConfig::default());
+    let args = format!("{{{TRIPLE_ACTOR_ARGS},\"actor\":\"harness\"}}");
+    let res = post_call(port, "triple_add", &args, "");
+    assert_eq!(res.status, 200, "{}", res.body);
+    let body: Value = serde_json::from_str(&res.body).expect("json");
+    assert_eq!(body["result"]["isError"], json!(false), "{}", res.body);
+}

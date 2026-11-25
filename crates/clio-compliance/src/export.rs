@@ -298,13 +298,13 @@ fn refusal_error(refusal: DeliveryRefusal) -> AmError {
 
 /// Only harness/system actors carry export privilege.
 fn authorize(actor: Actor) -> Result<(), AmError> {
-    match actor {
-        Actor::Harness | Actor::System => Ok(()),
-        Actor::Agent | Actor::User => Err(AmError::new(
-            ErrorCode::Forbidden,
-            "memory export requires a harness or system actor with compliance privilege",
-        )),
+    if actor.is_privileged() {
+        return Ok(());
     }
+    Err(AmError::new(
+        ErrorCode::Forbidden,
+        "memory export requires a harness or system actor with compliance privilege",
+    ))
 }
 
 /// Honest completeness: `true` only when nothing was narrowed or truncated.
