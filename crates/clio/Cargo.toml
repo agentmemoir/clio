@@ -65,6 +65,11 @@ sha2 = { workspace = true }
 # `SIG_IGN` at startup, which turns a broken pipe into an `EPIPE` error that
 # `println!` panics on. Unix-only, so the dependency is target-scoped.
 libc = { workspace = true }
+# The foreign-config write opens the target's parent directory once and does
+# every later step through that descriptor, so the entry it judges is the
+# entry it replaces. `openat`, `statat`, `renameat`, and `unlinkat` are the
+# whole surface, and std has no descriptor-relative form.
+rustix = { workspace = true }
 
 [lints]
 workspace = true

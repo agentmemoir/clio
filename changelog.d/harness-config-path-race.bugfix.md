@@ -1,0 +1,1 @@
+The harness config editor now judges and replaces one entry through a single directory handle, so a local process that swaps a symlink in between the two steps can no longer redirect the write onto a different file.
