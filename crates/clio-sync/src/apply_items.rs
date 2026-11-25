@@ -4,7 +4,7 @@
 //! # Responsibility
 //!
 //! This module is responsible for the item apply effects: decoding one item
-//! payload, the bank and shredded-subject checks, the last-writer-wins update
+//! payload, the identity, bank, and shredded-subject checks, the last-writer-wins update
 //! resolution, and the create / invalidate / discard durable writes.
 //!
 //! ## Owns
@@ -27,7 +27,8 @@
 //!
 //! Keep this module focused on the item apply effects.
 
-use crate::apply::{ApplyEngine, ApplyOutcome, dead_letter, lww_loser};
+use crate::apply::apply_freshness::writer_stamp_epoch;
+use crate::apply::{ApplyEngine, ApplyOutcome, dead_letter, lww_loser, malformed_payload_stamp};
 use crate::protocol::{SyncContent, SyncMutation};
 use clio_types::{AmError, ErrorCode, MemoryItem};
 
@@ -51,6 +52,17 @@ pub(crate) fn apply_item_upsert(
             return crate::apply_history::reject(engine, m, envelope_json, "bad item content", &e);
         }
     };
+    if m.entity_id != item.id {
+        return dead_letter(
+            engine,
+            m,
+            envelope_json,
+            &AmError::new(
+                ErrorCode::InvalidArgument,
+                "item entity_id must be the item id",
+            ),
+        );
+    }
     if item.bank_id != m.bank {
         return dead_letter(
             engine,
@@ -75,6 +87,15 @@ pub(crate) fn apply_item_upsert(
     }
     if let Err(err) = item.validate() {
         return dead_letter(engine, m, envelope_json, &err);
+    }
+    if writer_stamp_epoch(&item.updated_at).is_none() {
+        return malformed_payload_stamp(
+            engine,
+            m,
+            envelope_json,
+            "item updated_at",
+            &item.updated_at,
+        );
     }
     if let Some(existing) = engine.store.get_memory_item(&m.bank, &m.entity_id)? {
         if lww_loser(engine, m, &existing.updated_at, existing.admission_score)? {
@@ -157,3 +178,7 @@ pub(crate) fn apply_item_discard(
         Err(err) => dead_letter(engine, m, envelope_json, &err),
     }
 }
+
+#[cfg(test)]
+#[path = "apply_items_tests.rs"]
+mod apply_items_tests;

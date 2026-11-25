@@ -24,7 +24,8 @@
 //!
 //! Keep this module focused on the edge and triple effects.
 
-use super::{ApplyEngine, ApplyOutcome, dead_letter, lww_loser};
+use super::{ApplyEngine, ApplyOutcome, dead_letter, lww_loser, malformed_payload_stamp};
+use crate::apply::apply_freshness::writer_stamp_epoch;
 use crate::protocol::{SyncContent, SyncMutation};
 use clio_store::AssocEdgeRecord;
 use clio_types::{AmError, ErrorCode};
@@ -70,6 +71,15 @@ pub(super) fn apply_assoc(
     if prune {
         engine.store.delete_assoc_edge(&m.bank, &m.entity_id)?;
         return Ok(ApplyOutcome::Applied);
+    }
+    if writer_stamp_epoch(&edge.last_updated_at).is_none() {
+        return malformed_payload_stamp(
+            engine,
+            m,
+            envelope_json,
+            "assoc edge last_updated_at",
+            &edge.last_updated_at,
+        );
     }
     if let Some(existing) = engine.store.get_assoc_edge(&m.bank, &edge.id)?
         && lww_loser(engine, m, &existing.last_updated_at, None)?
