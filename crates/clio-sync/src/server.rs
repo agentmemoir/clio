@@ -185,7 +185,8 @@ impl SyncServer {
 /// server with one wired.
 ///
 /// # Errors
-/// Bind failure, a refused public bind, or auth material missing outside dev mode.
+/// Bind failure, a refused public bind, or auth material missing outside dev
+/// mode or for a non-loopback bind.
 pub fn sync_serve(options: SyncServerOptions) -> Result<SyncServer, AmError> {
     serve(options, None)
 }
@@ -198,7 +199,8 @@ pub fn sync_serve(options: SyncServerOptions) -> Result<SyncServer, AmError> {
 /// unreadable authority refuses the affected action instead of clearing it.
 ///
 /// # Errors
-/// Bind failure, a refused public bind, or auth material missing outside dev mode.
+/// Bind failure, a refused public bind, or auth material missing outside dev
+/// mode or for a non-loopback bind.
 pub fn sync_serve_with_denial(
     options: SyncServerOptions,
     denial: Arc<dyn ErasureDenial>,
@@ -227,6 +229,16 @@ fn serve(
     let local = listener.local_addr().expect("listener local addr");
     if bind_admission(bind_is_loopback(local), options.allow_public_bind).is_some() {
         return Err(AmError::new(ErrorCode::Forbidden, refusal_message(local)));
+    }
+    if credentials.is_none() && !bind_is_loopback(local) {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            format!(
+                "sync serve: refusing the bind at {local}: it is not loopback, and a \
+                 non-loopback bind requires a credential store (pass --token-file) in \
+                 every mode, dev mode included"
+            ),
+        ));
     }
     warn_public_bind(local);
     let addr = local.to_string();

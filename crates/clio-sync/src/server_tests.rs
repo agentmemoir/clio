@@ -29,10 +29,10 @@ use crate::envelope_fixtures::seal_own_content;
 use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, SyncContent, SyncMutation, decode_cursor};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve};
 use clio_store::{DekProvider, LocalDevKms, SqliteStore, Store, SyncStore};
-use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
+use clio_types::{EpistemicKind, ErrorCode, ItemKind, MemoryItem, SemanticCategory};
 use serde_json::{Value, json};
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -288,6 +288,52 @@ fn dev_mode_accepts_anonymous_requests() {
     let accepted = ack["accepted"].as_array().expect("accepted");
     assert!(accepted.is_empty(), "{accepted:?}");
     server.stop();
+}
+
+/// Dev mode drops the credential requirement only for a loopback bind. A
+/// public bind with no credential store is refused even when the operator
+/// allows the bind, and the refused start leaves the address free.
+#[test]
+fn dev_mode_public_bind_without_a_credential_is_refused() {
+    let probe = TcpListener::bind("0.0.0.0:0").expect("probe bind");
+    let port = probe.local_addr().expect("probe local addr").port();
+    drop(probe);
+    let (store, kms) = sqlite();
+    let err = sync_serve(SyncServerOptions {
+        bind: format!("0.0.0.0:{port}"),
+        store: store.clone(),
+        sync: store,
+        kms,
+        banks: vec!["b1".into()],
+        token_file: None,
+        dev_mode: true,
+        allow_public_bind: true,
+        ttl_secs: None,
+        deadline_secs: None,
+        max_envelope_skew_secs: None,
+        device_id: "srv-1".into(),
+        sync_key: None,
+    })
+    .err()
+    .expect("a public dev bind without a credential is refused");
+    assert_eq!(
+        err.code,
+        ErrorCode::Forbidden,
+        "a refused public dev bind is a forbidden start: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains(&format!("0.0.0.0:{port}")),
+        "the refusal names the address: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("--token-file"),
+        "the refusal names the missing token file: {}",
+        err.message
+    );
+    TcpListener::bind(("0.0.0.0", port))
+        .expect("the refused bind left nothing listening on the address");
 }
 
 #[test]
