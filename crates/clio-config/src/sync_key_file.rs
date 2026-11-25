@@ -90,7 +90,13 @@ pub(crate) fn sidecar_path(key_file: Option<&Path>) -> Option<PathBuf> {
         .map(|dir| dir.join(CREATED_NAME))
 }
 
-/// Read and validate the sync key file at `path`.
+/// A validated sync key and the descriptor it was read through.
+///
+/// The pair travels together so a caller cannot keep the bytes and lose the proof
+/// of which file they came from.
+pub(crate) type HeldKey = (Zeroizing<[u8; KEY_LEN]>, fs::File);
+
+/// Read and validate the sync key file at `path`, keeping the descriptor.
 ///
 /// The file must be owner-only and hold exactly [`KEY_LEN`] raw bytes. A
 /// violation is refused rather than worked around: a key that is short, padded,
@@ -99,16 +105,53 @@ pub(crate) fn sidecar_path(key_file: Option<&Path>) -> Option<PathBuf> {
 ///
 /// The path is opened once, without following a link and without waiting on a
 /// FIFO, and the descriptor that open returned is what is judged and read, so the
-/// file the refusal approved is the file the bytes came from.
+/// file the refusal approved is the file the bytes came from. The descriptor is
+/// returned with the bytes, so a caller that removes the entry afterwards can
+/// prove the path still names this object.
+///
+/// `Ok(None)` means the path holds nothing: a rotation then has no key to archive
+/// and no entry to remove, and the answer comes from the one open rather than from
+/// a lookup of its own.
 ///
 /// # Errors
 /// A link, a file that is not regular, is owned by another user, or grants group
 /// or other access ([`ErrorCode::Forbidden`]); the file cannot be opened or read
 /// ([`ErrorCode::Internal`]); or its length is wrong
 /// ([`ErrorCode::ConfigCorrupt`]).
+pub(crate) fn read_key_holding(path: &Path) -> Result<Option<HeldKey>, AmError> {
+    let Some(mut file) = open_optional(path)? else {
+        return Ok(None);
+    };
+    let key = read_validated(path, &mut file)?;
+    Ok(Some((key, file)))
+}
+
+/// Read and validate the sync key file at `path`.
+///
+/// The same one-open rule as [`read_key_holding`], for a caller that only needs
+/// the bytes. A missing file is refused, because a caller that expected a key must
+/// not mistake absence for a new key.
+///
+/// # Errors
+/// The same refusals and failures [`read_key_holding`] reports, and the
+/// missing-file refusal naming the path.
 pub(crate) fn read_key(path: &Path) -> Result<Zeroizing<[u8; KEY_LEN]>, AmError> {
-    let mut file = open_judged(path, "sync key file")?;
-    let raw = Zeroizing::new(crate::sync_key_gate::read_bytes(&mut file).map_err(|err| {
+    match read_key_holding(path)? {
+        Some((key, _held)) => Ok(key),
+        None => Err(unreadable(path, "the file does not exist")),
+    }
+}
+
+/// Read a descriptor the gate already judged and check its length.
+///
+/// The bytes come from the descriptor the refusal approved, never from a second
+/// lookup by path, so the file judged is the file read.
+///
+/// # Errors
+/// [`ErrorCode::Internal`] when the read failed, and
+/// [`ErrorCode::ConfigCorrupt`] when the bytes are not exactly [`KEY_LEN`].
+fn read_validated(path: &Path, file: &mut fs::File) -> Result<Zeroizing<[u8; KEY_LEN]>, AmError> {
+    let raw = Zeroizing::new(crate::sync_key_gate::read_bytes(file).map_err(|err| {
         AmError::new(
             ErrorCode::Internal,
             format!(
@@ -155,32 +198,6 @@ pub(crate) fn write_key(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), AmError>
     file.write_all(key)
         .and_then(|()| file.sync_all())
         .map_err(|err| io_error(path, "write", &err))
-}
-
-/// Remove the sync key file and its sidecar, succeeding when neither exists.
-pub(crate) fn remove_key(path: &Path) -> Result<(), AmError> {
-    for candidate in [
-        path.to_path_buf(),
-        sidecar_path(Some(path)).unwrap_or_default(),
-    ] {
-        if candidate.as_os_str().is_empty() {
-            continue;
-        }
-        match fs::remove_file(&candidate) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => {
-                return Err(AmError::new(
-                    ErrorCode::Internal,
-                    format!(
-                        "cannot remove the Clio sync key material at {}: {err}",
-                        candidate.display()
-                    ),
-                ));
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Read the creation-time sidecar beside `key_file`.
@@ -261,27 +278,31 @@ pub(crate) fn write_created(key_file: Option<&Path>, stamp: &str) -> Result<(), 
 ///
 /// The gate in [`crate::sync_key_gate`] does the open without following a link or
 /// waiting on a FIFO, and refuses a descriptor that is not a regular owner-only
-/// file this process owns. Nothing here asks the path again, so the file the
-/// refusal approved is the file the caller reads from.
+/// file this process owns. `Ok(None)` means the path holds nothing, so no caller
+/// needs an existence check that a second lookup could disagree with. Nothing here
+/// asks the path again, so the file the refusal approved is the file the caller
+/// reads from.
 ///
 /// # Errors
 /// [`ErrorCode::Forbidden`] for a link or a refused descriptor, and the
-/// missing-or-unreadable refusal naming the path when the file is absent or the
-/// open failed.
-fn open_judged(path: &Path, subject: &str) -> Result<fs::File, AmError> {
-    let unreadable = |reason: String| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!(
-                "cannot read the Clio {subject} {}: {reason}. Clio will not generate a \
-                 replacement, because a new key cannot open anything sealed under the old one; \
-                 restore access to the file and run again",
-                path.display()
-            ),
-        )
-    };
-    crate::sync_key_gate::open_read_no_follow(path, subject, |err| unreadable(err.to_string()))?
-        .ok_or_else(|| unreadable("the file does not exist".to_owned()))
+/// missing-or-unreadable refusal naming the path when the open failed.
+pub(crate) fn open_optional(path: &Path) -> Result<Option<fs::File>, AmError> {
+    crate::sync_key_gate::open_read_no_follow(path, "sync key file", |err| {
+        unreadable(path, &err.to_string())
+    })
+}
+
+/// A sync-key file that could not be opened, naming the path and the reason.
+fn unreadable(path: &Path, reason: &str) -> AmError {
+    AmError::new(
+        ErrorCode::Internal,
+        format!(
+            "cannot read the Clio sync key file {}: {reason}. Clio will not generate a \
+             replacement, because a new key cannot open anything sealed under the old one; \
+             restore access to the file and run again",
+            path.display()
+        ),
+    )
 }
 
 /// A sync-key file that could not be created or written.
@@ -327,3 +348,7 @@ where
 #[cfg(test)]
 #[path = "sync_key_file_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sync_key_file_identity_tests.rs"]
+mod identity_tests;

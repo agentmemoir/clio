@@ -72,6 +72,9 @@ pub mod sync_key;
 // `pub(crate)`, so it is declared crate-private and exports no public interface.
 pub(crate) mod sync_key_dir_gate;
 pub mod sync_key_file;
+// The removal seam: every item in it is `pub(crate)`, so it is declared
+// crate-private and exports no public interface.
+pub(crate) mod sync_key_file_remove;
 // The gate is an internal seam: every item in it is `pub(crate)`, so it is
 // declared crate-private and exports no public interface.
 pub(crate) mod sync_key_gate;
