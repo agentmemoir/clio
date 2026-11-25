@@ -3,16 +3,16 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the tests that pin the anchored atomic write
-//! of a foreign-config file: one directory descriptor judges and replaces the
-//! same entry, and no second path lookup can redirect the edit.
+//! This module is responsible for the tests that pin resolution before the
+//! write: the target is resolved once, and a link repointed after that
+//! resolution cannot redirect the edit.
 //!
 //! ## Owns
-//! - Resolved-target write tests: a repointed link, a symlinked final entry,
-//!   a new file, and temp-sibling cleanup
+//! - The repointed-symlink write test
 //!
 //! ## Does not own
 //! - The behaviour tests of the editor (`agent_harness_write_tests`)
+//! - The descriptor tests of the atomic write (`agent_harness_atomic_write`)
 //!
 //! ## Boundary
 //!
@@ -22,7 +22,7 @@
 
 use super::*;
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -79,7 +79,7 @@ impl Drop for Scratch {
 
 /// A link that moves after the single resolution must not redirect the write:
 /// the resolved target gets the new bytes and the new link target keeps its
-/// own. This is the defect the anchored write removes.
+/// own.
 #[test]
 fn a_resolved_write_does_not_follow_a_repointed_symlink() {
     let scratch = Scratch::new("repointed");
@@ -106,65 +106,6 @@ fn a_resolved_write_does_not_follow_a_repointed_symlink() {
         serde_json::from_str(&fs::read_to_string(&real).expect("target can be read"))
             .expect("the target holds valid JSON");
     assert_eq!(after, written, "the resolved target holds the new content");
-    assert!(
-        scratch.temp_siblings().is_empty(),
-        "a successful write leaves no temp sibling"
-    );
-}
-
-/// A symlink at the resolved target's final entry is refused rather than
-/// followed, and its target keeps its own bytes.
-#[test]
-fn a_symlink_at_the_target_entry_is_refused() {
-    let scratch = Scratch::new("entry-link");
-    let victim = scratch.write("victim.json", r#"{"keep":"me"}"#);
-    let victim_before = fs::read(&victim).expect("victim can be read");
-    let target = scratch.path("real.json");
-    symlink(&victim, &target).expect("a symlink can be made");
-
-    let err = write_json_atomic_resolved(&target, &serde_json::json!({"written": true}))
-        .expect_err("a symlinked final entry is refused");
-    assert!(matches!(err, WriteError::Io { .. }), "got {err:?}");
-
-    assert_eq!(
-        fs::read(&victim).expect("victim can be read"),
-        victim_before,
-        "the symlink target must stay byte-identical"
-    );
-    assert!(
-        fs::symlink_metadata(&target)
-            .expect("the entry still exists")
-            .file_type()
-            .is_symlink(),
-        "the refused entry is left in place"
-    );
-    assert!(
-        scratch.temp_siblings().is_empty(),
-        "a refused write leaves no temp sibling"
-    );
-}
-
-/// A new file is created with mode `0o644`, holds the serialized value, and
-/// leaves no temp sibling behind.
-#[test]
-fn a_new_file_is_written_with_the_default_mode() {
-    let scratch = Scratch::new("new-file");
-    let path = scratch.path("opencode.json");
-    let value = serde_json::json!({"mcp": {"servers": {}}});
-
-    write_json_atomic(&path, &value).expect("a new file is written");
-
-    let text = fs::read_to_string(&path).expect("file can be read");
-    assert_eq!(
-        serde_json::from_str::<Value>(&text).expect("file holds valid JSON"),
-        value
-    );
-    let mode = fs::metadata(&path)
-        .expect("file exists")
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(mode, 0o644, "a new file gets the default mode");
     assert!(
         scratch.temp_siblings().is_empty(),
         "a successful write leaves no temp sibling"

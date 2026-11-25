@@ -11,15 +11,15 @@
 //! ## Owns
 //! - Timestamped same-directory backup of a config before it is edited
 //! - Parse-refusal: an unparseable file is left byte-identical, with a snippet
-//! - Atomic replace through a same-directory temp sibling and rename
 //! - Removing one named server entry under every caller-supplied key prefix
 //!   that holds it
-//! - One directory descriptor per write, so the entry judged is the entry
-//!   replaced even when the path changes between the two
+//! - Resolving a symlinked target once, so the link itself survives the edit
 //!
 //! ## Does not own
 //! - Which harness uses which config file or key prefix; the caller decides
 //! - Parsing or writing a non-JSON format; only JSON is handled
+//! - Judging and replacing one entry through a directory descriptor; see
+//!   `agent_harness_atomic_write`
 //! - Deciding when an edit runs, or reporting its result to the user
 //!
 //! ## Boundary
@@ -33,7 +33,8 @@
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::agent_harness_atomic_write::AnchoredTarget;
 
 /// Why a config edit did not happen.
 #[derive(Debug)]
@@ -136,13 +137,27 @@ pub(crate) fn write_json_atomic(path: &Path, value: &Value) -> Result<(), WriteE
 
 /// Write `value` to `path`, which already has its symlinks resolved.
 ///
-/// Resolving again would let a link that moved after the check redirect the
-/// edit, so this function never looks the path up again.
+/// The resolved target is held once: on Unix the parent directory descriptor
+/// plus the final entry name, elsewhere the path. On Unix every step after the
+/// open uses the descriptor and the entry name, so the entry that is judged is
+/// the entry that is replaced. A swap of a parent component before the open is
+/// out of scope: it needs write access above the target directory, and it gains
+/// no privilege the attacker does not already hold.
+///
+/// # Errors
+/// Serializing the value fails, or the atomic write fails.
 fn write_json_atomic_resolved(path: &Path, value: &Value) -> Result<(), WriteError> {
+    let target = AnchoredTarget::open(path)?;
+    write_value(&target, path, value)
+}
+
+/// Serialize `value` and write it through `target`, the entry already held
+/// open.
+fn write_value(target: &AnchoredTarget, path: &Path, value: &Value) -> Result<(), WriteError> {
     let text = serde_json::to_string_pretty(value).map_err(|e| WriteError::Io {
         detail: format!("failed to serialize {}: {e}", path.display()),
     })?;
-    replace_file_with(path, text.as_bytes())
+    target.replace(text.as_bytes())
 }
 
 /// Remove Clio's entry from a JSON config file.
@@ -153,9 +168,11 @@ fn write_json_atomic_resolved(path: &Path, value: &Value) -> Result<(), WriteErr
 /// atomically: a parseable file is re-serialized, so key order and whitespace
 /// may change while every value and entry is preserved by parsed value, not
 /// byte-identical. A symlinked config is followed to its target, so the link
-/// itself survives. An unparseable file is refused byte-identical and its
-/// refusal combines the caller's manual `snippet` with the offending line's
-/// number, never the line's bytes.
+/// itself survives; the final entry is resolved once and replaced through the
+/// handle opened for it (a directory descriptor on Unix), so an entry swapped
+/// in after the resolution cannot redirect the write. An unparseable file is
+/// refused byte-identical and its refusal combines the caller's manual
+/// `snippet` with the offending line's number, never the line's bytes.
 ///
 /// # Errors
 /// A read, backup, or write failure, or an unparseable file.
@@ -183,10 +200,11 @@ pub(crate) fn remove_server_from_file(
     if !remove_server_entry(&mut value, key_prefixes, server_name) {
         return Ok(RemoveOutcome::Absent);
     }
+    let target = AnchoredTarget::open(&path)?;
     let backup = backup_file(&path)?.ok_or_else(|| WriteError::Io {
         detail: format!("{} vanished before it could be backed up", path.display()),
     })?;
-    write_json_atomic_resolved(&path, &value)?;
+    write_value(&target, &path, &value)?;
     Ok(RemoveOutcome::Removed { backup })
 }
 
@@ -221,27 +239,19 @@ fn offending_line_note(line: usize) -> String {
     format!("(offending line: {line})")
 }
 
-fn file_name(path: &Path) -> String {
+/// The base name of `path`, for naming a backup or a temp sibling beside it.
+pub(crate) fn file_name(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("config.json")
         .to_owned()
 }
 
-fn unix_nanos() -> u128 {
+/// The current time in nanoseconds since the Unix epoch, or zero before it.
+pub(crate) fn unix_nanos() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos())
-}
-
-/// A hidden temp sibling beside `path`, unique across threads and processes.
-fn temp_sibling(path: &Path) -> PathBuf {
-    static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
-    let name = file_name(path);
-    let pid = std::process::id();
-    let nanos = unix_nanos();
-    let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    path.with_file_name(format!(".{name}.{pid}.{nanos}.{seq}.tmp"))
 }
 
 /// The file `path` names with symlinks resolved: when `path` itself is a
@@ -275,169 +285,11 @@ fn effective_path(path: &Path) -> Result<PathBuf, WriteError> {
     })
 }
 
-/// Replace `path` with `bytes` through a sibling created, judged, and renamed
-/// under one directory descriptor, so a symlink swapped in after the check
-/// cannot redirect the rename. The parent opens without `O_NOFOLLOW`, so a
-/// symlinked directory such as `/tmp` still works; the held descriptor pins it.
-#[cfg(unix)]
-fn replace_file_with(path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
-    use rustix::fs::{AtFlags, FileType, Mode, OFlags};
-
-    let name = path.file_name().ok_or_else(|| WriteError::Io {
-        detail: format!("failed to replace {}: it has no file name", path.display()),
-    })?;
-    let parent = match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-        _ => PathBuf::from("."),
-    };
-    let dir = rustix::fs::open(
-        &parent,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map_err(|err| io_errno("open", &parent, err))?;
-
-    let mode = match rustix::fs::statat(&dir, name, AtFlags::SYMLINK_NOFOLLOW) {
-        Ok(stat) if FileType::from_raw_mode(stat.st_mode).is_file() => {
-            Mode::from_raw_mode(stat.st_mode)
-        }
-        Ok(_) => {
-            return Err(WriteError::Io {
-                detail: format!(
-                    "failed to replace {}: the final entry is not a regular file",
-                    path.display()
-                ),
-            });
-        }
-        Err(rustix::io::Errno::NOENT) => Mode::from_raw_mode(0o644),
-        Err(err) => return Err(io_errno("inspect", path, err)),
-    };
-
-    let tmp = temp_sibling(path);
-    let tmp_name = tmp.file_name().ok_or_else(|| WriteError::Io {
-        detail: format!("failed to name a temp file for {}", path.display()),
-    })?;
-    let fd = rustix::fs::openat(
-        &dir,
-        tmp_name,
-        OFlags::CREATE | OFlags::EXCL | OFlags::WRONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        mode,
-    )
-    .map_err(|err| io_errno("create", &tmp, err))?;
-    let mut file = std::fs::File::from(fd);
-    if let Err(err) = write_and_sync_at(&mut file, bytes, mode, &tmp) {
-        remove_temp(&dir, tmp_name);
-        return Err(err);
-    }
-    if let Err(err) = rustix::fs::renameat(&dir, tmp_name, &dir, name) {
-        remove_temp(&dir, tmp_name);
-        return Err(io_errno("replace", path, err));
-    }
-    Ok(())
-}
-
-/// Replace `path` with `bytes` through a path-named sibling. Non-Unix has no
-/// `openat`, so each step looks the path up again.
-#[cfg(not(unix))]
-fn replace_file_with(path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
-    let mode = 0o644;
-    let (tmp, file) = create_temp(path, mode)?;
-    if let Err(err) = write_and_sync(file, bytes, mode, &tmp) {
-        let _ = fs::remove_file(&tmp);
-        return Err(err);
-    }
-    if let Err(e) = fs::rename(&tmp, path) {
-        let _ = fs::remove_file(&tmp);
-        return Err(io_error("replace", path, &e));
-    }
-    Ok(())
-}
-
-/// Write `bytes` to the temp `file`, restore the exact mode in case the
-/// process mask narrowed it at creation, and sync to disk before the caller
-/// renames the temp file over its target.
-#[cfg(unix)]
-fn write_and_sync_at(
-    file: &mut std::fs::File,
-    bytes: &[u8],
-    mode: rustix::fs::Mode,
-    tmp: &Path,
-) -> Result<(), WriteError> {
-    use std::io::Write;
-    file.write_all(bytes)
-        .map_err(|e| io_error("write", tmp, &e))?;
-    rustix::fs::fchmod(&*file, mode).map_err(|err| io_errno("set permissions on", tmp, err))?;
-    file.sync_all().map_err(|e| io_error("sync", tmp, &e))?;
-    Ok(())
-}
-
-/// Remove the temp sibling, tolerating its absence: the caller already holds
-/// the write error, and a removal failure cannot replace it.
-#[cfg(unix)]
-fn remove_temp(dir: &rustix::fd::OwnedFd, name: &std::ffi::OsStr) {
-    let _ = rustix::fs::unlinkat(dir, name, rustix::fs::AtFlags::empty());
-}
-
-/// Create a new temp sibling of `path` with `mode` already applied, so the
-/// file never exists with wider permissions. The name is unique across threads
-/// and processes; a leftover name from a crashed run is skipped.
-#[cfg(not(unix))]
-fn create_temp(path: &Path, mode: u32) -> Result<(PathBuf, std::fs::File), WriteError> {
-    for _ in 0..10 {
-        let tmp = temp_sibling(path);
-        match open_new(&tmp, mode) {
-            Ok(file) => return Ok((tmp, file)),
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(err) => return Err(io_error("create", &tmp, &err)),
-        }
-    }
-    Err(WriteError::Io {
-        detail: format!("failed to create a temp file beside {}", path.display()),
-    })
-}
-
-#[cfg(not(unix))]
-fn open_new(tmp: &Path, _mode: u32) -> std::io::Result<std::fs::File> {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(tmp)
-}
-
-/// Write `bytes` to the temp `file` and sync to disk before the caller renames
-/// the temp file over its target.
-#[cfg(not(unix))]
-fn write_and_sync(
-    file: std::fs::File,
-    bytes: &[u8],
-    mode: u32,
-    tmp: &Path,
-) -> Result<(), WriteError> {
-    use std::io::Write;
-    let mut file = file;
-    file.write_all(bytes)
-        .map_err(|e| io_error("write", tmp, &e))?;
-    set_mode(tmp, mode).map_err(|e| io_error("set permissions on", tmp, &e))?;
-    file.sync_all().map_err(|e| io_error("sync", tmp, &e))?;
-    Ok(())
-}
-
-fn io_error(action: &str, path: &Path, err: &std::io::Error) -> WriteError {
+/// A filesystem error named with the path it concerns.
+pub(crate) fn io_error(action: &str, path: &Path, err: &std::io::Error) -> WriteError {
     WriteError::Io {
         detail: format!("failed to {action} {}: {err}", path.display()),
     }
-}
-
-#[cfg(unix)]
-fn io_errno(action: &str, path: &Path, err: rustix::io::Errno) -> WriteError {
-    WriteError::Io {
-        detail: format!("failed to {action} {}: {err}", path.display()),
-    }
-}
-
-#[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
-    Ok(())
 }
 
 #[cfg(test)]

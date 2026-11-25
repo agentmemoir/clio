@@ -250,9 +250,9 @@ fn generated(path: &Path) -> Result<bool, CliError> {
 
 /// Write one page through a same-directory temp sibling, the pattern
 /// `agent_harness_write::write_json_atomic` uses without its symlink-following
-/// policy: the temp file is created with create-new and the mode applied,
-/// written, synced, and promoted with rename. On any failure the temp file is
-/// removed and the error names the step.
+/// policy or its directory-descriptor anchoring: the temp file is created with
+/// create-new and the mode applied, written, synced, and promoted with rename.
+/// On any failure the temp file is removed and the error names the step.
 fn write_page(out_dir: &Path, page: &Page) -> Result<(), CliError> {
     let target = out_dir.join(&page.file);
     let mode = existing_mode(&target).unwrap_or(0o644);
