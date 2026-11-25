@@ -11,6 +11,8 @@
 //! - Temp files that are created new, so an entry already at the temp name is
 //!   refused instead of followed
 //! - The monotonic counter that keeps concurrent temp files distinct
+//! - The pre-rename check that refuses to replace a different entry at the
+//!   target path
 //! - `restrict_dir`, the owner-only directory rule
 //!
 //! ## Does not own
@@ -26,6 +28,7 @@
 //! Keep this module focused on owner-only file and directory writes.
 
 use super::path::DEPLOYMENT_CONFIG_FILE_NAME;
+use crate::error::{AmError, ErrorCode};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -49,6 +52,26 @@ pub fn write_private_atomic(path: &Path, contents: &str) -> std::io::Result<()> 
     write_private_atomic_to(path, &tmp, contents)
 }
 
+/// Write `contents` to `path` atomically, but run `check` after the temp file
+/// is ready and before the rename. A failed check removes the temp file and
+/// changes nothing at `path`.
+///
+/// # Errors
+/// The I/O errors of [`write_private_atomic`], or the refusal `check` returns.
+pub(crate) fn write_private_atomic_checked(
+    path: &Path,
+    contents: &str,
+    check: impl FnOnce() -> Result<(), AmError>,
+) -> Result<(), AmError> {
+    let tmp = temp_sibling(path);
+    write_atomic_to(path, &tmp, contents, check, |e| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!("failed to write deployment config {}: {e}", path.display()),
+        )
+    })
+}
+
 /// Write `contents` to `path` through the temp path `tmp`: create `tmp` new,
 /// then rename it onto `path`. `tmp` is removed only when the rename fails.
 ///
@@ -56,10 +79,29 @@ pub fn write_private_atomic(path: &Path, contents: &str) -> std::io::Result<()> 
 /// `AlreadyExists` when any entry already sits at `tmp`, including a symlink;
 /// any create, write, or sync error on the temp file; or the rename error.
 fn write_private_atomic_to(path: &Path, tmp: &Path, contents: &str) -> std::io::Result<()> {
-    create_new_private(tmp, contents)?;
+    write_atomic_to(path, tmp, contents, || Ok(()), std::convert::identity)
+}
+
+/// The shared temp-create, check, rename, and cleanup body.
+///
+/// # Errors
+/// An error from creating or writing `tmp`, the refusal `check` returns, or
+/// the rename error, mapped through `io_failure`.
+fn write_atomic_to<E>(
+    path: &Path,
+    tmp: &Path,
+    contents: &str,
+    check: impl FnOnce() -> Result<(), E>,
+    io_failure: impl Fn(std::io::Error) -> E,
+) -> Result<(), E> {
+    create_new_private(tmp, contents).map_err(&io_failure)?;
+    if let Err(refusal) = check() {
+        let _ = fs::remove_file(tmp);
+        return Err(refusal);
+    }
     if let Err(e) = fs::rename(tmp, path) {
         let _ = fs::remove_file(tmp);
-        return Err(e);
+        return Err(io_failure(e));
     }
     Ok(())
 }
