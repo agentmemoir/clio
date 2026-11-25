@@ -87,11 +87,15 @@ fn a_bound_principal_keeps_the_credential_rule_on_an_untrusted_listener() {
     assert!(err.message.contains("bundle import"), "{}", err.message);
 }
 
-/// The refusal is the one message the actor and the administrative gates share,
-/// and it carries no secret, no host, and no path.
+/// The refusal a refused call actually carries is the shared message, and that
+/// message names the transport while carrying no secret, no host, and no path.
 #[test]
 fn the_refusal_names_the_transport_and_nothing_else() {
-    let message = UNAUTHENTICATED_TRANSPORT_REFUSAL;
+    let message = untrusted()
+        .require_authenticated_transport()
+        .expect_err("an unbound untrusted state is refused")
+        .message;
+    assert_eq!(message, UNAUTHENTICATED_TRANSPORT_REFUSAL);
     assert!(message.contains("unauthenticated"), "{message}");
     for secret in ["token", "secret", "/", "\\", "localhost", "127.0.0.1"] {
         assert!(
@@ -101,13 +105,31 @@ fn the_refusal_names_the_transport_and_nothing_else() {
     }
 }
 
-/// A state is born trusted: every constructor builds through one literal, and
-/// the fact is the listener's, not the store's.
+/// The transport gate answers on both branches: an untrusted unbound state is
+/// refused, and a trusted one — or any bound one — passes.
 #[test]
-fn a_fresh_state_is_trusted() {
-    assert!(!state().network_untrusted, "open leaves the state trusted");
-    assert!(
-        untrusted().network_untrusted,
-        "the setter is the only way a state becomes untrusted"
+fn the_transport_gate_refuses_only_an_untrusted_unbound_state() {
+    let untrusted_err = untrusted()
+        .require_authenticated_transport()
+        .expect_err("an unbound untrusted state is refused");
+    assert_eq!(
+        untrusted_err.code,
+        ErrorCode::Forbidden,
+        "{}",
+        untrusted_err.message
     );
+
+    state()
+        .require_authenticated_transport()
+        .expect("a trusted unbound state passes");
+
+    let mut bound = state().with_principal(Principal::new(
+        "ops-key".to_owned(),
+        Actor::Harness,
+        vec!["default".to_owned()],
+    ));
+    bound.mark_network_untrusted();
+    bound
+        .require_authenticated_transport()
+        .expect("a bound principal is never refused by the transport rule");
 }

@@ -49,16 +49,17 @@ use crate::principal::Principal;
 use crate::runtime::PipelineStatus;
 use std::sync::{Arc, Condvar};
 
-/// The one refusal a listener that serves with no credential outside loopback
-/// answers a privileged caller-declared actor with.
+/// The one refusal a transport that cannot vouch for its caller answers a
+/// privileged caller-declared actor with.
 ///
 /// An unbound state normally lets the caller declare the actor, because a local
-/// process owner already holds the store. A listener reachable off this machine
-/// has no credential to vouch for that declaration, so it refuses `harness` and
-/// `system` there. The text names the transport rule and nothing else: no
-/// secret, no host, and no path.
-pub(crate) const UNAUTHENTICATED_TRANSPORT_REFUSAL: &str = "this listener is unauthenticated and reachable off this machine, so it does not honour a \
-     caller-declared harness or system actor";
+/// process owner already holds the store. A transport that cannot show its
+/// caller is local has no credential to vouch for that declaration, so it
+/// refuses `harness` and `system` there — whether it was reached off this
+/// machine or through a proxy that landed on a loopback socket. The text names
+/// the caller's provenance and nothing else: no secret, no host, and no path.
+pub(crate) const UNAUTHENTICATED_TRANSPORT_REFUSAL: &str = "this request did not arrive from an authenticated local caller, so this \
+     unauthenticated transport does not honour a caller-declared harness or system actor";
 
 /// Shared state behind every MCP transport: one store, one engine set.
 ///
@@ -226,14 +227,15 @@ pub struct McpState {
     /// what the local transports use, because a local process has no credential
     /// edge — the process owner already holds the store.
     pub(crate) principal: Option<Arc<Principal>>,
-    /// Whether this state is served over a listener that cannot vouch for a
-    /// caller-declared actor: an unbound one reachable off this machine.
+    /// Whether this state is served for a caller the transport cannot vouch for:
+    /// an unbound one that the transport did not show to be local.
     ///
-    /// Only the HTTP transport sets it, and only for a bind outside loopback
-    /// with no credential source. A local process and a loopback listener keep
-    /// the unbound contract above, because their owner already holds the store;
-    /// a listener every interface can reach may not be told by its caller that
-    /// it acts as `harness` or `system`.
+    /// Only the HTTP transport sets it, and it sets it for a bind outside
+    /// loopback with no credential source or for a single request that arrived
+    /// through a proxy or a tunnel. A local process and a direct loopback caller
+    /// keep the unbound contract above, because their owner already holds the
+    /// store; a caller neither of those is may not say it acts as `harness` or
+    /// `system`.
     pub(crate) network_untrusted: bool,
     /// A pinned clock for the read handlers, set by tests that compare the
     /// protocol handler with direct dispatch. `None` (every production build,

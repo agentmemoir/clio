@@ -9,9 +9,9 @@
 //!
 //! ## Owns
 //! - Minimal HTTP/1.1 request parsing and response writing for `/mcp`
-//! - The accept loop, connection cap, per-request dispatch (`http_candidate`), and
-//!   the trust fact this listener marks its handler with; the credential source
-//!   it accepts, and the bind rule that requires one (see `http_start_guard`)
+//! - The accept loop, connection cap, per-request dispatch (`http_candidate`),
+//!   and the two trust facts it reads: listener reachability and caller origin;
+//!   the credential source it accepts, and the bind rule requiring one
 //! - The transport resource bounds (values defined below):
 //!   - 64 KiB head cap (`MAX_HEAD_BYTES`) and 10 MiB body cap (`MAX_BODY`),
 //!     separate because a client controls the header block and body apart
@@ -43,8 +43,11 @@
 //!
 //! Keep this module focused on the Streamable HTTP transport.
 
+pub use self::http_start_guard::has_credential_source;
 use crate::conn_pool::{ConnPool, MAX_CONNECTIONS};
-use crate::http::http_start_guard::{BindRefusal, bind_refusal, serves_untrusted_network};
+use crate::http::http_start_guard::{
+    BindRefusal, bind_refusal, is_proxied_or_remote, serves_untrusted_network,
+};
 use crate::http_auth::{CredentialStore, authorize_request};
 use crate::http_candidate::CandidatePost;
 use crate::http_guard::check_origin;
@@ -54,7 +57,7 @@ use crate::protocol::McpHandler;
 use crate::runtime::McpState;
 use std::fmt::Write as _;
 use std::io::Write;
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -199,7 +202,7 @@ where
         return Err(std::io::Error::other(message));
     }
     let mut handler = McpHandler::new(state);
-    handler.set_network_untrusted(serves_untrusted_network(&cfg, loopback));
+    handler.set_network_trusted(!serves_untrusted_network(&cfg, loopback));
     let handler = Arc::new(handler);
     let pool = Arc::new(ConnPool::default());
     for stream in listener.incoming() {
@@ -210,6 +213,10 @@ where
             refuse_over_cap(&mut stream);
             continue;
         };
+        // A socket that cannot report its peer is treated as off-machine.
+        let peer = stream
+            .peer_addr()
+            .unwrap_or(SocketAddr::from(([0, 0, 0, 0], 0)));
         let handler = Arc::clone(&handler);
         let cfg = cfg.clone();
         let post = Arc::clone(&post);
@@ -218,7 +225,7 @@ where
             // Drop on every exit path: success, client error, server error,
             // write failure, timeout, or panic.
             let _slot = slot;
-            let _ = handle_conn(handler, cfg, post, stream);
+            let _ = handle_conn(handler, cfg, post, stream, peer);
         });
     }
     Ok(())
@@ -240,6 +247,7 @@ fn handle_conn<P>(
     cfg: HttpConfig,
     post: Arc<P>,
     mut stream: TcpStream,
+    peer: SocketAddr,
 ) -> std::io::Result<()>
 where
     P: PostRoute,
@@ -263,7 +271,7 @@ where
             return write_simple(&mut stream, status, &message);
         }
     };
-    let (status, body, extra) = route(&handler, &cfg, &req, &*post);
+    let (status, body, extra) = route(&handler, &cfg, &req, &*post, peer);
     let mut response = String::new();
     let _ = write!(response, "HTTP/1.1 {status}\r\n");
     for (k, v) in extra {
@@ -292,13 +300,14 @@ where
     Ok(())
 }
 
-/// Core request routing; returns `(status, body, extra_headers)`.
+/// Core request routing for the accepted `peer`; returns the response parts.
 #[must_use]
 fn route<P>(
     handler: &Arc<McpHandler>,
     cfg: &HttpConfig,
     req: &HttpRequest,
     post: &P,
+    peer: SocketAddr,
 ) -> PostResponse
 where
     P: PostRoute,
@@ -345,23 +354,13 @@ where
     }
     // The request-scoped state carries the credential's principal, so dispatch
     // runs through the bound entry point and the shared `Mutex`-held state stays
-    // one instance rather than a per-request fork; this listener marks the rest.
-    let request_state = scoped_state(handler, principal);
+    // one instance rather than a per-request fork; trust comes from this request.
+    let remote = is_proxied_or_remote(peer, &req.headers);
+    let request_state = scoped_state(handler, principal, remote);
     post.respond(PostContext {
         state: &request_state,
         req,
     })
-}
-
-/// Whether this config carries a credential source for its requests.
-///
-/// The decision is [`CredentialStore::is_credential_source`]: a supplied store
-/// is a source even with no record, so the start guard refuses that bind.
-#[must_use]
-pub fn has_credential_source(cfg: &HttpConfig) -> bool {
-    cfg.credentials
-        .as_ref()
-        .is_some_and(|s| s.is_credential_source())
 }
 
 /// Whether an `Accept` header admits a JSON answer.

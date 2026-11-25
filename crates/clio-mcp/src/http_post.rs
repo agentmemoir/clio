@@ -76,14 +76,21 @@ pub(crate) trait PostRoute {
 ///
 /// A handler that serves a listener reachable off this machine marks every copy
 /// it hands out, bound or not, so a request served there can never be read as
-/// one a local process owner made.
-pub(crate) fn scoped_state(handler: &Arc<McpHandler>, principal: AuthOutcome) -> McpState {
+/// one a local process owner made. `remote` is the per-request half of the same
+/// fact: a request that arrived through a proxy or a tunnel is marked even when
+/// its listener is loopback, because a loopback socket proves only where the
+/// last hop came from.
+pub(crate) fn scoped_state(
+    handler: &Arc<McpHandler>,
+    principal: AuthOutcome,
+    remote: bool,
+) -> McpState {
     let base = handler.state();
     let mut scoped = match principal {
         AuthOutcome::Bound(principal) => base.with_principal(principal),
         AuthOutcome::Unbound => base.as_ref().clone(),
     };
-    if handler.network_untrusted() {
+    if !handler.network_trusted() || remote {
         scoped.mark_network_untrusted();
     }
     scoped

@@ -334,7 +334,8 @@ pub(crate) fn call_tool(
     tool: &str,
     arguments: &Value,
 ) -> Result<Value, CliError> {
-    let handler = clio_mcp::protocol::McpHandler::new(Arc::clone(state));
+    let mut handler = clio_mcp::protocol::McpHandler::new(Arc::clone(state));
+    handler.set_network_trusted(true);
     let response = handler.handle_cli_verb(tool, arguments);
     if let Some(error) = response.get("error") {
         let code = match error.get("code") {

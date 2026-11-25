@@ -117,6 +117,9 @@ pub(crate) fn profile_set(state: &McpState, args: &Value) -> Result<Value, AmErr
             "accepted_but_inert": profile.accepted_but_inert(),
         }));
     }
+    // The preview above writes nothing, so it is not gated; everything past it
+    // persists a profile, which a caller the transport cannot vouch for may not.
+    state.require_authenticated_transport()?;
     let persisted = if scope == "deployment" {
         state.authorize_admin()?;
         state.set_retention_deployment(profile.clone())?

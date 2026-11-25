@@ -11,7 +11,7 @@
 //! - MCP error-code mapping (tool failures keep machine-readable codes)
 //! - The profile-narrowed tool view that `tools/list` and dispatch share, the
 //!   bound write+read set the argument contract reads, and the handler a
-//!   transport dispatches through with the trust fact of its listener
+//!   transport dispatches through with the trust of its callers
 //!
 //! ## Does not own
 //! - Tool semantics (see `write_tools`/`mutator_tools`)
@@ -47,28 +47,28 @@ pub const ERR_COACTIVATION_HANDOFF: i64 = -32001;
 #[derive(Debug)]
 pub struct McpHandler {
     state: Arc<McpState>,
-    network_untrusted: bool,
+    network_trusted: bool,
 }
 
 impl McpHandler {
-    /// Bind the handler to runtime state, trusted until a transport marks it.
+    /// Bind the handler to runtime state, untrusted until a transport marks it.
     #[must_use]
     pub fn new(state: Arc<McpState>) -> Self {
         Self {
             state,
-            network_untrusted: false,
+            network_trusted: false,
         }
     }
 
-    /// Record that this handler serves a listener reachable off this machine.
-    pub(crate) fn set_network_untrusted(&mut self, network_untrusted: bool) {
-        self.network_untrusted = network_untrusted;
+    /// Record whether this handler's callers are local process owners.
+    pub fn set_network_trusted(&mut self, network_trusted: bool) {
+        self.network_trusted = network_trusted;
     }
 
-    /// Whether this handler serves a listener reachable off this machine.
+    /// Whether this handler's callers are local process owners.
     #[must_use]
-    pub(crate) fn network_untrusted(&self) -> bool {
-        self.network_untrusted
+    pub(crate) fn network_trusted(&self) -> bool {
+        self.network_trusted
     }
 
     /// Runtime state accessor (transports may need defaults).
