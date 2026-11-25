@@ -50,6 +50,7 @@ on:
       - '.github/workflows/ci.yml'
       - '.github/workflows/scoped-coverage.yml'
       - '.github/workflows/secret-service.yml'
+      - '.github/workflows/**'
   pull_request:
     branches: [master, main]
     # This list is identical in all three workflow files and must stay that way.
@@ -69,6 +70,7 @@ on:
       - '.github/workflows/ci.yml'
       - '.github/workflows/scoped-coverage.yml'
       - '.github/workflows/secret-service.yml'
+      - '.github/workflows/**'
 
 env:
   CARGO_TERM_COLOR: always

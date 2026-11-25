@@ -137,13 +137,12 @@ jobs:
       # leaves assembly alone, because `cc` would otherwise hand the flag to the
       # assembler and ring's hand-written .S would not build. Full explanation
       # in scripts/musl-cc.sh.
-      - name: Route the musl C build through the header wrapper
-        if: runner.os == 'Linux'
+      # The target comes from the environment and is checked against an allowlist
+      # before any later step uses it.
+      - name: Check the release target is expected
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          # The target comes from the environment and is checked against the
-          # release allowlist before any of it reaches the shell.
           case "$TARGET" in
             aarch64-apple-darwin|x86_64-unknown-linux-musl|aarch64-unknown-linux-musl) ;;
             *)
@@ -151,6 +150,12 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Route the musl C build through the header wrapper
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
           chmod +x scripts/musl-cc.sh
           case "$TARGET" in
             x86_64-unknown-linux-musl)
