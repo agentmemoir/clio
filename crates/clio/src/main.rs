@@ -26,6 +26,7 @@
 //! Keep this module focused on the `clio` CLI process entrypoint.
 
 mod agent_harness;
+mod agent_harness_atomic_write;
 mod agent_harness_delegate;
 mod agent_harness_delegate_read;
 mod agent_harness_targets;
@@ -90,6 +91,7 @@ mod cli_help_request;
 mod cli_help_surfaces;
 mod cli_help_usage;
 mod cli_manual_write;
+mod cli_manual_write_dir;
 mod cli_output;
 mod cli_read;
 mod cli_read_args;

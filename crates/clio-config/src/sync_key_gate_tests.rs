@@ -255,7 +255,9 @@ fn a_symlinked_archive_directory_is_refused() {
     // `O_NOFOLLOW` guards the archive's final name only, so the directory that
     // name is resolved in is judged itself: a `chmod` through a link would
     // tighten a directory Clio never meant to touch and leave the real parent
-    // loose enough for another account to swap the archive entry.
+    // loose enough for another account to swap the archive entry. The directory
+    // gate's own wording is pinned by `sync_key_dir_gate_tests`; this case pins
+    // that the archive's write path reaches it at all.
     use std::os::unix::fs::PermissionsExt;
     let outside = TempDir::new("gate-archive-parent-target");
     std::fs::set_permissions(outside.path(), std::fs::Permissions::from_mode(0o755))
@@ -294,9 +296,9 @@ fn a_symlinked_archive_directory_is_refused() {
 #[cfg(unix)]
 #[test]
 fn a_symlinked_key_directory_is_refused_for_the_key_and_the_sidecar() {
-    // The same rule the archive applies: the directory the key's final name is
-    // resolved in is judged itself, so the write neither follows the link nor
-    // chmods through it.
+    // The same rule the archive applies, for the key file and its sidecar: the
+    // directory the final name is resolved in is judged itself, so neither write
+    // follows the link nor chmods through it.
     use std::os::unix::fs::PermissionsExt;
     let outside = TempDir::new("gate-key-parent-target");
     std::fs::set_permissions(outside.path(), std::fs::Permissions::from_mode(0o755))
@@ -337,72 +339,6 @@ fn a_symlinked_key_directory_is_refused_for_the_key_and_the_sidecar() {
         0o755,
         "the refusal did not chmod through the link either"
     );
-}
-
-#[cfg(unix)]
-#[test]
-fn a_key_directory_that_is_a_regular_file_is_refused() {
-    // A parent that exists but is not a directory is the other half of the same
-    // rule, and the gate must refuse it by its own shape check rather than by a
-    // `chmod` that happened to fail. The gate is called directly here, because a
-    // call through `write_created` or `append_entry` reaches `create_dir_all`
-    // first, and that fails before the gate's non-directory arm is ever asked.
-    let dir = TempDir::new("gate-parent-file");
-    let blocker = dir.join("blocker");
-    std::fs::write(&blocker, b"not a directory").expect("blocker");
-
-    let err = super::ensure_owner_only_dir(&blocker)
-        .expect_err("a regular file is not a directory to keep key material in");
-
-    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
-    let expected = format!(
-        "sync key directory {}: refused because it is not a directory; replace it with a real \
-         directory only the owner can enter and run again",
-        blocker.display()
-    );
-    assert_eq!(err.message, expected);
-    assert_eq!(
-        std::fs::read_to_string(&blocker).expect("the blocker is untouched"),
-        "not a directory",
-        "the refusal neither chmodded nor wrote through the path it refused"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn a_missing_key_directory_is_refused_before_it_is_tightened() {
-    // The gate reads the parent before it tightens it, so a path that is gone is
-    // a reported failure rather than key material kept in a directory no one
-    // checked.
-    let holder = TempDir::new("gate-parent-gone");
-    let missing = holder.join("absent");
-
-    let err = super::ensure_owner_only_dir(&missing)
-        .expect_err("a directory that cannot be read is not a place for key material");
-
-    assert_eq!(err.code, clio_types::ErrorCode::Internal);
-    assert!(
-        err.message.starts_with(&format!(
-            "cannot read the Clio sync key directory {}: ",
-            missing.display()
-        )),
-        "the failure names the unreadable directory: {}",
-        err.message
-    );
-}
-
-#[test]
-fn the_current_directory_is_never_tightened() {
-    // A bare relative key name reaches the gate as `.`, the process directory.
-    use std::os::unix::fs::PermissionsExt;
-    let dir = TempDir::new("gate-current-dir");
-    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).expect("chmod");
-    let previous = std::env::current_dir().expect("cwd");
-    std::env::set_current_dir(dir.path()).expect("enter");
-    super::ensure_owner_only_dir(std::path::Path::new(".")).expect("left alone");
-    std::env::set_current_dir(previous).expect("leave");
-    let meta = std::fs::metadata(dir.path()).expect("metadata");
-    assert_eq!(meta.permissions().mode() & 0o777, 0o755, "mode kept");
 }
 
 // ------------------------------------------------------------------- owner
