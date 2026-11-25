@@ -7,7 +7,7 @@ Passing the value through `env:` and reading it as a shell variable keeps the sc
 This check reads the workflow lines and knows one key: `run:`.
 An expression under `env:`, `with:`, `if:`, `name:`, `uses:`, `run-name:`, or any other key is not a finding, because the engine expands it into a field rather than into a command.
 That is the whole rule, and it is why the check parses no YAML: a full parse would need a library, and the question here is which lines a `run:` key owns, not what the document means.
-The ownership rule is the one a reader would use: a block scalar owns every following line indented deeper than the leading indentation of the line that holds its key, including the blank lines inside it, and it ends at the first non-blank line that is not deeper.
+The ownership rule is the one a reader would use: a block scalar, or a plain value written on the lines below its key, owns every following line indented deeper than the column where its `run:` key starts, including the blank lines inside it, and it ends at the first non-blank line that is not deeper.
 
 What it does not do: follow an anchor, an alias, or a merge key. A `run:` reached through one of those is not seen by a line reader; a `run:` key is seen whether it starts its line or follows a list dash on the same line (`- run: ...`).
 
@@ -39,11 +39,13 @@ USAGE = "usage: workflow_expression_check.py | --self-test"
 WORKFLOW_DIR = ".github/workflows"
 
 #: A `run:` mapping key at any indentation, with an inline value or none, and an
-#: optional list dash on the same line.
-RUN_KEY = re.compile(r"^([ ]*)(?:-[ ]+)?run:(?:[ ]+(.*))?$")
+#: optional list dash on the same line. Group 1 is the leading spaces and group 2
+#: the dash with its trailing spaces, so their lengths give the column of `run`.
+RUN_KEY = re.compile(r"^([ ]*)(-[ ]+)?run:(?:[ ]+(.*))?$")
 
-#: The block scalar headers YAML allows, after a trailing comment is dropped.
-BLOCK_MARKERS = frozenset({"|", "|-", "|+", ">", ">-", ">+"})
+#: A block scalar header, with an indentation digit and a chomping sign in either
+#: order, after a trailing comment is dropped.
+BLOCK_HEADER = re.compile(r"^[|>](?:[1-9][+-]?|[+-][1-9]?)?$")
 
 EXPRESSION = "${{"
 
@@ -70,19 +72,20 @@ def run_bodies(text: str) -> list[tuple[int, str]]:
         index += 1
         if not match:
             continue
-        indent = len(match.group(1))
-        value = _inline(match.group(2))
-        if value in BLOCK_MARKERS:
-            while index < len(lines):
-                body = lines[index]
-                if body.strip():
-                    if len(body) - len(body.lstrip(" ")) <= indent:
-                        break
-                    found.append((index + 1, body))
-                index += 1
-            continue
-        if value:
+        # The body boundary is measured from the `run` column, not from the dash.
+        key_column = len(match.group(1)) + len(match.group(2) or "")
+        value = _inline(match.group(3))
+        if value and not BLOCK_HEADER.match(value):
             found.append((number, value))
+            continue
+        # A block header and an empty key both own the deeper lines below them.
+        while index < len(lines):
+            body = lines[index]
+            if body.strip():
+                if len(body) - len(body.lstrip(" ")) <= key_column:
+                    break
+                found.append((index + 1, body))
+            index += 1
     return found
 
 
@@ -237,6 +240,31 @@ jobs:
           echo "sha: ${{ github.sha }}"
           echo done
 """
+    dash_bare = """on: [push]
+jobs:
+  check:
+    steps:
+      - run:
+          echo "sha: ${{ github.sha }}"
+"""
+    block_digit = """on: [push]
+jobs:
+  check:
+    steps:
+      - name: Echo
+        run: |2-
+          echo "sha: ${{ github.sha }}"
+          echo done
+"""
+    dash_sibling = """on: [push]
+jobs:
+  check:
+    steps:
+      - run: |
+          echo done
+        env:
+          SHA: ${{ github.sha }}
+"""
     folded = """on: [push]
 jobs:
   check:
@@ -276,6 +304,21 @@ jobs:
             EXIT_FINDINGS,
             _fixture(base, "dash-block", {wf: dash_block}),
         ),
+        (
+            "a value on the lines below a bare list-dash run key is a finding",
+            EXIT_FINDINGS,
+            _fixture(base, "dash-bare", {wf: dash_bare}),
+        ),
+        (
+            "a block header with an indentation digit holding an expression is a finding",
+            EXIT_FINDINGS,
+            _fixture(base, "block-digit", {wf: block_digit}),
+        ),
+        (
+            "a list-dash block ends at a sibling key at the run column",
+            EXIT_OK,
+            _fixture(base, "dash-sibling", {wf: dash_sibling}),
+        ),
         ("a folded block holding an expression is a finding", EXIT_FINDINGS, _fixture(base, "folded", {wf: folded})),
         (
             "a block body ends at a sibling key holding an expression",
@@ -304,8 +347,15 @@ def _self_test() -> int:
             print(f"self-test {'ok' if ok else 'FAIL'}: {name} (exit {got}, want {want})")
             failures += 0 if ok else 1
 
-        # The exit code alone cannot say whether the finding names the line the expression sits on, and a reader with a block scalar needs that line rather than the key's. Asserted here for the inline case, a block, and both list-dash forms, because they take different paths through the reader.
-        for label, want_count in (("inline", 1), ("block", 1), ("dash-inline", 1), ("dash-block", 1)):
+        # The exit code alone cannot say whether the finding names the line the expression sits on, and a reader with a block scalar needs that line rather than the key's. Asserted here for every finding case, because they take different paths through the reader.
+        for label, want_count in (
+            ("inline", 1),
+            ("block", 1),
+            ("dash-inline", 1),
+            ("dash-block", 1),
+            ("dash-bare", 1),
+            ("block-digit", 1),
+        ):
             total += 1
             root = base / label
             surface = scan(root)
