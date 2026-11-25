@@ -71,10 +71,22 @@ RUN channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' /tmp/rust-toolchain.toml)" \
 # Drop root: the build steps above need UID 0, nothing at run time does. The base
 # image ships `ubuntu` at 1000:1000, which matches the common Linux host user, so
 # the read-only checkout bind mount reports no dubious ownership to git.
-# The two Rust trees are handed to that user so cargo can write its registry and
-# rustup its settings; the gain here is losing UID 0 and all capabilities, not a
-# read-only toolchain.
-RUN chown -R ubuntu:ubuntu "${CARGO_HOME}" "${RUSTUP_HOME}"
+# Cargo and rustup need to write some state, so hand them that state only.
+# Executable directories stay root-owned: a writable bin on PATH is how a
+# process in the box could replace the toolchain a later command runs.
+RUN set -eux; \
+    for dir in \
+      "${CARGO_HOME}/registry" \
+      "${CARGO_HOME}/git" \
+      "${RUSTUP_HOME}/downloads" \
+      "${RUSTUP_HOME}/tmp" \
+      "${RUSTUP_HOME}/update-hashes" \
+    ; do \
+      mkdir -p "${dir}"; \
+      chown -R ubuntu:ubuntu "${dir}"; \
+    done; \
+    touch "${CARGO_HOME}/.package-cache" "${RUSTUP_HOME}/settings.toml"; \
+    chown ubuntu:ubuntu "${CARGO_HOME}/.package-cache" "${RUSTUP_HOME}/settings.toml"
 USER ubuntu
 
 WORKDIR /workspace
