@@ -273,3 +273,7 @@ pub(crate) fn test_engine_at<'a>(
 #[cfg(test)]
 #[path = "apply_freshness_tests.rs"]
 mod apply_freshness_tests;
+
+#[cfg(test)]
+#[path = "apply_freshness_stamp_tests.rs"]
+mod apply_freshness_stamp_tests;
