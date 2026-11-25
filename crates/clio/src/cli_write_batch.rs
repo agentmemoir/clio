@@ -103,9 +103,7 @@ fn batch_call(
                     "try 'clio batch --file - < ops.json'",
                 ));
             };
-            std::io::read_to_string(stdin).map_err(|error| {
-                CliError::usage(format!("`batch --file -` is not readable: {error}"))
-            })?
+            crate::cli_read_cap::read_document(stdin, "`batch --file -`")?
         }
         other => std::fs::read_to_string(other).map_err(|error| {
             CliError::usage(format!("--file `{other}` is not readable: {error}"))

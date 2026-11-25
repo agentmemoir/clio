@@ -18,6 +18,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use crate::cli_read_cap::MAX_INPUT_BYTES;
 use crate::cli_read_test_support::{call, json_of, seed_item, state};
 use crate::cli_write_group::WriteGroup;
 use crate::cli_write_test_support::{run_write_resolved, run_write_state, run_write_state_stdin};
@@ -173,6 +174,36 @@ fn batch_reads_operations_from_stdin_with_dash() {
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     assert!(out.contains("batch: 2 operations committed"), "{out}");
     assert_eq!(bank_count(&s, "default"), 2);
+}
+
+#[test]
+fn batch_rejects_stdin_larger_than_the_byte_cap() {
+    let s = state();
+    let mut reader = Cursor::new(vec![b' '; MAX_INPUT_BYTES + 1]);
+    let (code, out, err) = run_write_state_stdin("batch", &["--file", "-"], &mut reader, &s, false);
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    let mebibytes = format!("{} MiB", MAX_INPUT_BYTES / (1024 * 1024));
+    assert!(err.contains("`batch --file -` is larger than the"), "{err}");
+    assert!(err.contains(&mebibytes), "{err}");
+    assert!(err.contains("split the document"), "{err}");
+    assert_eq!(bank_count(&s, "default"), 0, "refused before any write");
+}
+
+#[test]
+fn batch_accepts_stdin_exactly_at_the_byte_cap() {
+    let s = state();
+    let document = "{\"operations\":[]}";
+    let mut bytes = document.as_bytes().to_vec();
+    bytes.resize(MAX_INPUT_BYTES, b' ');
+    let mut reader = Cursor::new(bytes);
+    let (code, out, err) = run_write_state_stdin("batch", &["--file", "-"], &mut reader, &s, false);
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    let payload = json_of(&out);
+    assert_eq!(
+        payload["operations"].as_array().map(Vec::len),
+        Some(0),
+        "{payload}"
+    );
 }
 
 #[test]
