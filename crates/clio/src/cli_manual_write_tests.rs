@@ -53,6 +53,10 @@ impl Scratch {
     fn path(&self, name: &str) -> PathBuf {
         self.root.join(name)
     }
+
+    fn root(&self) -> &Path {
+        &self.root
+    }
 }
 
 impl Drop for Scratch {
@@ -274,20 +278,39 @@ fn write_manual_refuses_a_fifo_in_a_pages_place() {
 
 #[cfg(unix)]
 #[test]
-fn write_manual_refuses_an_unmarked_file_reached_through_a_created_component() {
-    let scratch = Scratch::new("late-resolution");
+fn write_manual_refuses_an_out_path_that_contains_a_parent_component() {
+    let scratch = Scratch::new("parent-component");
     fs::write(scratch.path("index.md"), "hand written").expect("the unrelated file");
-    // The walk creates `missing` with a directory create on the held descriptor, then opens
-    // `..` there, which is the scratch root. `missing` did not exist when the caller wrote
-    // the path, so the unrelated file it now resolves to is seen for the first time by the
-    // check that runs after the walk, and it is refused rather than replaced.
+    // `..` is refused at the walk, before any directory is created or a page target is inspected:
+    // the kernel resolves `..` against the held directory's current parent, so it cannot be both
+    // checked and used, and a `--out` that names one is refused rather than resolved.
     let out = scratch.path("missing").join("..");
-    let error = write_manual(&out).expect_err("the unrelated file is refused");
-    assert_eq!(error.code(), "usage");
+    let error = write_manual(&out).expect_err("a `..` component is refused");
+    assert_eq!(error.code(), "usage", "the refusal is a usage error");
+    assert!(
+        error.message().contains(".."),
+        "the refusal names what it refuses: {}",
+        error.message()
+    );
     assert_eq!(
         fs::read_to_string(scratch.path("index.md")).expect("the unrelated file"),
         "hand written",
         "the refused file is unchanged"
+    );
+    let created: Vec<String> = fs::read_dir(scratch.root())
+        .expect("the scratch root")
+        .map(|entry| {
+            entry
+                .expect("a directory entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name != "index.md")
+        .collect();
+    assert!(
+        created.is_empty(),
+        "nothing was created for the refused path: {created:?}"
     );
 }
 

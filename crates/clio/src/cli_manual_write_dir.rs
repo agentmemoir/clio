@@ -23,7 +23,10 @@
 //! Changes to how one page reaches the output directory should normally require changes here; and
 //! changes to which pages the manual writes should not. Why the held directory: a path checked then
 //! written through resolves its ancestors twice, so a component swapped for a symlink in between
-//! redirects the write; one walk into a descriptor, then bare names, share one inode.
+//! redirects the write; one walk into a descriptor, then bare names, keep the write in the directory
+//! the walk reached.
+//!
+//! What that guarantees, and no more: every component of `--out` is opened once, relative to the descriptor held for the component before it; a `..` component is refused rather than opened, because it re-resolves against the held directory's current parent rather than the parent the walk checked; and no operation after the walk resolves a path at all, since the target check, the temp create, the chmod, the sync, and the promote name a bare file inside the held directory.
 //!
 //! The held-directory form is the only form: the crate declares a descriptor-relative call
 //! unconditionally, and every target it ships is one that has them.
@@ -37,8 +40,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustix::{
     fs::{
-        AtFlags, FileType, Mode, OFlags, RawMode, fchmod, mkdirat, open, openat, renameat, statat,
-        unlinkat,
+        AtFlags, FileType, Mode, OFlags, fchmod, mkdirat, open, openat, renameat, statat, unlinkat,
     },
     io::Errno,
 };
@@ -49,18 +51,20 @@ use std::os::fd::OwnedFd;
 pub(crate) static FAILED_PROMOTE_TARGET: std::sync::Mutex<Option<PathBuf>> =
     std::sync::Mutex::new(None);
 
-/// The place the checked directory is moved to, and the decoy directory that
-/// takes its name, for the seam swapping a component between the walk and the
-/// promote. Test-only, and armed at most once.
+/// The `--out` a test seam is armed for, the place the checked directory is
+/// moved to, and the decoy directory that takes its name: the seam swapping a
+/// component between the walk and the promote. Test-only, and keyed by the armed
+/// `--out` so another test's write cannot consume it.
 #[cfg(test)]
-static SWAP_BEFORE_PROMOTE: std::sync::Mutex<Option<(PathBuf, PathBuf)>> =
+static SWAP_BEFORE_PROMOTE: std::sync::Mutex<Option<(PathBuf, PathBuf, PathBuf)>> =
     std::sync::Mutex::new(None);
 
-/// The page name a symlink is planted at, and the file outside `--out` it
-/// points at, for the seam planting a target between the check and the write.
-/// Test-only, and armed at most once.
+/// The `--out` a test seam is armed for, the page name a symlink is planted at,
+/// and the file outside `--out` it points at: the seam planting a target
+/// between the check and the write. Test-only, and keyed by the armed `--out` so
+/// another test's write cannot consume it.
 #[cfg(test)]
-static PLANT_AFTER_CHECK: std::sync::Mutex<Option<(PathBuf, OsString)>> =
+static PLANT_AFTER_CHECK: std::sync::Mutex<Option<(PathBuf, PathBuf, OsString)>> =
     std::sync::Mutex::new(None);
 
 /// The manual's output directory, resolved once and held. `shown` is `--out` as the caller
@@ -74,8 +78,7 @@ impl OutDir {
     /// Resolve `out_dir` once, creating a missing component as it is reached. Each component is
     /// visited once: an existing one is classified without following a link, a missing one is created
     /// and then opened, and what comes back is a descriptor the later operations name rather than
-    /// resolving the path again. `..` opens relative to the held descriptor, so `missing/..` is what
-    /// the caller wrote.
+    /// resolving the path again. A `..` component is refused before anything is created.
     pub(crate) fn open(out_dir: &Path) -> Result<Self, CliError> {
         if out_dir.components().next().is_none() {
             return Err(CliError::usage("--out is empty"));
@@ -86,19 +89,24 @@ impl OutDir {
         } else {
             (Path::new("."), PathBuf::new())
         };
+        // A `..` is refused before anything is opened or created: the kernel resolves it against the
+        // held directory's current parent, which a rename can change after the walk checked it.
+        refuse_parent_component(out_dir, &walked)?;
         let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
         let mut fd = open(start, flags, Mode::empty())
             .map_err(|err| io_error("create", start, &err.into()))?;
         for component in out_dir.components() {
-            // `.` only re-resolves the directory already held, the root of an absolute path
-            // is already open, and a prefix is not a name here; none of them is a step.
-            let name: &OsStr = match component {
-                std::path::Component::ParentDir => OsStr::new(".."),
-                std::path::Component::Normal(name) => name,
-                _ => continue,
-            };
-            fd = step(&fd, &walked, name)?;
-            walked.push(name);
+            match component {
+                std::path::Component::Normal(name) => {
+                    fd = step(&fd, &walked, name)?;
+                    walked.push(name);
+                }
+                // Kept in the displayed path, so a refusal repeats the bytes the caller wrote.
+                std::path::Component::CurDir => walked.push("."),
+                // A `..` is refused above; the root of an absolute path is already open, and a
+                // prefix is not a name here, so neither is a step.
+                _ => {}
+            }
         }
         Ok(Self {
             fd,
@@ -116,17 +124,18 @@ impl OutDir {
             Ok(stat) => stat,
             Err(err) => return Err(errno_error("inspect", &target, err)),
         };
-        match FileType::from_raw_mode(stat.st_mode as RawMode) {
+        match FileType::from_raw_mode(stat.st_mode) {
             FileType::RegularFile => {}
             FileType::Symlink => return Err(symlink_target(&target)),
             FileType::Directory => return Err(directory_target(&target)),
             _ => return Err(special_target(&target)),
         }
         // The open names the entry classified above; `NONBLOCK` makes a FIFO swapped in after
-        // the classification an error rather than a wait.
+        // the classification an error rather than a wait. The open is part of reading the marker,
+        // so its failure reports the read, as a plain path read of the same file would.
         let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
         let opened = openat(&self.fd, file, flags, Mode::empty())
-            .map_err(|err| errno_error("inspect", &target, err))?;
+            .map_err(|err| errno_error("read", &target, err))?;
         if !generated(std::fs::File::from(opened), &target)? {
             return Err(unmarked_target(&target));
         }
@@ -134,16 +143,21 @@ impl OutDir {
     }
 
     /// Write `bytes` to a fresh temp sibling of `file` in the held directory and return its bare name.
-    /// The temp takes the target's mode, or `0o644` for a new page, and is created owner-only so it never
-    /// exists wider. A target swapped for a symlink after its check is never followed: the create requires
-    /// a new name. A failure once the temp exists removes it and reports the manual incomplete.
-    /// A test-only seam can plant a target at the page name before the create.
+    /// The temp takes a replaced page's mode, or `0o644` for a new page or for anything that is not a
+    /// regular file, and is created owner-only so it never exists wider. A target swapped for a symlink
+    /// after its check is never followed: the create requires a new name. A failure once the temp exists
+    /// removes it and reports the manual incomplete. A test-only seam can plant a target at the page
+    /// name before the create.
     pub(crate) fn write_temp(&self, file: &str, bytes: &[u8]) -> Result<OsString, CliError> {
         armed_plant_after_check(&self.shown);
-        // Read without following a link; a link leaves the new page's default mode.
-        let mode = statat(&self.fd, file, AtFlags::SYMLINK_NOFOLLOW)
-            .ok()
-            .map_or(0o644, |stat| stat.st_mode & 0o7777);
+        // A regular file's mode is kept; a link, a fifo, or anything else planted after the check
+        // leaves the new page at the default, so an attacker cannot choose a wider one.
+        let mode = match statat(&self.fd, file, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(stat) if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile => {
+                Mode::from_raw_mode(stat.st_mode)
+            }
+            _ => Mode::from(0o644),
+        };
         let (tmp, mut staged) = self.create_temp(file)?;
         let shown = self.shown.join(&tmp);
         if let Err(err) = write_and_sync(&mut staged, bytes, mode, &shown) {
@@ -189,25 +203,23 @@ impl OutDir {
 
 /// Open one path component relative to the directory already held. The classification and the open
 /// name the same entry, so the component checked is the one opened; a missing one is created then
-/// opened, making the create and the check one lookup.
+/// opened, making the create and the check one lookup. The create uses `0o777` and leaves the mode to
+/// the process umask, as a directory create outside this module would.
 fn step(dir: &OwnedFd, walked: &Path, name: &OsStr) -> Result<OwnedFd, CliError> {
     let at = walked.join(name);
     match statat(dir, name, AtFlags::SYMLINK_NOFOLLOW) {
-        Ok(stat) => match FileType::from_raw_mode(stat.st_mode as RawMode) {
+        Ok(stat) => match FileType::from_raw_mode(stat.st_mode) {
             FileType::Directory => {}
             FileType::Symlink => return Err(symlink_component(&at)),
             _ => return Err(not_a_directory(&at)),
         },
-        Err(Errno::NOENT) if name != ".." => {
-            if let Err(err) = mkdirat(dir, name, Mode::from(0o755))
+        Err(Errno::NOENT) => {
+            if let Err(err) = mkdirat(dir, name, Mode::from(0o777))
                 && err != Errno::EXIST
             {
                 return Err(errno_error("create", &at, err));
             }
         }
-        // A `..` that is not there cannot be created, so it never becomes a
-        // directory the caller can reach.
-        Err(Errno::NOENT) => return Err(not_a_directory(&at)),
         Err(err) => return Err(errno_error("inspect", &at, err)),
     }
     let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
@@ -216,6 +228,30 @@ fn step(dir: &OwnedFd, walked: &Path, name: &OsStr) -> Result<OwnedFd, CliError>
         Errno::NOTDIR => not_a_directory(&at),
         _ => errno_error("create", &at, err),
     })
+}
+
+/// The refusal an `--out` containing `..` receives before anything is opened or created: the kernel
+/// resolves `..` against the held directory's current parent, which a rename can change after the
+/// walk checked it, so one lookup cannot both check and use it.
+fn parent_component(walked: &Path) -> CliError {
+    let shown = walked.join("..").display().to_string();
+    CliError::usage(format!(
+        "--out refuses `{shown}`: `..` can resolve to a different directory than the one checked"
+    ))
+}
+
+/// Refuse an `out_dir` whose walk reaches a `..`, naming the walked path up to it.
+fn refuse_parent_component(out_dir: &Path, start: &Path) -> Result<(), CliError> {
+    let mut walked = start.to_path_buf();
+    for component in out_dir.components() {
+        match component {
+            std::path::Component::Normal(name) => walked.push(name),
+            std::path::Component::CurDir => walked.push("."),
+            std::path::Component::ParentDir => return Err(parent_component(&walked)),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// The refusal a symlink component receives.
@@ -277,7 +313,7 @@ fn generated(mut file: std::fs::File, target: &Path) -> Result<bool, CliError> {
 
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
-        .map_err(|err| io_error("inspect", target, &err))?;
+        .map_err(|err| io_error("read", target, &err))?;
     let first_line = bytes
         .split(|byte| *byte == b'\n')
         .next()
@@ -289,15 +325,14 @@ fn generated(mut file: std::fs::File, target: &Path) -> Result<bool, CliError> {
 fn write_and_sync(
     temp: &mut std::fs::File,
     bytes: &[u8],
-    mode: u32,
+    mode: Mode,
     shown: &Path,
 ) -> Result<(), CliError> {
     use std::io::Write;
 
     temp.write_all(bytes)
         .map_err(|err| io_error("write", shown, &err))?;
-    fchmod(&*temp, Mode::from_raw_mode(mode as RawMode))
-        .map_err(|err| errno_error("set permissions on", shown, err))?;
+    fchmod(&*temp, mode).map_err(|err| errno_error("set permissions on", shown, err))?;
     temp.sync_all().map_err(|err| io_error("sync", shown, &err))
 }
 
@@ -333,15 +368,17 @@ fn armed_promote_failure(target: &Path) -> Option<CliError> {
 }
 
 /// Move the checked directory to the armed place and put a symlink to the armed decoy directory at
-/// its name, once per test that arms it; always a no-op in production.
+/// its name, once for the `--out` the seam was armed for; a seam armed for another directory stays
+/// armed. Always a no-op in production.
 fn armed_swap_before_promote(shown: &Path) {
     #[cfg(test)]
     {
-        let armed = SWAP_BEFORE_PROMOTE
+        let mut seam = SWAP_BEFORE_PROMOTE
             .lock()
-            .expect("the swap seam lock is not poisoned")
-            .take();
-        if let Some((aside, decoy)) = armed {
+            .expect("the swap seam lock is not poisoned");
+        if seam.as_ref().is_some_and(|(armed, _, _)| armed == shown)
+            && let Some((_, aside, decoy)) = seam.take()
+        {
             let _ = std::fs::rename(shown, aside);
             let _ = std::os::unix::fs::symlink(decoy, shown);
         }
@@ -350,16 +387,17 @@ fn armed_swap_before_promote(shown: &Path) {
     let _ = shown;
 }
 
-/// Plant a symlink to the armed file outside `--out` at the armed page name, once per test that arms
-/// it; always a no-op in production.
+/// Plant a symlink to the armed file outside `--out` at the armed page name, once for the `--out` the
+/// seam was armed for; a seam armed for another directory stays armed. Always a no-op in production.
 fn armed_plant_after_check(shown: &Path) {
     #[cfg(test)]
     {
-        let armed = PLANT_AFTER_CHECK
+        let mut seam = PLANT_AFTER_CHECK
             .lock()
-            .expect("the plant seam lock is not poisoned")
-            .take();
-        if let Some((outside, page)) = armed {
+            .expect("the plant seam lock is not poisoned");
+        if seam.as_ref().is_some_and(|(armed, _, _)| armed == shown)
+            && let Some((_, outside, page)) = seam.take()
+        {
             let _ = std::os::unix::fs::symlink(outside, shown.join(page));
         }
     }

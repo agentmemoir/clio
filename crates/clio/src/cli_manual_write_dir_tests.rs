@@ -3,11 +3,11 @@
 //
 //! # Responsibility
 //!
-//! This module tests the held output directory: that the pages land in the directory the walk resolved even when the name the caller wrote stops naming it, that a target planted after its check is replaced rather than followed, and that a missing component is created once while a non-directory one is refused.
+//! This module tests the held output directory: that the pages land in the directory the walk resolved even when the name the caller wrote stops naming it, that the write entry point is the caller that lands them there, that a target planted after its check is replaced rather than followed and is not left world-writable, that a missing component is created once while a non-directory one is refused, and that a `..` component is refused before it can resolve twice.
 //!
 //! ## Owns
 //! - The local scratch directory every test fills
-//! - The guards arming the component-swap and planted-target seams, each disarming on drop
+//! - The guards arming the component-swap and planted-target seams for one `--out`, each disarming on drop
 //!
 //! ## Does not own
 //! - The writer under test (the `cli_manual_write_dir` module)
@@ -20,6 +20,7 @@
 //! Keep this module on what the held directory guarantees, not which pages the manual holds.
 
 use super::*;
+use crate::cli_command_registry;
 use crate::cli_help_markdown::PageMap;
 use crate::cli_manual_write::write_manual;
 use std::fs;
@@ -86,18 +87,21 @@ fn names_in(dir: &Path) -> Vec<String> {
     names
 }
 
-/// Arm the component-swap seam until the guard drops, so a panicking test cannot leave the seam armed for the next one.
+/// Arm the component-swap seam for one `--out` until the guard drops, so a panicking test cannot leave the seam armed for the next one.
 #[cfg(unix)]
 struct ArmedComponentSwap;
 
 #[cfg(unix)]
 impl ArmedComponentSwap {
-    /// Arm the seam: the next promote moves the held directory to `aside` and puts a symlink to `decoy` where it was.
-    fn arm(aside: &Path, decoy: &Path) -> Self {
+    /// Arm the seam: the next promote inside `out` moves that directory to `aside` and puts a symlink to `decoy` where it was.
+    fn arm(out: &Path, aside: &Path, decoy: &Path) -> Self {
         *SWAP_BEFORE_PROMOTE
             .lock()
-            .expect("the swap seam lock is not poisoned") =
-            Some((aside.to_path_buf(), decoy.to_path_buf()));
+            .expect("the swap seam lock is not poisoned") = Some((
+            out.to_path_buf(),
+            aside.to_path_buf(),
+            decoy.to_path_buf(),
+        ));
         Self
     }
 }
@@ -111,18 +115,21 @@ impl Drop for ArmedComponentSwap {
     }
 }
 
-/// Arm the planted-target seam until the guard drops, so a panicking test cannot leave the seam armed for the next one.
+/// Arm the planted-target seam for one `--out` until the guard drops, so a panicking test cannot leave the seam armed for the next one.
 #[cfg(unix)]
 struct ArmedPlantedTarget;
 
 #[cfg(unix)]
 impl ArmedPlantedTarget {
-    /// Arm the seam: the next temp write puts a symlink to `outside` at `page` in the held directory.
-    fn arm(outside: &Path, page: &str) -> Self {
+    /// Arm the seam: the next temp write inside `out` puts a symlink to `outside` at `page` there.
+    fn arm(out: &Path, outside: &Path, page: &str) -> Self {
         *PLANT_AFTER_CHECK
             .lock()
-            .expect("the plant seam lock is not poisoned") =
-            Some((outside.to_path_buf(), OsString::from(page)));
+            .expect("the plant seam lock is not poisoned") = Some((
+            out.to_path_buf(),
+            outside.to_path_buf(),
+            OsString::from(page),
+        ));
         Self
     }
 }
@@ -187,7 +194,7 @@ fn a_component_swapped_before_the_write_lands_in_the_checked_directory() {
     dir.check_target("index.md")
         .expect("the target is absent in the held directory");
     // Swapped after the walk and after the check, so only the held inode still names the checked directory.
-    let _armed = ArmedComponentSwap::arm(&aside, &decoy);
+    let _armed = ArmedComponentSwap::arm(&checked, &aside, &decoy);
 
     let tmp = dir
         .write_temp("index.md", b"generated page\n")
@@ -210,6 +217,7 @@ fn a_component_swapped_before_the_write_lands_in_the_checked_directory() {
 #[cfg(unix)]
 #[test]
 fn a_page_target_planted_as_a_symlink_after_the_check_is_replaced_not_followed() {
+    use std::os::unix::fs::PermissionsExt;
     let scratch = Scratch::new("planted");
     let root = scratch.root();
     let out = root.join("out");
@@ -220,7 +228,7 @@ fn a_page_target_planted_as_a_symlink_after_the_check_is_replaced_not_followed()
     dir.check_target("index.md")
         .expect("the target is absent at the check");
     // The page name becomes a symlink out of `--out` between the check and the write.
-    let _armed = ArmedPlantedTarget::arm(&outside, "index.md");
+    let _armed = ArmedPlantedTarget::arm(&out, &outside, "index.md");
 
     let page = format!("{GENERATED_MARKER}\ngenerated page\n");
     let tmp = dir
@@ -245,6 +253,16 @@ fn a_page_target_planted_as_a_symlink_after_the_check_is_replaced_not_followed()
     assert!(
         !outside.exists(),
         "the file outside `--out` was not created by the page"
+    );
+    // The link's own mode is 0o777; taking it would make the promoted page world-writable.
+    let mode = fs::symlink_metadata(&target)
+        .expect("the page target")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        mode, 0o644,
+        "a page replacing a planted link gets the new page's mode, not the link's"
     );
 }
 
@@ -286,4 +304,132 @@ fn a_component_that_is_not_a_directory_is_refused() {
         error.message()
     );
     assert!(!out.exists(), "the refused output path was not created");
+}
+
+#[test]
+fn an_out_path_containing_a_parent_component_is_refused() {
+    let scratch = Scratch::new("parent-component");
+    let root = scratch.root();
+    let existing = root.join("existing");
+    fs::create_dir(&existing).expect("the existing directory");
+    // `..` is refused at the walk, before any directory is opened or created, so the refusal
+    // holds even when the tree is intact and the `..` would have resolved as written.
+    let out = existing.join("..").join("later");
+
+    let Err(error) = OutDir::open(&out) else {
+        panic!("an `--out` containing `..` is refused")
+    };
+
+    assert_eq!(error.code(), "usage", "the refusal is a usage error");
+    assert!(
+        error.message().contains(".."),
+        "the refusal names what it refuses: {}",
+        error.message()
+    );
+    assert_eq!(
+        names_in(root),
+        vec!["existing".to_owned()],
+        "the refused walk created nothing"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_refusal_keeps_the_bytes_the_caller_wrote() {
+    let scratch = Scratch::new("shown-bytes");
+    let root = scratch.root();
+    let link = root.join("link");
+    std::os::unix::fs::symlink(root, &link).expect("the symlink component");
+
+    let error = write_manual(&root.join("link").join("manual"))
+        .expect_err("a symlink component is refused");
+
+    let expected = format!("`{}`", root.join("link").display());
+    assert!(
+        error.message().contains(&expected),
+        "the refusal repeats the caller's path {expected}: {}",
+        error.message()
+    );
+    // The walk skips `.` but keeps it in the displayed path, so a refusal repeats the caller's
+    // bytes rather than a normalised form of them. A `..` is refused before anything is opened,
+    // so this path is never touched.
+    let dot_error = write_manual(Path::new("./nowhere/../manual"))
+        .expect_err("a `..` component is refused through a `./` prefix");
+    assert!(
+        dot_error.message().contains("`./nowhere/..`"),
+        "the leading `./` the caller wrote is kept: {}",
+        dot_error.message()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_directory_renamed_under_a_decoy_parent_is_not_reached_through_a_parent_component() {
+    let scratch = Scratch::new("renamed-parent");
+    let root = scratch.root();
+    let checked = root.join("checked");
+    let trap = root.join("trap");
+    let decoy = trap.join("out");
+    fs::create_dir(&checked).expect("the checked directory");
+    fs::create_dir_all(&decoy).expect("the decoy parent");
+
+    let _held = OutDir::open(&checked).expect("the checked directory opens");
+    // The held directory now names a different parent than the one the walk checked.
+    fs::rename(&checked, decoy.join("moved")).expect("the checked directory moves");
+
+    // The `..` is refused before it is opened, so no write reaches the decoy parent even though
+    // the kernel would now resolve `..` there.
+    let error = write_manual(&decoy.join("moved").join(".."))
+        .expect_err("an `--out` containing `..` is refused after the rename");
+
+    assert_eq!(error.code(), "usage", "the refusal is a usage error");
+    assert_eq!(
+        names_in(&trap),
+        vec!["out".to_owned()],
+        "nothing but the decoy parent itself was created under the trap"
+    );
+    assert_eq!(
+        names_in(&decoy),
+        vec!["moved".to_owned()],
+        "no page appeared in the decoy parent"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn write_manual_lands_every_page_in_the_directory_the_walk_held() {
+    let scratch = Scratch::new("entry-held");
+    let root = scratch.root();
+    let out = root.join("out");
+    let aside = root.join("aside");
+    let decoy = root.join("decoy");
+    fs::create_dir(&out).expect("the output directory");
+    fs::create_dir(&decoy).expect("the directory that takes its name");
+
+    // Armed for this `--out`, so the seam fires on the first promote the entry point reaches.
+    let _armed = ArmedComponentSwap::arm(&out, &aside, &decoy);
+    write_manual(&out).expect("the manual writes into the directory it holds");
+
+    assert!(
+        fs::symlink_metadata(&out)
+            .expect("the name the caller wrote")
+            .file_type()
+            .is_symlink(),
+        "the seam swapped the checked directory for a link at its name"
+    );
+    assert_eq!(
+        names_in(&aside).len(),
+        cli_command_registry::all().count() + 1,
+        "every page and the index landed in the held directory"
+    );
+    assert_eq!(
+        first_line(&aside.join(PageMap::index_page())),
+        GENERATED_MARKER.as_bytes(),
+        "the index landed in the held directory"
+    );
+    assert_eq!(
+        names_in(&decoy),
+        Vec::<String>::new(),
+        "the entry point never wrote through the name it was reached by"
+    );
 }
