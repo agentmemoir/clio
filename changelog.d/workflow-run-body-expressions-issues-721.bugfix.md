@@ -1,0 +1,1 @@
+Workflow shell bodies read the pull-request base SHA, the push SHA, and the release matrix target from the environment instead of interpolating them, and a new check rejects any workflow expression inside a run body.

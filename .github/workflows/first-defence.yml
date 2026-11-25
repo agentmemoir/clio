@@ -119,14 +119,22 @@ jobs:
       # An entry also covers its subdomains, so `example.com` covers `v2.api.example.com`.
       # The boundary is a dot, so `bar.example.com` does not cover `notbar.example.com`.
       # A new domain fails CI until someone adds it to .github/domain-allowlist.txt.
+      # The SHAs arrive as environment values and are never interpolated into this body,
+      # so neither value can become shell syntax.
       - name: Compare URL domains against the allow-list
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -uo pipefail
-          base="${{ github.event.pull_request.base.sha }}"
-          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-            base="${{ github.event.before }}"
-          fi
-          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+          base=""
+          for candidate in "$PR_BASE_SHA" "$EVENT_BEFORE_SHA"; do
+            if [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "$candidate^{commit}" 2>/dev/null; then
+              base="$candidate"
+              break
+            fi
+          done
+          if [ -z "$base" ]; then
             echo "no base commit; nothing to check"
             exit 0
           fi
