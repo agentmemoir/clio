@@ -5,8 +5,7 @@
 //!
 //! This module is responsible for the gates key material passes on its way to and
 //! from the filesystem: the no-follow openers that produce a descriptor, the
-//! judgement of that descriptor, the bytes read through it, and the owner-only
-//! rule on the directory that holds the file.
+//! judgement of that descriptor, and the bytes read through it.
 //!
 //! ## Owns
 //! - [`open_append_no_follow`] and [`open_read_no_follow`]: one open per use,
@@ -16,20 +15,22 @@
 //!   on the descriptor rather than on the path
 //! - [`read_bytes`] and [`read_string`]: the contents of a descriptor the gate
 //!   already judged
-//! - [`ensure_owner_only_dir`]: refusing a linked or non-directory parent before
-//!   tightening it to 0700
+//! - [`report_refusal`]: the one log line every gate writes when it refuses
 //!
 //! ## Does not own
+//! - The owner-only rule on the directory that holds the file, descriptor and
+//!   all (see `sync_key_dir_gate`)
 //! - Where these files live, what they are called, or what they hold (see
 //!   `sync_key_file`, `sync_key_rotation`, and `secret_key_file`)
 //!
 //! ## Boundary
 //!
-//! Changes to what makes a file or a directory acceptable to hold key material
-//! belong here, once, so the archive, the key file, and the sidecar cannot drift
-//! apart. Changes to where they live or what they hold should not.
+//! Changes to what makes a file acceptable to hold key material belong here,
+//! once, so the archive, the key file, and the sidecar cannot drift apart.
+//! Changes to where they live, what they hold, or what makes their directory
+//! acceptable should not.
 //!
-//! Keep this module focused on the gates themselves.
+//! Keep this module focused on the file gates themselves.
 //!
 //! # Why the checks ask the descriptor
 //!
@@ -52,9 +53,9 @@
 //! `O_NOFOLLOW` guards the final name only: the directory that name is resolved
 //! in can itself be a link, and a `chmod` that followed it would tighten a
 //! directory the caller never meant to touch while leaving the real parent loose
-//! enough for another account to swap the entry. So the parent is refused when it
-//! is a link or not a directory, tightened to 0700 with a failure that is
-//! reported rather than swallowed, and read back to prove the mode took.
+//! enough for another account to swap the entry. The parent therefore has a gate
+//! of its own, held on one opened descriptor for its whole decision; see
+//! [`crate::sync_key_dir_gate`].
 
 use std::fs;
 use std::path::Path;
@@ -67,8 +68,9 @@ use crate::log;
 ///
 /// Every caller of a gate therefore logs the refusal it returns, so a refused key
 /// file or key directory is a line in the log and not only a message a caller may
-/// show or drop.
-fn report_refusal(subject: &str, path: &Path, reason: &str) {
+/// show or drop. The directory gate in [`crate::sync_key_dir_gate`] logs through
+/// this same line, so one place decides what a refusal says.
+pub(crate) fn report_refusal(subject: &str, path: &Path, reason: &str) {
     let shown = path.display().to_string();
     log::warn(
         "key material refused",
@@ -343,84 +345,10 @@ pub(crate) fn read_string(file: &mut fs::File) -> std::io::Result<String> {
 
 /// Make the directory holding key material owner-only, or refuse it.
 ///
-/// Clio tightens the directory it is given only when that directory is a real,
-/// named directory, and never the process working directory or a parent of it: a
-/// path that is `.`, is empty, or is made only of `..` names a directory no key
-/// setting chose, so it is left exactly as it is.
-///
-/// The caller runs `create_dir_all` first, so a missing parent is created rather
-/// than refused. Then, in order: the parent must be a real directory — a link is
-/// refused, because `O_NOFOLLOW` on the file's name does not stop the directory
-/// that name sits in from being one — it is set to 0700 with a failure that is
-/// reported instead of ignored, and it is read back so a mode that did not take is
-/// a failure and not an assumption.
-///
-/// The shared `config::restrict_dir` is deliberately not used here: it ignores
-/// the `chmod` error, and a silent failure would leave key material in a
-/// directory another account can enter.
-///
-/// # Errors
-/// [`ErrorCode::Forbidden`] when `parent` is a link or not a directory;
-/// [`ErrorCode::Internal`] naming the path when the directory cannot be read,
-/// cannot be tightened, or still grants group or other access afterwards.
-pub(crate) fn ensure_owner_only_dir(parent: &Path) -> Result<(), AmError> {
-    if !parent
-        .components()
-        .any(|part| matches!(part, std::path::Component::Normal(_)))
-    {
-        return Ok(());
-    }
-    let file_type = fs::symlink_metadata(parent)
-        .map_err(|err| dir_error(parent, "cannot read the Clio sync key directory", &err))?
-        .file_type();
-    if file_type.is_symlink() || !file_type.is_dir() {
-        let shape = if file_type.is_symlink() {
-            "a symbolic link"
-        } else {
-            "not a directory"
-        };
-        report_refusal("sync key directory", parent, &format!("it is {shape}"));
-        return Err(AmError::new(
-            ErrorCode::Forbidden,
-            format!(
-                "sync key directory {}: refused because it is {shape}; replace it with a real \
-                 directory only the owner can enter and run again",
-                parent.display()
-            ),
-        ));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|err| {
-            dir_error(parent, "cannot restrict the Clio sync key directory", &err)
-        })?;
-        let mode = fs::symlink_metadata(parent)
-            .map_err(|err| dir_error(parent, "cannot read the Clio sync key directory", &err))?
-            .permissions()
-            .mode();
-        if mode & 0o077 != 0 {
-            return Err(AmError::new(
-                ErrorCode::Internal,
-                format!(
-                    "the Clio sync key directory {} still grants {:o} after it was set to 0700, \
-                     so Clio will not keep key material in it",
-                    parent.display(),
-                    mode & 0o777
-                ),
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// A directory that could not be read or tightened.
-fn dir_error(path: &Path, action: &str, err: &std::io::Error) -> AmError {
-    AmError::new(
-        ErrorCode::Internal,
-        format!("{action} {}: {err}", path.display()),
-    )
-}
+/// The rule lives in [`crate::sync_key_dir_gate::ensure_owner_only_dir`], which
+/// holds one opened descriptor for the whole decision; this name is the seam the
+/// callers already use.
+pub(crate) use crate::sync_key_dir_gate::ensure_owner_only_dir;
 
 #[cfg(test)]
 #[path = "sync_key_gate_tests.rs"]

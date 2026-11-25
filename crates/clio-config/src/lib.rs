@@ -68,6 +68,9 @@ pub mod secret_key_store;
 pub mod secret_seal;
 pub mod sync_device_id;
 pub mod sync_key;
+// The directory gate is an internal seam like the file gate: every item in it is
+// `pub(crate)`, so it is declared crate-private and exports no public interface.
+pub(crate) mod sync_key_dir_gate;
 pub mod sync_key_file;
 // The gate is an internal seam: every item in it is `pub(crate)`, so it is
 // declared crate-private and exports no public interface.
