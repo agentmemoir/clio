@@ -4,7 +4,7 @@
 //! # Responsibility
 //!
 //! This module is responsible for the item apply effects: decoding one item
-//! payload, the bank and shredded-subject checks, the last-writer-wins update
+//! payload, the identity, bank, and shredded-subject checks, the last-writer-wins update
 //! resolution, and the create / invalidate / discard durable writes.
 //!
 //! ## Owns
@@ -52,6 +52,17 @@ pub(crate) fn apply_item_upsert(
             return crate::apply_history::reject(engine, m, envelope_json, "bad item content", &e);
         }
     };
+    if m.entity_id != item.id {
+        return dead_letter(
+            engine,
+            m,
+            envelope_json,
+            &AmError::new(
+                ErrorCode::InvalidArgument,
+                "item entity_id must be the item id",
+            ),
+        );
+    }
     if item.bank_id != m.bank {
         return dead_letter(
             engine,
@@ -167,3 +178,7 @@ pub(crate) fn apply_item_discard(
         Err(err) => dead_letter(engine, m, envelope_json, &err),
     }
 }
+
+#[cfg(test)]
+#[path = "apply_items_tests.rs"]
+mod apply_items_tests;

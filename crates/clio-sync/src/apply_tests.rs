@@ -23,10 +23,8 @@
 //! Keep this module focused on apply engine tests.
 
 use crate::apply::ApplyOutcome;
-use crate::apply_fixtures::{apply, apply_at_epoch, env, fixture, item_value, receipt, upsert};
-use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, REASON_MALFORMED_STAMP};
+use crate::apply_fixtures::{apply, apply_at_epoch, fixture, receipt, upsert};
 use clio_store::{DeadLetterStatus, SqliteStore, Store, SyncStore};
-use serde_json::json;
 
 #[test]
 fn t24_02_same_mutation_id_applies_once_then_duplicates() {
@@ -83,47 +81,6 @@ fn t24_03_lww_later_stamp_wins_loser_conflict_recorded() {
         .expect("journaled");
     assert!(row.content_sealed.is_some());
     assert!(!row.client_encrypted);
-}
-
-/// The store keeps the payload's `updated_at` verbatim as the row's stamp, so a
-/// peer-supplied value this build cannot place must be refused before any
-/// write: otherwise it becomes the stored side of every later comparison.
-#[test]
-fn a_peer_payload_updated_at_must_be_placeable_before_it_is_stored() {
-    let (store, _kms) = fixture();
-    let bank = "b-payload";
-    let canonical = upsert(
-        "m-canonical",
-        bank,
-        "2026-01-01T00:00:00Z",
-        "dev-a",
-        "canonical",
-    );
-    assert_eq!(apply(&store, None, &canonical), ApplyOutcome::Applied);
-    let mut value = item_value(bank, "i-1", "s1", "2026-01-02T00:00:00Z", "poison");
-    value["updated_at"] = json!("zzzzzzzzzzzzzzzzzzzz");
-    let poison = env(
-        "m-poison",
-        bank,
-        ENTITY_KIND_ITEM,
-        "i-1",
-        OP_UPSERT,
-        "2026-01-02T00:00:00Z",
-        "dev-z",
-        value,
-    );
-    assert_eq!(
-        apply(&store, None, &poison),
-        ApplyOutcome::DeadLettered {
-            reason_code: REASON_MALFORMED_STAMP.into()
-        }
-    );
-    let row = store
-        .get_memory_item(bank, "i-1")
-        .unwrap()
-        .expect("the canonical row stays");
-    assert_eq!(row.gist.as_deref(), Some("canonical"));
-    assert_eq!(row.updated_at, "2026-01-01T00:00:00Z");
 }
 
 #[test]
@@ -225,105 +182,4 @@ fn t24_09_malformed_envelope_dead_letters_then_ack_skip_once() {
             .dead_letter_ack_skip("m-bad", "2026-01-01T00:00:00Z")
             .unwrap()
     );
-}
-
-#[test]
-fn t24_09_erased_subject_resurrection_dead_letters() {
-    let (store, _kms) = fixture();
-    store
-        .upsert_subject_key_ref("subj-gone", "shredded", "shredded")
-        .expect("shred marker");
-    let m = env(
-        "m-res",
-        "b-erase",
-        ENTITY_KIND_ITEM,
-        "i-res",
-        OP_UPSERT,
-        "2026-01-01T00:00:00Z",
-        "dev-a",
-        item_value(
-            "b-erase",
-            "i-res",
-            "subj-gone",
-            "2026-01-01T00:00:00Z",
-            "resurrected",
-        ),
-    );
-    assert_eq!(
-        apply(&store, None, &m),
-        ApplyOutcome::DeadLettered {
-            reason_code: "erased_subject".into()
-        }
-    );
-    let open = store
-        .dead_letter_list("b-erase", DeadLetterStatus::Open, 10)
-        .unwrap();
-    assert_eq!(open.len(), 1);
-    assert_eq!(open[0].reason_code, "erased_subject");
-    assert!(store.get_memory_item("b-erase", "i-res").unwrap().is_none());
-}
-
-#[test]
-fn t24_08_item_bank_mismatch_dead_letters_unauthorized_bank() {
-    let (store, _kms) = fixture();
-    let m = env(
-        "m-x",
-        "bank-wire",
-        ENTITY_KIND_ITEM,
-        "i-1",
-        OP_UPSERT,
-        "2026-01-01T00:00:00Z",
-        "dev-a",
-        item_value("bank-item", "i-1", "s1", "2026-01-01T00:00:00Z", "g"),
-    );
-    assert_eq!(
-        apply(&store, None, &m),
-        ApplyOutcome::DeadLettered {
-            reason_code: "unauthorized_bank".into()
-        }
-    );
-}
-
-#[test]
-fn item_upsert_carries_context_and_pre_field_payloads_still_apply() {
-    let (store, _kms) = fixture();
-    let mut payload = item_value("b-ctx-sync", "i-1", "s1", "2026-01-01T00:00:01Z", "g1");
-    payload["context"] = json!("team chat");
-    let m = env(
-        "m-ctx",
-        "b-ctx-sync",
-        ENTITY_KIND_ITEM,
-        "i-1",
-        OP_UPSERT,
-        "2026-01-01T00:00:01Z",
-        "dev-a",
-        payload,
-    );
-    assert_eq!(apply(&store, None, &m), ApplyOutcome::Applied);
-    let got = store
-        .get_memory_item("b-ctx-sync", "i-1")
-        .unwrap()
-        .expect("applied item");
-    assert_eq!(got.context.as_deref(), Some("team chat"));
-
-    // A payload produced before the field existed (no `context` key at all)
-    // applies unchanged and stores an absent context.
-    let legacy = item_value("b-ctx-legacy", "i-2", "s1", "2026-01-01T00:00:02Z", "g2");
-    assert!(legacy.get("context").is_none());
-    let m2 = env(
-        "m-legacy",
-        "b-ctx-legacy",
-        ENTITY_KIND_ITEM,
-        "i-2",
-        OP_UPSERT,
-        "2026-01-01T00:00:02Z",
-        "dev-a",
-        legacy,
-    );
-    assert_eq!(apply(&store, None, &m2), ApplyOutcome::Applied);
-    let got2 = store
-        .get_memory_item("b-ctx-legacy", "i-2")
-        .unwrap()
-        .expect("legacy applied item");
-    assert!(got2.context.is_none());
 }

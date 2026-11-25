@@ -1,0 +1,1 @@
+A peer could name one item in the envelope `entity_id` for the ordering comparison and write a different item in the payload, bypassing last writer wins; the item path now refuses an envelope entity that is not the payload item's `id`, before any read or write, with the same dead-letter refusal the task, failure, persona, and belief upserts already use.
