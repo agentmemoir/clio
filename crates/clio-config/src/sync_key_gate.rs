@@ -64,6 +64,14 @@ use clio_types::{AmError, ErrorCode};
 
 use crate::log;
 
+/// The refusal a file or a directory owned by another user reports.
+///
+/// One string for both gates, so the owner rule reads the same whether the object
+/// refused is the key file itself or the directory holding it.
+#[cfg(unix)]
+pub(crate) const FOREIGN_OWNER: &str = "it is owned by a user other than the one running Clio; \
+                                        change its owner to the one running Clio and run again";
+
 /// Report a refusal once, naming the subject, the path, and the reason.
 ///
 /// Every caller of a gate therefore logs the refusal it returns, so a refused key
@@ -127,8 +135,7 @@ fn descriptor_refusal_for_uid(
     let refusal = if !meta.is_file() {
         "it is not a regular file"
     } else if meta.uid() != euid {
-        "it is owned by a user other than the one running Clio; change its owner to the one \
-         running Clio and run again"
+        FOREIGN_OWNER
     } else if meta.permissions().mode() & 0o077 != 0 {
         "it is not owner-only; restrict it to the owner (0600) and run again"
     } else {
@@ -143,8 +150,11 @@ fn descriptor_refusal_for_uid(
 
 /// The effective uid of the process, reached through `rustix` so this crate needs
 /// no `unsafe` to ask.
+///
+/// Shared with the directory gate, so both gates compare an owner against the same
+/// answer.
 #[cfg(unix)]
-fn effective_uid() -> u32 {
+pub(crate) fn effective_uid() -> u32 {
     rustix::process::geteuid().as_raw()
 }
 
