@@ -14,6 +14,8 @@
 //!   directory holds the harness config, injectable for tests
 //! - Spawning the vendor command with the registry's argument list, an
 //!   optional fixed confirmation, and capturing its output
+//! - Holding the opened harness binary from the lookup check to the spawn,
+//!   through `agent_harness_delegate_path`
 //! - The per-vendor exit-code table and the config read-back that decides
 //!   the final outcome, including the remove-and-re-add repair of a stale
 //!   registration
@@ -37,6 +39,7 @@
 //! Keep this module focused on the delegate run and its outcome.
 
 use crate::agent_harness::{HarnessRecord, ReadBack, snippet_from_argv};
+use crate::agent_harness_delegate_path::{Held, lookup_on_path};
 use crate::agent_harness_delegate_read::{entry_points_at, read_entry};
 use crate::agent_harness_write::{RemoveOutcome, WriteError};
 use std::ffi::OsString;
@@ -285,8 +288,10 @@ fn remove_direct(
     })
 }
 
-/// Run one vendor command argv and collect its exit code and output. A
-/// binary that cannot be found or run refuses with the manual command for
+/// Run one vendor command argv and collect its exit code and output. The
+/// binary found on `PATH` is opened and held once, and every attempt starts
+/// that held file, so a name replaced after the check cannot change what runs.
+/// A binary that cannot be found or run refuses with the manual command for
 /// the direction this argv belongs to. A `stdin` confirmation is piped to
 /// the vendor, then its input is closed.
 fn run_step(
@@ -364,13 +369,15 @@ fn repair_stale(
 }
 
 /// Run the vendor command with its registry arguments and collect its
-/// output. A `stdin` confirmation, when present, is written and its handle
-/// dropped so the vendor sees end of input; writing is best effort and the
-/// read-back still decides. Both output streams are drained while it runs,
-/// so a chatty vendor cannot block on a full pipe. On overlay filesystems,
-/// such as inside containers, a harness binary installed moments ago can
-/// briefly report "text file busy", so that one refusal is retried: up to
-/// ten spawn attempts with a short sleep between attempts, adding at most
+/// output. The resolved file is opened and held once before the first attempt,
+/// and every attempt starts that held file, so the exec targets the file whose
+/// type and exec bit were checked. A `stdin` confirmation, when present, is
+/// written and its handle dropped so the vendor sees end of input; writing is
+/// best effort and the read-back still decides. Both output streams are drained
+/// while it runs, so a chatty vendor cannot block on a full pipe. On overlay
+/// filesystems, such as inside containers, a harness binary installed moments
+/// ago can briefly report "text file busy", so that one refusal is retried: up
+/// to ten spawn attempts with a short sleep between attempts, adding at most
 /// 180 ms in the busy case and nothing in the normal case.
 fn run_vendor(
     resolved: &Path,
@@ -379,10 +386,12 @@ fn run_vendor(
 ) -> std::io::Result<(i32, String)> {
     const BUSY_SPAWN_ATTEMPTS: u32 = 10;
     const BUSY_RETRY_BACKOFF: Duration = Duration::from_millis(20);
+    let held = Held::open(resolved)?;
     for attempt in 1..=BUSY_SPAWN_ATTEMPTS {
         let spawned = match stdin {
-            None => std::process::Command::new(resolved).args(args).output(),
-            Some(bytes) => std::process::Command::new(resolved)
+            None => held.command(resolved).args(args).output(),
+            Some(bytes) => held
+                .command(resolved)
                 .args(args)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
@@ -415,26 +424,6 @@ fn run_vendor(
         }
     }
     unreachable!("the loop returns or errors on its last attempt");
-}
-
-/// Find a binary on the process `PATH`: a file the user could run.
-fn lookup_on_path(binary: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|dir| dir.join(binary))
-        .find(|candidate| is_runnable(candidate))
-}
-
-#[cfg(unix)]
-fn is_runnable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    path.is_file()
-        && std::fs::metadata(path).is_ok_and(|meta| meta.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_runnable(path: &Path) -> bool {
-    path.is_file()
 }
 
 #[cfg(test)]

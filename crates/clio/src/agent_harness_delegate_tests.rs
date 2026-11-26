@@ -296,37 +296,6 @@ fn production_env_names_the_config_file_after_the_record() {
 }
 
 #[test]
-fn lookup_on_path_misses_a_binary_no_host_ships() {
-    assert_eq!(
-        lookup_on_path("clio-no-such-binary-anywhere"),
-        None,
-        "a binary absent from every PATH entry is not found"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn is_runnable_follows_the_exec_bits_of_a_real_file() {
-    use std::os::unix::fs::PermissionsExt;
-    let fixture = Fixture::new("is-runnable");
-    let script = fixture.root.join("runnable");
-    fs::write(&script, "#!/bin/sh\n").expect("the script can be written");
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
-        .expect("the script can be made executable");
-    assert!(is_runnable(&script), "an executable file is runnable");
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o644))
-        .expect("the exec bits can be removed");
-    assert!(
-        !is_runnable(&script),
-        "a file without exec bits is not runnable"
-    );
-    assert!(
-        !is_runnable(&fixture.root.join("missing")),
-        "a missing file is not runnable"
-    );
-}
-
-#[test]
 fn a_harness_without_a_vendor_command_refuses_without_spawning() {
     let fixture = Fixture::new("empty-argv");
     let unknown = HarnessRecord {
