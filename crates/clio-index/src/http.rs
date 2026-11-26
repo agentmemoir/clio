@@ -365,22 +365,14 @@ pub fn get_json(url: &str, timeout: Duration, auth: Option<&str>) -> Result<Valu
     parse_response_json(code, &bytes)
 }
 
-/// Parse a TEI-style JSON response: non-2xx surfaces the status plus a short
-/// body snippet, except 401/403 which omit the snippet (an external endpoint
-/// can echo invalid credentials back, and those must never land in `AmError`
-/// text); a 2xx non-JSON body fails closed.
+/// Parse a TEI-style JSON response: a non-2xx status reports the status alone,
+/// because the response body can echo secrets and must never land in `AmError`
+/// text; a 2xx non-JSON body fails closed.
 fn parse_response_json(code: u16, body: &[u8]) -> Result<Value, AmError> {
     if !(200..300).contains(&code) {
-        if matches!(code, 401 | 403) {
-            return Err(AmError::new(
-                ErrorCode::Internal,
-                format!("endpoint returned HTTP {code}"),
-            ));
-        }
-        let snippet = String::from_utf8_lossy(&body[..body.len().min(200)]);
         return Err(AmError::new(
             ErrorCode::Internal,
-            format!("endpoint returned HTTP {code}: {}", snippet.trim()),
+            format!("endpoint returned HTTP {code}"),
         ));
     }
     serde_json::from_slice(body).map_err(|e| {
