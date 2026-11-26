@@ -39,11 +39,65 @@ fn output(stdout: &str) -> Output {
     }
 }
 
-/// A scratch directory of this test's own, under the system temporary
-/// directory, removed when the test ends, including when it panics.
+/// The roots a scratch directory may live in, most preferred first.
+///
+/// `std::env::temp_dir()` is last and is never trusted. A `noexec` mount
+/// accepts the write and the mode change and then refuses to execute the file,
+/// even through `/proc/self/fd/<n>`, so a scratch directory there cannot hold
+/// the `df` these tests run; CI points `TMPDIR` at exactly that. The first root
+/// is the directory this test binary was loaded from, which is executable by
+/// construction, because the kernel already executed a file from it. The second
+/// is the workspace `target` directory, which sits on the build volume.
+#[cfg(unix)]
+fn scratch_roots() -> [PathBuf; 3] {
+    let beside_the_binary = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .unwrap_or_default();
+    [
+        beside_the_binary,
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"),
+        std::env::temp_dir(),
+    ]
+}
+
+/// Whether `root` can hold a file and execute it, proved by running one.
+///
+/// Nothing short of an actual exec tells a `noexec` mount from a root these
+/// tests may use, so this writes the smallest possible `#!/bin/sh` script, marks
+/// it executable and runs it.
+#[cfg(unix)]
+fn executes_a_file(root: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    if root.as_os_str().is_empty() || std::fs::create_dir_all(root).is_err() {
+        return false;
+    }
+    let probe = root.join(format!(
+        "clio-exec-probe-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let prepared = std::fs::write(&probe, "#!/bin/sh\nexit 0\n")
+        .and_then(|()| std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o755)));
+    let ran = prepared.is_ok()
+        && std::process::Command::new(&probe)
+            .status()
+            .is_ok_and(|status| status.success());
+    let _ = std::fs::remove_file(&probe);
+    ran
+}
+
+/// A scratch directory of this test's own, in the first root on this host that
+/// can execute a file, removed when the test ends, including when it panics.
 ///
 /// The crate carries no `tempfile` dependency, so the name is the process id
-/// plus a counter and nothing here touches a fixed path.
+/// plus a counter and nothing here touches a fixed path. `None` where every root
+/// refuses the probe: that is a host precondition, not a failure, so the caller
+/// skips the test.
 #[cfg(unix)]
 struct Scratch {
     path: PathBuf,
@@ -51,15 +105,22 @@ struct Scratch {
 
 #[cfg(unix)]
 impl Scratch {
-    fn new() -> Self {
+    fn new() -> Option<Self> {
         use std::sync::atomic::{AtomicU64, Ordering};
 
         static NEXT: AtomicU64 = AtomicU64::new(0);
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("clio-free-space-{}-{serial}", std::process::id()));
-        std::fs::create_dir_all(&path).expect("a scratch directory");
-        Self { path }
+        let name = format!(
+            "clio-free-space-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        );
+        scratch_roots().into_iter().find_map(|root| {
+            let path = root.join(&name);
+            if !executes_a_file(&root) || std::fs::create_dir_all(&path).is_err() {
+                return None;
+            }
+            Some(Self { path })
+        })
     }
 
     /// The scratch path as the candidate text `pin_df_from` takes.
@@ -77,6 +138,31 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
     }
+}
+
+/// Report why the calling test is skipped: no root on this host can execute a
+/// file, which is a host precondition rather than a failure.
+///
+/// The message names the precondition so a silent skip is not mistaken for a
+/// pass.
+#[cfg(unix)]
+fn skip_without_an_executable_root() {
+    eprintln!(
+        "skipping: no scratch root on this host can execute a file, and a pinned df must run \
+         (precondition: a directory this test may write to and execute a script from; the \
+         system temporary directory is not assumed executable)"
+    );
+}
+
+/// Take a scratch directory into `$name`, or skip the calling test where this
+/// host has no root that can execute a file.
+#[cfg(unix)]
+macro_rules! scratch {
+    ($name:ident) => {
+        let Some($name) = Scratch::new() else {
+            return skip_without_an_executable_root();
+        };
+    };
 }
 
 /// Whether this host names an open descriptor as a path, which a pin needs.
@@ -127,7 +213,7 @@ fn the_pinned_df_runs_the_descriptor_not_the_swapped_path() {
     if !host_names_descriptors() || !Path::new("/bin/sh").is_file() {
         return;
     }
-    let scratch = Scratch::new();
+    scratch!(scratch);
     let candidate = scratch.candidate("df");
     let path = df_script(&scratch, "df", 424_242);
 
@@ -171,7 +257,7 @@ fn the_descriptor_is_inheritable_by_the_child_it_is_executed_from() {
     if !host_names_descriptors() {
         return;
     }
-    let scratch = Scratch::new();
+    scratch!(scratch);
     let candidate = scratch.candidate("df");
     df_script(&scratch, "df", 424_242);
     let pinned = pin_df_from(&[candidate.as_str()]).expect("the script is a regular file");
@@ -192,7 +278,7 @@ fn the_descriptor_is_inheritable_by_the_child_it_is_executed_from() {
 #[cfg(unix)]
 #[test]
 fn pin_skips_a_directory_candidate() {
-    let scratch = Scratch::new();
+    scratch!(scratch);
     std::fs::create_dir(scratch.path.join("df")).expect("a candidate directory");
     let candidate = scratch.candidate("df");
 
@@ -212,7 +298,7 @@ fn pin_skips_a_directory_candidate() {
 ))]
 #[test]
 fn pin_skips_a_fifo_candidate_without_blocking() {
-    let scratch = Scratch::new();
+    scratch!(scratch);
     let fifo = scratch.path.join("df");
     rustix::fs::mkfifoat(
         rustix::fs::CWD,
@@ -236,7 +322,7 @@ fn pin_skips_a_fifo_candidate_without_blocking() {
 #[cfg(unix)]
 #[test]
 fn the_statistics_answer_is_in_whole_file_system_fragments() {
-    let scratch = Scratch::new();
+    scratch!(scratch);
     let space = rustix::fs::statvfs(scratch.path.as_path()).expect("the scratch file system");
     if space.f_bavail == 0 {
         // Host-supplied precondition: the temp filesystem has no room, so there
@@ -267,7 +353,7 @@ fn the_statistics_answer_is_in_whole_file_system_fragments() {
 #[cfg(unix)]
 #[test]
 fn the_chooser_reads_the_statistics_where_no_descriptor_can_be_named() {
-    let scratch = Scratch::new();
+    scratch!(scratch);
     let space = rustix::fs::statvfs(scratch.path.as_path()).expect("the scratch file system");
     let fragment = if space.f_frsize == 0 {
         space.f_bsize
@@ -295,7 +381,7 @@ fn the_chooser_reads_the_statistics_where_no_descriptor_can_be_named() {
 #[cfg(unix)]
 #[test]
 fn the_chooser_runs_the_df_where_a_descriptor_can_be_named() {
-    let scratch = Scratch::new();
+    scratch!(scratch);
     let chosen = available_bytes_with(scratch.path.as_path(), true, &|_| {
         Ok(output(
             "Filesystem 1024-blocks Used Available Capacity Mounted on\n\
@@ -329,7 +415,7 @@ fn the_kept_descriptor_is_fenced_above_the_standard_streams() {
     if !host_names_descriptors() || !Path::new("/bin/sh").is_file() {
         return;
     }
-    let scratch = Scratch::new();
+    scratch!(scratch);
     let candidate = scratch.candidate("df");
     df_script(&scratch, "df", 424_242);
 
