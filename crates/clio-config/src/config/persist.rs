@@ -51,8 +51,8 @@ pub use path::{
 };
 pub use save::save_overlay_file;
 pub(crate) use save::save_overlay_file_checked;
-pub use write::{restrict_dir, write_private_atomic};
 pub(crate) use write::create_private_dir;
+pub use write::{restrict_dir, write_private_atomic};
 
 // These names were in scope here before the split; the test modules below
 // reach them through `use super::*`.
