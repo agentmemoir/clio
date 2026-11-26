@@ -208,7 +208,7 @@ fn a_missing_sidecar_is_an_unknown_creation_time_not_a_lost_key() {
 #[test]
 fn an_empty_sidecar_reads_as_unknown_rather_than_as_an_empty_date() {
     let dir = TempDir::new("empty-created");
-    fs::write(sidecar_path(Some(&dir.key())).expect("path"), "\n").expect("seed");
+    seed(&sidecar_path(Some(&dir.key())).expect("path"), b"\n");
 
     assert_eq!(read_created(Some(&dir.key())).expect("read"), None);
 }
@@ -340,6 +340,33 @@ fn a_write_whose_directory_cannot_be_created_says_which_step_failed() {
     assert!(
         err.message.contains("create the directory for"),
         "{}",
+        err.message
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_sidecar_symlink_never_supplies_the_creation_time() {
+    use std::os::unix::fs::symlink;
+    let dir = TempDir::new("created-is-link");
+    let marker = "2030-12-31T23:59:59Z";
+    let target = dir.join("marker");
+    fs::write(&target, marker).expect("marker");
+    let sidecar = sidecar_path(Some(&dir.key())).expect("path");
+    symlink(&target, &sidecar).expect("a link where the record goes");
+
+    let err = read_created(Some(&dir.key())).expect_err("a link is not a record");
+
+    assert!(
+        !err.message.contains(marker),
+        "the link's target supplied the creation time: {}",
+        err.message
+    );
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+    assert!(err.message.contains("symbolic link"), "{}", err.message);
+    assert!(
+        err.message.contains(CREATED_NAME),
+        "the refusal names the sidecar: {}",
         err.message
     );
 }
