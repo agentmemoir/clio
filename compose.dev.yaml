@@ -23,6 +23,15 @@ services:
       context: .
       dockerfile: dev/Dockerfile
     image: cliobuntu:24.04
+    # Matches the `USER ubuntu` line in `dev/Dockerfile`. The base image ships
+    # that account at uid 1000 / gid 1000, the usual Linux host user, so git does
+    # not report dubious ownership on the read-only `/workspace` mount below.
+    user: "ubuntu"
+    # Refuses privilege gain through setuid/setgid binaries and file
+    # capabilities. This is the one hardening flag that still does real work
+    # once the process starts non-root.
+    security_opt:
+      - no-new-privileges:true
     tmpfs:
       - /tmp:noexec,nosuid,nodev,size=2g
       - /dev/shm:noexec,nosuid,nodev,size=2g

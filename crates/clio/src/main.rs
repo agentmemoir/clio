@@ -28,6 +28,7 @@
 mod agent_harness;
 mod agent_harness_atomic_write;
 mod agent_harness_delegate;
+mod agent_harness_delegate_path;
 mod agent_harness_delegate_read;
 mod agent_harness_targets;
 mod agent_harness_write;

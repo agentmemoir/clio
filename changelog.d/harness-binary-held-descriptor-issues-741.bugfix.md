@@ -1,0 +1,1 @@
+Clio now checks and starts the same harness binary: on Linux it opens the file once and starts that opened file, and on macOS and the BSDs it refuses a binary or parent directory that every user can write.

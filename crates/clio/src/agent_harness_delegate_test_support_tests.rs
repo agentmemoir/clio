@@ -110,7 +110,7 @@ fn exec_dir_in(base: &Path, label: &str, runs: impl Fn(&Path) -> bool) -> Result
 
 /// The directory for one test's stub executables; see [`exec_dir_in`].
 #[cfg(unix)]
-fn exec_dir(label: &str) -> Result<PathBuf, String> {
+pub(crate) fn exec_dir(label: &str) -> Result<PathBuf, String> {
     exec_dir_in(&exec_dir_base()?, label, can_execute)
 }
 
@@ -220,7 +220,7 @@ impl Fixture {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
             .expect("stub script can be made executable");
         Ok(DelegateEnv::with(
-            move |name: &str| Some(exec.join(name)),
+            move |name: &str| vec![exec.join(name)],
             self.home(),
         ))
     }
@@ -308,13 +308,13 @@ impl Fixture {
 
     /// An environment where the harness binary is nowhere to be found.
     pub(crate) fn empty_env(&self) -> DelegateEnv {
-        DelegateEnv::with(|_| None, self.home())
+        DelegateEnv::with(|_| Vec::new(), self.home())
     }
 
     /// An environment with a custom lookup and this fixture's home.
     pub(crate) fn env_with_lookup(
         &self,
-        lookup: impl Fn(&str) -> Option<PathBuf> + 'static,
+        lookup: impl Fn(&str) -> Vec<PathBuf> + 'static,
     ) -> DelegateEnv {
         DelegateEnv::with(lookup, self.home())
     }

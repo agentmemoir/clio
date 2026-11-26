@@ -189,15 +189,106 @@ fn a_complete_download_is_renamed_into_place() {
     );
 }
 
-/// A digest that is not the published one is refused before the rename, so bytes
-/// from anywhere in the redirect chain can never become the model.
+/// Passing the check is what earns the destination: a download that matches its
+/// stated length and its published digest replaces the bytes that were already
+/// there, and leaves nothing of its own behind.
 #[test]
-fn a_digest_that_does_not_match_is_refused_and_removes_both_files() {
-    let dir = temp_dir("stream-digest");
+fn a_verified_download_replaces_the_file_already_at_the_destination() {
+    let dir = temp_dir("stream-replaces");
     let dest = dir.join(GGUF_FILE_NAME);
-    std::fs::write(&dest, b"an older model").expect("write the older model");
+    let older = b"an older model this run replaces".to_vec();
+    std::fs::write(&dest, &older).expect("write the file already at the destination");
+    let body = vec![b'z'; 200_000];
+
+    let written = stream_to_file(
+        &mut Cursor::new(body.clone()),
+        &dest,
+        Some(200_000),
+        &digest_of(&body),
+        &mut |_| {},
+    )
+    .expect("a matching body is written");
+
+    assert_eq!(written, 200_000);
+    assert_eq!(
+        std::fs::read(&dest).expect("the model is on disk"),
+        body,
+        "a verified download replaces the bytes that were at the destination"
+    );
+    let parts = part_files_beside(&dest);
+    assert!(
+        parts.is_empty(),
+        "no temporary file is left beside the destination: {parts:?}"
+    );
+}
+
+/// Every entry beside `dest` that has this run's temporary-file shape: the
+/// destination's file name, then the suffix that marks it as half-written. Sorted,
+/// so a failure reads the same way on a filesystem that returns names in any order.
+fn part_files_beside(dest: &Path) -> Vec<String> {
+    let dir = dest.parent().expect("the destination has a directory");
+    let dest_name = dest
+        .file_name()
+        .expect("the destination has a file name")
+        .to_string_lossy()
+        .into_owned();
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .expect("read the destination's directory")
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(&dest_name) && name.strip_suffix(".part").is_some())
+        .collect();
+    names.sort_unstable();
+    names
+}
+
+/// A file already at the destination is not this run's to remove: it may have
+/// been there before the run, and a checksum miss leaves those bytes exactly as
+/// they were.
+#[test]
+fn a_checksum_miss_leaves_the_file_already_at_the_destination_in_place() {
+    let dir = temp_dir("stream-digest-existing");
+    let dest = dir.join(GGUF_FILE_NAME);
+    let existing = b"an older model this run never read".to_vec();
+    std::fs::write(&dest, &existing).expect("write the file already at the destination");
     let body = vec![b'z'; 200_000];
     let published = digest_of(&body);
+    let expected = "0".repeat(64);
+
+    let err = stream_to_file(
+        &mut Cursor::new(body),
+        &dest,
+        Some(200_000),
+        &expected,
+        &mut |_| {},
+    )
+    .expect_err("a body whose digest differs must be refused");
+
+    assert!(
+        err.contains("published checksum"),
+        "the refusal names the check: {err}"
+    );
+    assert!(err.contains(&expected), "it names what it expected: {err}");
+    assert!(err.contains(&published), "it names what it found: {err}");
+    assert_eq!(
+        std::fs::read(&dest).expect("the file at the destination is still there"),
+        existing,
+        "a refused download leaves the destination's bytes alone"
+    );
+    let parts = part_files_beside(&dest);
+    assert!(
+        parts.is_empty(),
+        "no temporary file is left beside the destination: {parts:?}"
+    );
+}
+
+/// With nothing at the destination, a refused download leaves nothing there
+/// either.
+#[test]
+fn a_checksum_miss_with_no_file_at_the_destination_leaves_no_file_behind() {
+    let dir = temp_dir("stream-digest-absent");
+    let dest = dir.join(GGUF_FILE_NAME);
+    let body = vec![b'z'; 200_000];
 
     let err = stream_to_file(
         &mut Cursor::new(body),
@@ -212,18 +303,11 @@ fn a_digest_that_does_not_match_is_refused_and_removes_both_files() {
         err.contains("published checksum"),
         "the refusal names the check: {err}"
     );
+    assert!(!dest.exists(), "a refused download never becomes the model");
+    let parts = part_files_beside(&dest);
     assert!(
-        err.contains(&"0".repeat(64)),
-        "it names what it expected: {err}"
-    );
-    assert!(err.contains(&published), "it names what it found: {err}");
-    assert!(
-        !dest.exists(),
-        "the unchecked file at the destination goes too"
-    );
-    assert!(
-        !part_path(&dest).exists(),
-        "the temporary file is removed on a digest mismatch"
+        parts.is_empty(),
+        "no temporary file is left beside the destination: {parts:?}"
     );
 }
 

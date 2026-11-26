@@ -212,12 +212,14 @@ fn stream_to_file(
     }
     let found = to_hex(&hasher.finalize());
     if found != sha256 {
-        // A file already at the destination was never checked, and this run cannot
-        // say what it holds, so it goes with the temporary file.
-        let _ = std::fs::remove_file(dest);
+        // A file already at the destination is not this run's to remove: it may have
+        // been there before the run, and this run never read it, so it stays, and
+        // only the verified rename below replaces it.
         return Err(format!(
             "the file does not match the published checksum: expected {sha256}, found {found}, \
-             so it was discarded; run `clio setup` again"
+             so the download was refused and nothing at the destination was changed; remove any \
+             file at {} and run `clio setup` again",
+            dest.display()
         ));
     }
     std::fs::rename(&part, dest).map_err(|e| {

@@ -207,25 +207,20 @@ pub(crate) fn write_key(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), AmError>
 /// count.
 ///
 /// # Errors
-/// The sidecar exists but cannot be read.
+/// The sidecar is a link, is not a regular owner-only file this process can read
+/// ([`ErrorCode::Forbidden`]), or exists but cannot be read
+/// ([`ErrorCode::Internal`]).
 pub(crate) fn read_created(key_file: Option<&Path>) -> Result<Option<String>, AmError> {
     let Some(path) = sidecar_path(key_file) else {
         return Ok(None);
     };
-    match fs::read_to_string(&path) {
-        Ok(raw) => {
-            let stamp = raw.trim();
-            Ok((!stamp.is_empty()).then(|| stamp.to_owned()))
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(AmError::new(
-            ErrorCode::Internal,
-            format!(
-                "cannot read the Clio sync key creation record {}: {err}",
-                path.display()
-            ),
-        )),
-    }
+    let Some(mut file) = open_sidecar(&path)? else {
+        return Ok(None);
+    };
+    let raw = crate::sync_key_gate::read_string(&mut file)
+        .map_err(|err| sidecar_unreadable(&path, &err.to_string()))?;
+    let stamp = raw.trim();
+    Ok((!stamp.is_empty()).then(|| stamp.to_owned()))
 }
 
 /// Write the creation-time sidecar beside `key_file`, owner-only.
@@ -290,6 +285,36 @@ pub(crate) fn open_optional(path: &Path) -> Result<Option<fs::File>, AmError> {
     crate::sync_key_gate::open_read_no_follow(path, "sync key file", |err| {
         unreadable(path, &err.to_string())
     })
+}
+
+/// The sidecar's subject in every refusal and failure.
+///
+/// The gate writes the subject before the path and the reason, so this wording
+/// makes the whole message read as a sentence about the creation record.
+const SIDECAR_SUBJECT: &str = "cannot read the Clio sync key creation record";
+
+/// Open the creation-time sidecar once, judged on the descriptor that open returned.
+///
+/// The same one-open rule as [`open_optional`], with the sidecar as the subject: a
+/// link at the record's name, a directory occupying it, or a file another account
+/// can read is refused with a message that names the record rather than the key
+/// file. `Ok(None)` means the sidecar is absent, which is an unknown creation time.
+///
+/// # Errors
+/// [`ErrorCode::Forbidden`] for a link or a refused descriptor, and the
+/// missing-or-unreadable refusal naming the sidecar when the open failed.
+fn open_sidecar(path: &Path) -> Result<Option<fs::File>, AmError> {
+    crate::sync_key_gate::open_read_no_follow(path, SIDECAR_SUBJECT, |err| {
+        sidecar_unreadable(path, &err.to_string())
+    })
+}
+
+/// A creation record that could not be read, naming the sidecar and the reason.
+fn sidecar_unreadable(path: &Path, reason: &str) -> AmError {
+    AmError::new(
+        ErrorCode::Internal,
+        format!("{SIDECAR_SUBJECT} {}: {reason}", path.display()),
+    )
 }
 
 /// A sync-key file that could not be opened, naming the path and the reason.

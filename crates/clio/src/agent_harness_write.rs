@@ -9,7 +9,10 @@
 //! disturbing any other entry.
 //!
 //! ## Owns
-//! - Timestamped same-directory backup of a config before it is edited
+//! - Timestamped same-directory backup of a config before it is edited, created
+//!   exclusively so an existing entry or a planted symlink can never be
+//!   followed or overwritten, and created with the source's mode already
+//!   applied so the copy is never readable by anyone the source is not
 //! - Parse-refusal: an unparseable file is left byte-identical, with a snippet
 //! - Removing one named server entry under every caller-supplied key prefix
 //!   that holds it
@@ -61,20 +64,126 @@ pub(crate) enum RemoveOutcome {
 
 /// Back up `path` beside itself as `<name>.clio-backup-<unix_nanos>`.
 ///
-/// Returns `Ok(None)` when there is no file to back up. The copy keeps the
-/// source's bytes and permission bits, because `fs::copy` does.
+/// Returns `Ok(None)` when there is no file to back up. The backup keeps the
+/// source's bytes and permission bits, and is created with those bits already
+/// applied, so it is never readable by anyone the source is not — not even
+/// while it is being written. It is created exclusively: any entry already
+/// holding the stamped name — a regular file, a directory, a symlink, or a
+/// dangling symlink — makes the backup fail, so the bytes are never written
+/// through a link and an existing entry is never overwritten, even by a second
+/// backup stamped in the same nanosecond.
 ///
 /// # Errors
-/// The copy fails.
+/// The backup cannot be created exclusively, read from the source, written, or
+/// given the source's permission bits; or an entry already exists at the
+/// stamped name.
 pub(crate) fn backup_file(path: &Path) -> Result<Option<PathBuf>, WriteError> {
+    backup_file_at(path, unix_nanos())
+}
+
+/// Back up `path` under the stamp `nanos` rather than the clock's.
+///
+/// The stamp is `backup_file`'s only input that cannot be observed before the
+/// call, so it is taken as a parameter and the name it builds can be known in
+/// advance. Nothing else differs from `backup_file`: the same name is built
+/// beside the source, the same exclusive create runs, and the same `Ok(None)`
+/// applies when there is no file. This is the seam that lets a test plant an
+/// entry at the exact name the shipped path will choose and watch the shipped
+/// path refuse it; a test that had to guess the clock's stamp could only ever
+/// exercise a fresh name.
+///
+/// Private to this module: a stamp is not part of the caller's contract, and
+/// `backup_file` is the entry point they get.
+fn backup_file_at(path: &Path, nanos: u128) -> Result<Option<PathBuf>, WriteError> {
     if !path.exists() {
         return Ok(None);
     }
     let name = file_name(path);
-    let nanos = unix_nanos();
     let target = path.with_file_name(format!("{name}.clio-backup-{nanos}"));
-    fs::copy(path, &target).map_err(|e| io_error("back up", path, &e))?;
+    write_backup(path, &target)?;
     Ok(Some(target))
+}
+
+/// Copy `source` to `target`, which must not already exist, keeping the
+/// source's permission bits.
+///
+/// The source is opened once and its permission bits are read from that
+/// descriptor, so the bits written onto the backup are the bits of the file the
+/// bytes came from, never those of a path resolved again later. The backup is
+/// created with those bits already applied, so it never exists with a wider
+/// mode than the source at any instant.
+///
+/// The create is exclusive, so an entry that is already there — whatever its
+/// type, and whether or not a symlink resolves — fails the call instead of
+/// being overwritten or followed. A later failure removes exactly the entry
+/// this call created and nothing else.
+fn write_backup(source: &Path, target: &Path) -> Result<(), WriteError> {
+    let mut from = fs::File::open(source).map_err(|e| io_error("back up", source, &e))?;
+    let permissions = from
+        .metadata()
+        .map_err(|e| io_error("back up", source, &e))?
+        .permissions();
+    let created = create_backup(target, &permissions)?;
+    match fill_backup(&mut from, target, created, &permissions) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let _ = fs::remove_file(target);
+            Err(err)
+        }
+    }
+}
+
+/// Fill the already-created `target` with the bytes read from `from`, sync
+/// them, and give it `permissions` exactly.
+///
+/// `created` is consumed, so the descriptor is closed before the caller can
+/// remove the file on a failure. The mode is set on the open descriptor, not on
+/// the path, so no second lookup can be pointed at another entry between the
+/// write and the mode change. Applying it again is not redundant: the process
+/// mask narrows the mode the create asked for, so only this restores the
+/// source's exact bits.
+fn fill_backup(
+    from: &mut fs::File,
+    target: &Path,
+    mut created: fs::File,
+    permissions: &fs::Permissions,
+) -> Result<(), WriteError> {
+    std::io::copy(from, &mut created).map_err(|e| io_error("back up", target, &e))?;
+    created
+        .sync_all()
+        .map_err(|e| io_error("back up", target, &e))?;
+    created
+        .set_permissions(permissions.clone())
+        .map_err(|e| io_error("back up", target, &e))
+}
+
+/// Create `target` exclusively with `permissions`' bits already applied, so the
+/// entry never exists with a wider mode than the source it will hold.
+///
+/// `O_CREAT | O_EXCL` and the mode are one syscall, so there is no instant
+/// between the create and the mode change in which another local user could
+/// open the file. `O_EXCL` also refuses a symlink at the name rather than
+/// following it, so a planted link reaches nothing.
+#[cfg(unix)]
+fn create_backup(target: &Path, permissions: &fs::Permissions) -> Result<fs::File, WriteError> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(permissions.mode())
+        .open(target)
+        .map_err(|e| io_error("back up", target, &e))
+}
+
+/// Create `target` exclusively. This platform has no mode bits to apply at
+/// creation, so exclusivity is the whole of the guarantee here.
+#[cfg(not(unix))]
+fn create_backup(target: &Path, _permissions: &fs::Permissions) -> Result<fs::File, WriteError> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)
+        .map_err(|e| io_error("back up", target, &e))
 }
 
 /// Read and parse `path`, or `Ok(None)` when it does not exist.
@@ -299,3 +408,11 @@ mod tests;
 #[cfg(all(test, unix))]
 #[path = "agent_harness_write_toctou_tests.rs"]
 mod toctou_tests;
+
+#[cfg(all(test, unix))]
+#[path = "agent_harness_write_backup_tests.rs"]
+mod backup_tests;
+
+#[cfg(all(test, unix))]
+#[path = "agent_harness_write_backup_entry_tests.rs"]
+mod backup_entry_tests;

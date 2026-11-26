@@ -14,6 +14,8 @@
 //!   directory holds the harness config, injectable for tests
 //! - Spawning the vendor command with the registry's argument list, an
 //!   optional fixed confirmation, and capturing its output
+//! - Holding the first `PATH` candidate that opens, from that open to every
+//!   spawn attempt, through `agent_harness_delegate_path`
 //! - The per-vendor exit-code table and the config read-back that decides
 //!   the final outcome, including the remove-and-re-add repair of a stale
 //!   registration
@@ -37,14 +39,16 @@
 //! Keep this module focused on the delegate run and its outcome.
 
 use crate::agent_harness::{HarnessRecord, ReadBack, snippet_from_argv};
+use crate::agent_harness_delegate_path::{Held, path_candidates};
 use crate::agent_harness_delegate_read::{entry_points_at, read_entry};
 use crate::agent_harness_write::{RemoveOutcome, WriteError};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// How a harness binary is found: a binary name, and the path to run.
-type BinaryLookup = Box<dyn Fn(&str) -> Option<PathBuf>>;
+/// How a harness binary is found: a binary name, and its `PATH` candidates in
+/// search order.
+type BinaryLookup = Box<dyn Fn(&str) -> Vec<PathBuf>>;
 
 /// Where a harness binary is found and where its config file lives.
 pub(crate) struct DelegateEnv {
@@ -57,7 +61,7 @@ impl DelegateEnv {
     /// the user's home directory.
     pub(crate) fn production() -> DelegateEnv {
         DelegateEnv {
-            lookup: Box::new(lookup_on_path),
+            lookup: Box::new(path_candidates),
             home: std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_default(),
@@ -68,7 +72,7 @@ impl DelegateEnv {
     /// real home directory. Test-only: production always uses [`production`].
     #[cfg(test)]
     pub(crate) fn with(
-        lookup: impl Fn(&str) -> Option<PathBuf> + 'static,
+        lookup: impl Fn(&str) -> Vec<PathBuf> + 'static,
         home: PathBuf,
     ) -> DelegateEnv {
         DelegateEnv {
@@ -285,10 +289,15 @@ fn remove_direct(
     })
 }
 
-/// Run one vendor command argv and collect its exit code and output. A
-/// binary that cannot be found or run refuses with the manual command for
-/// the direction this argv belongs to. A `stdin` confirmation is piped to
-/// the vendor, then its input is closed.
+/// Run one vendor command argv and collect its exit code and output. Each
+/// `PATH` candidate is opened in order and the first open that succeeds is
+/// held; every attempt starts that held file, so a name replaced after the open
+/// cannot change what runs. `PATH` order still trusts a writable directory: an
+/// earlier directory another user can write can supply the binary, and only the
+/// opened object is guaranteed to be the object started. A binary that cannot
+/// be found or run refuses with the manual command for the direction this argv
+/// belongs to. A `stdin` confirmation is piped to the vendor, then its input is
+/// closed.
 fn run_step(
     record: &HarnessRecord,
     env: &DelegateEnv,
@@ -305,10 +314,11 @@ fn run_step(
         binary: binary.to_string_lossy().into_owned(),
         manual_snippet: snippet.to_owned(),
     };
-    let Some(resolved) = binary.to_str().and_then(|name| (env.lookup)(name)) else {
+    let Some(name) = binary.to_str() else {
         return Err(refuse_binary());
     };
-    run_vendor(&resolved, &argv[1..], stdin).map_err(|_| refuse_binary())
+    let candidates = (env.lookup)(name);
+    run_vendor(&candidates, &argv[1..], stdin).map_err(|_| refuse_binary())
 }
 
 /// A registration exists but points at another executable, and the vendor
@@ -363,26 +373,36 @@ fn repair_stale(
     }
 }
 
-/// Run the vendor command with its registry arguments and collect its
-/// output. A `stdin` confirmation, when present, is written and its handle
-/// dropped so the vendor sees end of input; writing is best effort and the
-/// read-back still decides. Both output streams are drained while it runs,
-/// so a chatty vendor cannot block on a full pipe. On overlay filesystems,
-/// such as inside containers, a harness binary installed moments ago can
-/// briefly report "text file busy", so that one refusal is retried: up to
-/// ten spawn attempts with a short sleep between attempts, adding at most
-/// 180 ms in the busy case and nothing in the normal case.
+/// Run the vendor command with its registry arguments and collect its output.
+/// The first `PATH` candidate that opens is held once before the first attempt,
+/// and every attempt starts that held file, so the exec targets the file whose
+/// type and exec bit were checked. A non-executable earlier candidate falls
+/// through to a later one. `PATH` order still trusts a writable directory, and
+/// only the opened object is guaranteed to be the object started. A `stdin`
+/// confirmation, when present, is written and its handle dropped so the vendor
+/// sees end of input; writing is best effort and the read-back still decides.
+/// Both output streams are drained while it runs, so a chatty vendor cannot
+/// block on a full pipe. On overlay filesystems, such as inside containers, a
+/// harness binary installed moments ago can briefly report "text file busy", so
+/// that one refusal is retried: up to ten spawn attempts with a short sleep
+/// between attempts, adding at most 180 ms in the busy case and nothing in the
+/// normal case.
 fn run_vendor(
-    resolved: &Path,
+    candidates: &[PathBuf],
     args: &[OsString],
     stdin: Option<&[u8]>,
 ) -> std::io::Result<(i32, String)> {
     const BUSY_SPAWN_ATTEMPTS: u32 = 10;
     const BUSY_RETRY_BACKOFF: Duration = Duration::from_millis(20);
+    let held = candidates
+        .iter()
+        .find_map(|candidate| Held::open(candidate).ok())
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
     for attempt in 1..=BUSY_SPAWN_ATTEMPTS {
         let spawned = match stdin {
-            None => std::process::Command::new(resolved).args(args).output(),
-            Some(bytes) => std::process::Command::new(resolved)
+            None => held.command().args(args).output(),
+            Some(bytes) => held
+                .command()
                 .args(args)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
@@ -415,26 +435,6 @@ fn run_vendor(
         }
     }
     unreachable!("the loop returns or errors on its last attempt");
-}
-
-/// Find a binary on the process `PATH`: a file the user could run.
-fn lookup_on_path(binary: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|dir| dir.join(binary))
-        .find(|candidate| is_runnable(candidate))
-}
-
-#[cfg(unix)]
-fn is_runnable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    path.is_file()
-        && std::fs::metadata(path).is_ok_and(|meta| meta.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_runnable(path: &Path) -> bool {
-    path.is_file()
 }
 
 #[cfg(test)]
