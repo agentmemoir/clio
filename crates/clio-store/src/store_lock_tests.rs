@@ -429,3 +429,20 @@ fn a_symlink_at_the_lock_path_is_refused_through_the_read_only_fallback() {
         "the symlink target is untouched"
     );
 }
+
+#[test]
+fn an_exclusive_hold_refuses_a_symlinked_lock_and_writes_no_bytes_to_its_target() {
+    let scratch = Scratch::new("symlink-exclusive");
+    let store = a_store(&scratch);
+    let victim = scratch.join("victim");
+    let bytes = b"victim bytes";
+    std::fs::write(&victim, bytes).expect("write the victim file");
+    let lock_path = lock_file_path(&store);
+    std::os::unix::fs::symlink(&victim, &lock_path).expect("plant the symlink");
+    let error = ExclusiveHold::acquire(&store).expect_err("a symlinked lock must be refused");
+    assert!(error.message.contains("store lock"), "{}", error.message);
+    let after = std::fs::read(&victim).expect("read the victim file");
+    assert_eq!(after, bytes, "no byte reached the symlink target");
+    assert_eq!(after.len(), bytes.len(), "the target keeps its length");
+    assert!(lock_path.is_symlink(), "the lock path is still a symlink");
+}
