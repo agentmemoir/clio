@@ -24,6 +24,7 @@
 //! Keep this module focused on replacing one key store.
 
 use crate::restore_swap::{refuse_not_a_key_store, remove_sidecars};
+use std::fs::File;
 use std::path::Path;
 
 /// The outcome of a key-store swap: replaced, or the failure to report.
@@ -103,7 +104,38 @@ fn copy_then_swap(staged: &Path, destination: &Path) -> KeySwapReport {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.subsec_nanos());
     let temp = dir.join(format!(".clio-key-swap-{}-{nanos}", std::process::id()));
-    if let Err(error) = std::fs::copy(staged, &temp) {
+    copy_then_swap_at(staged, destination, &temp)
+}
+
+/// Copy the staged key to `temp`, then rename `temp` over the destination.
+///
+/// `temp` is a parameter so a test can plant an entry at the exact path the
+/// staging create will pick. The create, the copy, the cleanup and the rename
+/// all live here, so the exclusive-create rule the swap depends on is exercised
+/// through the swap itself, not only through `create_staging_file`.
+fn copy_then_swap_at(staged: &Path, destination: &Path, temp: &Path) -> KeySwapReport {
+    // `copy_then_swap` refuses a destination with no directory before it calls
+    // this; the lookup here only names that directory in a failure.
+    let dir = destination
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or(Path::new(""));
+    let mut staged_copy = match create_staging_file(temp) {
+        Ok(file) => file,
+        Err(error) => {
+            return KeySwapReport {
+                replaced: false,
+                failure: Some(format!(
+                    "the key store could not be staged beside {}: {error}",
+                    dir.display()
+                )),
+            };
+        }
+    };
+    let copied = File::open(staged).and_then(|mut src| std::io::copy(&mut src, &mut staged_copy));
+    drop(staged_copy);
+    if let Err(error) = copied {
+        let _ = std::fs::remove_file(temp);
         return KeySwapReport {
             replaced: false,
             failure: Some(format!(
@@ -112,13 +144,13 @@ fn copy_then_swap(staged: &Path, destination: &Path) -> KeySwapReport {
             )),
         };
     }
-    match std::fs::rename(&temp, destination) {
+    match std::fs::rename(temp, destination) {
         Ok(()) => KeySwapReport {
             replaced: true,
             failure: None,
         },
         Err(error) => {
-            let _ = std::fs::remove_file(&temp);
+            let _ = std::fs::remove_file(temp);
             KeySwapReport {
                 replaced: false,
                 failure: Some(format!(
@@ -128,6 +160,24 @@ fn copy_then_swap(staged: &Path, destination: &Path) -> KeySwapReport {
             }
         }
     }
+}
+
+/// Create the staging file the copied key is written into, and nothing else.
+///
+/// The temp path is predictable, so this never writes through whatever is
+/// already there: an exclusive create fails with `AlreadyExists` instead of
+/// following a symlink or truncating a planted file. The key material is
+/// owner-only from the first byte, and there is no retry and no parent
+/// creation, so a failure is the caller's to report.
+fn create_staging_file(path: &Path) -> std::io::Result<File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
 }
 
 #[cfg(test)]

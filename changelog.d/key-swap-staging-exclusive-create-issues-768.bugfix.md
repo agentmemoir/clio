@@ -1,0 +1,1 @@
+A restore that has to copy the key store into place now creates its temporary file exclusively and owner-only, so a file or symlink already sitting at that name is refused instead of being written through and cannot be used by another local user to capture the key material.
