@@ -4,11 +4,16 @@
 //! # Responsibility
 //!
 //! This module is responsible for testing the verify pass's free-space gate:
-//! the `df` report parser and every arm of the check that can be exercised
-//! without a real filesystem.
+//! the `df` report parser, the descriptor the gate pins before it executes
+//! anything, and every arm of the check that can be exercised without a real
+//! filesystem.
 //!
 //! ## Owns
 //! - The parser assertions and the injected `df` outcomes
+//! - Both arms of the chooser between a pinned `df` and the statistics
+//! - The descriptor invariants: fd 3 or higher, inheritable, the file it holds
+//!   is the one executed after its path is replaced, and a candidate that is
+//!   not a regular file is skipped
 //!
 //! ## Does not own
 //! - The call that runs `df` itself (see `free_space`)
@@ -119,4 +124,16 @@ fn more_bytes_than_this_host_holds_is_refused() {
         "the refusal names the need and the free space: {}",
         error.message
     );
+}
+
+/// A host with no `df` at any fixed path is refused by name, and the refusal
+/// lists every path that was tried.
+#[test]
+fn a_missing_df_names_every_path_that_was_tried() {
+    let error = missing_df_error(&DF_PATHS);
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    let message = error.to_string();
+    for path in DF_PATHS {
+        assert!(message.contains(path), "{path} is named in: {message}");
+    }
 }

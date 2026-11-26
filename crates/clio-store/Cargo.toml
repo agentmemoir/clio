@@ -28,6 +28,9 @@ postgres = { workspace = true }
 postgres_rustls = { workspace = true }
 rand = { workspace = true }
 rusqlite = { workspace = true }
+# `statvfs`, and the descriptor that pins the `df` the restore pre-flight
+# executes, so the program whose type was checked is the program that runs.
+rustix = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -12,10 +12,12 @@
 //!   which sums the footprints that share a directory and checks each
 //!   directory once for that total
 //! - `SpaceCheck`, the injectable check, and `DiskSpace`, the production one
-//! - `DF_PATHS`, the fixed absolute paths `df` is resolved from, and the
-//!   resolver that walks them
+//! - `DF_PATHS`, the fixed absolute paths `df` is looked for, the report
+//!   parser, and the free-space answer that calls the pinned run
 //!
 //! ## Does not own
+//! - Pinning a `df` candidate, running its descriptor, and the statistics answer
+//!   used where no descriptor can be pinned (see `df_pin`)
 //! - The swap itself (see `restore_swap`)
 //! - Directory resolution (see `clio-config`) or the snapshot's own size
 //!   estimate (see the create command)
@@ -29,22 +31,44 @@
 //!
 //! # Why `df` and not a syscall
 //!
-//! Free space is not available through the Rust standard library, the workspace
-//! denies `unsafe` outside the one sqlite-vec registration site, and the
-//! project takes no dependency it does not already carry. The POSIX `df -P -k`
-//! report is the portable answer: the second line's fourth column is the
-//! available space in 1024-byte blocks, on Linux, on macOS, and in BusyBox. A
-//! host where `df` cannot answer is reported as a failure to check, never as
-//! "there is room".
+//! Free space is not available through the Rust standard library, and the
+//! workspace denies `unsafe` outside the one sqlite-vec registration site. The
+//! POSIX `df -P -k` report is the portable answer: the second line's fourth
+//! column is the available space in 1024-byte blocks, on Linux, on macOS, and in
+//! BusyBox. It is the answer wherever a `df` descriptor can be pinned and
+//! executed.
+//!
+//! Three hosts do not get that answer, and none of them is told there is room:
+//!
+//! - A unix host that does not name an open descriptor as a path — no procfs, so
+//!   no `/proc/self/fd` — answers from `rustix::fs::statvfs` and runs no `df` at
+//!   all. macOS is such a host.
+//! - A non-unix target executes nothing and reports the check as a failure to
+//!   run, with the same "no `df` at any of these absolute paths" refusal a unix
+//!   host with no `df` at any of them gets. It has no statistics to read instead.
+//! - A host where the pinned descriptor cannot be executed is a failure to run as
+//!   well: the pre-flight does not silently downgrade to a figure nothing
+//!   checked, so a confined profile that blocks the exec fails closed.
 //!
 //! `df` is never resolved through `PATH`. It is looked for at the absolute paths
 //! in `DF_PATHS` and nowhere else, because this pre-flight is a safety gate: the
 //! process environment must not get to choose the program that decides whether a
 //! restore is allowed to proceed. A `PATH` entry planted by anything the user
 //! happens to run must not be able to answer "there is plenty of room".
+//!
+//! Nor is the chosen path resolved a second time. The first candidate that is a
+//! regular file is opened once and judged through that descriptor, and the child
+//! is executed from the descriptor, so replacing the path between the check and
+//! the exec cannot make a different program run. `argv[0]` stays the candidate
+//! path, which is what BusyBox reads when it picks an applet.
 
 use clio_types::{AmError, ErrorCode};
 use std::path::{Path, PathBuf};
+
+use self::df_pin::{available_bytes_with, df_output_from, fd_link_available};
+
+#[path = "df_pin.rs"]
+mod df_pin;
 
 /// One directory's restore footprint.
 ///
@@ -217,9 +241,18 @@ fn probe_writable(dir: &Path) -> Result<(), AmError> {
     }
 }
 
-/// The filesystem's available bytes for `dir`, from the POSIX `df` report.
+/// The filesystem's available bytes for `dir`.
+///
+/// A `df` report is used only when a descriptor can be pinned for it; without
+/// that precondition the answer comes from the statistics and nothing is run.
 fn available_bytes(dir: &Path) -> Result<u64, AmError> {
-    run_available_bytes(dir, &df_output)
+    available_bytes_with(dir, fd_link_available(), &df_output)
+}
+
+/// Build and run `df -P -k <dir>` from a descriptor pinned at one of this
+/// crate's fixed candidate paths.
+fn df_output(dir: &Path) -> std::io::Result<std::process::Output> {
+    df_output_from(dir, &DF_PATHS)
 }
 
 /// Run one `df` and read its report.
@@ -270,70 +303,29 @@ fn run_available_bytes(
 ///
 /// `PATH` is deliberately absent. The pre-flight is a gate, so the program that
 /// answers it is fixed here rather than searched for.
+///
+/// The verify pass's free-space gate in `clio-backup` (`free_space`) holds its
+/// own copy of this list, of the report parser below, and of the pin in
+/// `df_pin`. The copies stay separate so the backup container crate
+/// does not depend on the store crate; keep them in step, and change both when a
+/// host layout, the report shape, or the pin changes.
 const DF_PATHS: [&str; 4] = ["/bin/df", "/usr/bin/df", "/usr/sbin/df", "/sbin/df"];
 
-/// The first of `candidates` that is an existing regular file, or `None`.
+/// The `df` this host pins, from [`DF_PATHS`] only, without running anything.
 ///
-/// The list is a parameter so a test can supply its own; production callers pass
-/// [`DF_PATHS`]. A symlink to a real `df` counts, because `is_file` follows it.
-fn first_existing_df(candidates: &[&str]) -> Option<PathBuf> {
-    candidates
-        .iter()
-        .map(|candidate| PathBuf::from(*candidate))
-        .find(|candidate| candidate.is_file())
-}
-
-/// The absolute `df` this host provides, from [`DF_PATHS`] only.
-///
-/// Only the tests call this, to ask the production question without building a
-/// command. Production reaches the same list through [`df_command_from`].
-#[cfg(test)]
+/// Only the tests call this; production reaches the same pin through
+/// `df_pin`'s `df_output_from`.
+#[cfg(all(test, unix))]
 fn resolve_df() -> Option<PathBuf> {
-    first_existing_df(&DF_PATHS)
+    use self::df_pin::pin_df;
+
+    pin_df(&DF_PATHS).ok().map(|pinned| pinned.source)
 }
 
-/// Build `df -P -k <dir>` against the absolute `df` this host provides, from
-/// [`DF_PATHS`] only.
-///
-/// # Errors
-/// None of [`DF_PATHS`] is an existing regular file. The error message names
-/// every absolute path that was tried and never mentions `PATH`, so the operator
-/// sees what was searched and where to install `df`.
-fn df_command(dir: &Path) -> std::io::Result<std::process::Command> {
-    df_command_from(dir, &DF_PATHS)
-}
-
-/// Build `df -P -k <dir>` against the first of `candidates` that exists.
-///
-/// The candidate list is a parameter so the arm where no `df` exists at all can
-/// be exercised on any host: a host with none of [`DF_PATHS`] is a real layout,
-/// not a broken one, and the production path must behave the same way there.
-/// Production passes [`DF_PATHS`] and nothing else, so this indirection does
-/// not widen what a pre-flight will run.
-///
-/// # Errors
-/// None of `candidates` is an existing regular file. The error's kind is
-/// `NotFound` and its message names every path that was tried, and never the
-/// text `PATH`, because the resolver never consults the environment.
-fn df_command_from(dir: &Path, candidates: &[&str]) -> std::io::Result<std::process::Command> {
-    let program = first_existing_df(candidates).ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!(
-                "no `df` at any of these absolute paths: {}",
-                candidates.join(", ")
-            ),
-        )
-    })?;
-    let mut command = std::process::Command::new(program);
-    command.arg("-P").arg("-k").arg(dir);
-    Ok(command)
-}
-
-/// Run `df -P -k <dir>` for the production check, resolving the program from
-/// [`DF_PATHS`] rather than from the environment.
-fn df_output(dir: &Path) -> std::io::Result<std::process::Output> {
-    df_command(dir)?.output()
+/// A host that cannot name a descriptor has no `df` to resolve.
+#[cfg(all(test, not(unix)))]
+fn resolve_df() -> Option<PathBuf> {
+    None
 }
 
 /// The available-space column of a POSIX `df -P -k` report: the header line is

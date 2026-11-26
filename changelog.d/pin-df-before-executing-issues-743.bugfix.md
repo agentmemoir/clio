@@ -1,0 +1,5 @@
+The two free-space checks — the gate a backup verify pass runs before it stages its payload, and the restore pre-flight — now open the `df` they found once, judge that open file rather than the path, and execute the very same file, so replacing the `df` path between the check and the run can no longer make Clio run a different program.
+
+The descriptor that is kept is moved above the standard streams, so a host that starts with a closed stdio no longer loses the `df` it pinned to the slot its child's own standard streams are installed over.
+
+Which hosts get which answer is unchanged in direction and now stated exactly: a unix host that does not name an open descriptor as a path — no procfs, so macOS among others — answers from its file-system statistics and runs no `df`; a non-unix target executes nothing and reports the check as a failure to run; and a host where the pinned descriptor cannot be executed reports a failure to run as well, rather than falling back, so the check fails closed.

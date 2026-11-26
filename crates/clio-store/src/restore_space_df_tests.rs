@@ -3,24 +3,29 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for testing how the restore pre-flight finds `df`:
-//! the fixed absolute candidate list, the error when no candidate exists, and
-//! the guarantee that a program the pre-flight did not offer is never run.
+//! This module is responsible for testing how the restore pre-flight chooses
+//! the `df` it runs: the fixed absolute candidate list, the error when no
+//! candidate exists, and the guarantee that a program the pre-flight did not
+//! offer is never run.
 //!
 //! ## Owns
-//! - The `df` resolver assertions: fixed paths, a decoy that must lose, and the
-//!   no-candidate-found arm
+//! - The candidate assertions: every path is absolute, decoys that must lose,
+//!   and the no-candidate-found arm that names every path that was tried
+//! - The free-space answer of a live host's `df`
 //!
 //! ## Does not own
+//! - The pinned descriptor itself: where it sits, that it is executable, and
+//!   both arms of the chooser (see `df_pin_tests`)
 //! - The pre-flight's own grouping and refusal message (see
 //!   `restore_space_tests`)
 //!
 //! ## Boundary
 //!
-//! Test-only. Never compiled into production builds. Changes to the `df` report
-//! parser belong in the sibling file, not here.
+//! Test-only. Never compiled into production builds. Changes to how a `df`
+//! report is parsed belong in the sibling `restore_space_tests`, not here.
 
 use super::*;
+use crate::restore_space::df_pin::*;
 
 /// A scratch directory removed when the guard drops.
 struct Scratch(PathBuf);
@@ -31,6 +36,15 @@ impl Scratch {
             "clio-restore-df-{tag}"
         )))
     }
+
+    /// The path `name` inside this directory, as the candidate text a pin takes.
+    fn candidate(&self, name: &str) -> String {
+        self.0
+            .join(name)
+            .to_str()
+            .expect("a utf-8 scratch path")
+            .to_owned()
+    }
 }
 
 impl Drop for Scratch {
@@ -39,7 +53,7 @@ impl Drop for Scratch {
     }
 }
 
-/// Whether this host has a `df` at one of the fixed absolute paths.
+/// Whether this host pins a `df` at one of the fixed absolute paths.
 ///
 /// A host that does not is a real layout, not a broken one, so the assertions
 /// that need a live `df` are skipped rather than failed. The behaviour that arm
@@ -64,6 +78,7 @@ fn every_df_candidate_is_an_absolute_path() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn no_df_at_any_offered_path_is_a_not_found_that_names_every_path_tried() {
     // Four paths inside a fresh scratch directory, so none of them can exist on
@@ -72,12 +87,11 @@ fn no_df_at_any_offered_path_is_a_not_found_that_names_every_path_tried() {
     let scratch = Scratch::new("absent");
     let candidates: Vec<String> = ["one", "two", "three", "four"]
         .iter()
-        .map(|name| scratch.0.join(name).display().to_string())
+        .map(|name| scratch.candidate(name))
         .collect();
     let offered: Vec<&str> = candidates.iter().map(String::as_str).collect();
 
-    let error = df_command_from(&scratch.0, &offered)
-        .expect_err("none of these paths can exist, so there is no df to run");
+    let error = pin_df(&offered).err().expect("no such candidate can exist");
     assert_eq!(
         error.kind(),
         std::io::ErrorKind::NotFound,
@@ -102,8 +116,8 @@ fn a_fake_df_in_a_scratch_directory_is_never_chosen() {
     use std::os::unix::fs::PermissionsExt;
     let scratch = Scratch::new("fake-df");
     let fake = scratch.0.join("df");
-    // A script that would answer "there is room" for anything. If the pre-flight
-    // ever searched `PATH`, a hostile entry like this one would be picked up.
+    // A script that would answer "there is room" for anything: if the
+    // pre-flight ever searched `PATH`, a hostile entry like this would win.
     std::fs::write(
         &fake,
         "#!/bin/sh\n\
@@ -113,23 +127,19 @@ fn a_fake_df_in_a_scratch_directory_is_never_chosen() {
     .expect("seed the fake df");
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755))
         .expect("make the fake df executable");
-    assert!(fake.is_file(), "the fake df is a real executable file");
 
-    // Control: the resolver does return an existing file when one is offered, so
-    // the assertion below is not passing because it always answers `None`.
-    let offered = fake.to_str().expect("scratch path is text");
-    assert_eq!(
-        first_existing_df(&[offered]).as_deref(),
-        Some(fake.as_path()),
-        "the resolver honours the list it is given"
-    );
+    // Control: the pin does take an existing regular file when one is offered,
+    // so the assertion below is not passing because it always answers nothing.
+    let offered = scratch.candidate("df");
+    let pinned = pin_df_from(&[offered.as_str()]).expect("the fake df is a regular file");
+    assert_eq!(pinned.source, fake, "the pin honours its list");
 
     // Host-dependent: on a host with no `df` at any fixed path there is nothing
     // to choose, so the choice is not a decision this host can make.
     if !host_has_df() {
         return;
     }
-    let chosen = first_existing_df(&DF_PATHS).expect("this host has a df");
+    let chosen = pin_df(&DF_PATHS).expect("this host has a df").source;
     assert_ne!(
         chosen,
         fake,
@@ -137,9 +147,7 @@ fn a_fake_df_in_a_scratch_directory_is_never_chosen() {
         fake.display()
     );
     assert!(
-        DF_PATHS
-            .iter()
-            .any(|candidate| Path::new(candidate) == chosen),
+        DF_PATHS.iter().any(|c| Path::new(c) == chosen),
         "{chosen:?} is not one of the fixed paths {DF_PATHS:?}"
     );
 }
@@ -153,43 +161,32 @@ fn a_fake_df_loses_when_the_fixed_paths_are_offered_alongside_it() {
     std::fs::write(&fake, "#!/bin/sh\nexit 0\n").expect("seed the fake df");
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755))
         .expect("make the fake df executable");
-    let fake_text = fake.to_str().expect("scratch path is text");
+    let fake_text = scratch.candidate("df");
 
-    // What the resolver offers no protection against: it is a plain filter over
-    // the list, so a decoy placed FIRST is chosen. The safety lives entirely in
-    // the caller passing the fixed list, which is what the next assertions pin.
-    assert_eq!(
-        first_existing_df(&[fake_text]).as_deref(),
-        Some(fake.as_path()),
-        "the resolver honours the order of the list it is given"
-    );
+    // The pin is a plain filter over the list, so a decoy placed FIRST is
+    // pinned. The safety lives in the caller passing the fixed list.
+    let decoy = pin_df_from(&[fake_text.as_str()]).expect("the fake df is a regular file");
+    assert_eq!(decoy.source, fake, "the pin honours the order");
 
     // The decoy, offered with the fixed paths, is behind them all.
     let mut offered = DF_PATHS.to_vec();
-    offered.push(fake_text);
-    let chosen = df_command_from(&scratch.0, &offered)
-        .ok()
-        .map(|command| command.get_program().to_owned());
+    offered.push(fake_text.as_str());
+    let chosen = pin_df(&offered).ok().map(|pinned| pinned.source);
     // Host-dependent only in the positive branch: a host with no `df` at any
     // fixed path chooses nothing, and choosing nothing also means the fake lost.
-    // The claim under test, that the fake is not chosen, is checked everywhere.
-    if let Some(program) = chosen {
+    if let Some(source) = chosen {
         assert_ne!(
-            program,
-            fake.as_os_str(),
-            "the fake df won over the fixed paths: {program:?}"
+            source, fake,
+            "the fake df won over the fixed paths: {source:?}"
         );
         assert!(
-            DF_PATHS
-                .iter()
-                .any(|candidate| Path::new(candidate) == program),
-            "{program:?} is not one of the fixed paths {DF_PATHS:?}"
+            DF_PATHS.iter().any(|c| Path::new(c) == source),
+            "{source:?} is not one of the fixed paths {DF_PATHS:?}"
         );
     }
 
-    // And the host-free reason it cannot win in production, whatever the order:
-    // no candidate in the production list lives inside a scratch directory, so
-    // a file planted there is not a candidate at all.
+    // And the host-free reason it cannot win, whatever the order: no production
+    // candidate lives inside a scratch directory, so a planted file is not one.
     assert!(
         !DF_PATHS
             .iter()
@@ -199,37 +196,25 @@ fn a_fake_df_loses_when_the_fixed_paths_are_offered_alongside_it() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn the_resolver_never_falls_back_to_a_bare_program_name() {
-    // Nothing exists at these paths, so the resolver has nothing to return. If
-    // any code path fell back to a bare `df`, it would search the environment
-    // and this would succeed instead of reporting not found.
+    // Nothing exists at these paths, so there is nothing to pin. A code path
+    // that fell back to a bare `df` would search the environment and succeed
+    // instead of reporting not found.
     let scratch = Scratch::new("bare");
     let absent: Vec<String> = ["bin", "usr-bin", "usr-sbin", "sbin"]
         .iter()
-        .map(|dir| scratch.0.join(dir).join("df").display().to_string())
+        .map(|dir| scratch.candidate(&format!("{dir}/df")))
         .collect();
     let offered: Vec<&str> = absent.iter().map(String::as_str).collect();
-    let error = df_command_from(&scratch.0, &offered)
-        .expect_err("an empty list of candidates must not fall back to a bare `df`");
+    let error = pin_df(&offered).err().expect("no candidate here can exist");
     assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
 
-    // The same list the production path uses is absolute, so the program the
-    // production path builds is absolute too.
-    for candidate in DF_PATHS {
-        assert!(
-            Path::new(candidate).is_absolute(),
-            "the production candidate {candidate} must be an absolute path"
-        );
-    }
     // Limit of this test: it cannot put a fake `df` on `PATH`, because
-    // `std::env::set_var` is process-wide and `unsafe` in Rust 2024, and it does
-    // not need to. A resolver that searched `PATH` would be caught by
-    // `a_fake_df_in_a_scratch_directory_is_never_chosen` only if `PATH` held the
-    // scratch directory, which it never does, so no test here can prove the
-    // absence of a `PATH` search by mutating the environment. What is proved is
-    // narrower and still the part that can fail: the resolver takes its whole
-    // answer from the list it is given.
+    // `std::env::set_var` is process-wide and `unsafe` in Rust 2024. The two
+    // sibling tests prove instead that the candidate list decides and that no
+    // production candidate can be resolved by name.
 }
 
 #[test]
@@ -258,9 +243,9 @@ fn the_resolver_answers_with_the_first_fixed_path_that_exists() {
 
 #[test]
 fn available_bytes_answers_from_a_fixed_path_on_this_host() {
-    // Host-dependent: a host with no `df` at any fixed path cannot answer. The
-    // `NotFound` path is covered host-free by
-    // `no_df_at_any_offered_path_is_a_not_found_that_names_every_path_tried`.
+    // Host-dependent: a host with no `df` at any fixed path answers from its
+    // statistics instead, host-free in the sibling pin module's
+    // `the_chooser_reads_the_statistics_where_no_descriptor_can_be_named`.
     if !host_has_df() {
         return;
     }
@@ -275,32 +260,5 @@ fn available_bytes_answers_from_a_fixed_path_on_this_host() {
     assert!(
         available > 0 && available < PEBIBYTE,
         "a live filesystem reported {available} available bytes, which is not plausible"
-    );
-}
-
-#[test]
-fn the_df_command_names_a_fixed_absolute_program() {
-    // Host-dependent: with no `df` at any fixed path there is no program to
-    // name. The not-found arm is covered host-free by
-    // `no_df_at_any_offered_path_is_a_not_found_that_names_every_path_tried`.
-    if !host_has_df() {
-        return;
-    }
-    let scratch = Scratch::new("command");
-    let command = df_command(&scratch.0)
-        .unwrap_or_else(|error| panic!("no `df` at {DF_PATHS:?} could be run: {error}"));
-    let program = command.get_program();
-    assert!(
-        Path::new(program).is_absolute(),
-        "the program {} is relative, so the operating system resolves it against the current \
-         directory or PATH",
-        program.to_string_lossy()
-    );
-    assert!(
-        DF_PATHS
-            .iter()
-            .any(|candidate| Path::new(candidate) == Path::new(program)),
-        "the program {} is not one of the fixed paths {DF_PATHS:?}",
-        program.to_string_lossy()
     );
 }
