@@ -38,6 +38,13 @@ use serde_json::json;
 use super::{ImportArgs, SkippedInvalid};
 use crate::bundle::BundleEnvelope;
 
+// The bundle id maps use the default hasher in production and a counting hasher
+// in tests, so the scaling test can bound index probes per lookup.
+#[cfg(not(test))]
+type IndexHasher = std::collections::hash_map::RandomState;
+#[cfg(test)]
+type IndexHasher = crate::import_apply_seam::CountingBuildHasher;
+
 // Persona row planning lives in its own module (extracted to keep this file
 // within the source-size bound); it shares the same `Planner` state.
 #[path = "import_apply_persona.rs"]
@@ -66,9 +73,9 @@ pub(super) struct Planner<'a> {
     pub(super) args: &'a ImportArgs<'a>,
     pub(super) envelope: &'a BundleEnvelope,
     /// Bundle item rows by id, first row wins on a duplicate id.
-    pub(super) bundle_items: HashMap<&'a str, &'a MemoryItem>,
+    pub(super) bundle_items: HashMap<&'a str, &'a MemoryItem, IndexHasher>,
     /// Ids carried by the bundle's opaque array.
-    pub(super) bundle_opaque: HashSet<&'a str>,
+    pub(super) bundle_opaque: HashSet<&'a str, IndexHasher>,
     pub(super) staged: Vec<BatchWrite>,
     pub(super) create: usize,
     pub(super) skip: usize,
@@ -97,11 +104,11 @@ pub(super) struct Planner<'a> {
 
 impl<'a> Planner<'a> {
     pub(super) fn new(args: &'a ImportArgs<'a>, envelope: &'a BundleEnvelope) -> Self {
-        let mut bundle_items: HashMap<&'a str, &'a MemoryItem> = HashMap::new();
+        let mut bundle_items: HashMap<&'a str, &'a MemoryItem, IndexHasher> = HashMap::default();
         for item in &envelope.entities.items {
             bundle_items.entry(item.id.as_str()).or_insert(item);
         }
-        let bundle_opaque: HashSet<&'a str> = envelope
+        let bundle_opaque: HashSet<&'a str, IndexHasher> = envelope
             .entities
             .opaque_items
             .iter()

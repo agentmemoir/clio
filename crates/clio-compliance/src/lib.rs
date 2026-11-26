@@ -180,6 +180,8 @@ mod export_dest_fixtures;
 #[cfg(test)]
 mod export_tests;
 #[cfg(test)]
+mod import_apply_seam;
+#[cfg(test)]
 mod import_fixture;
 #[cfg(test)]
 mod import_fixture_signals;

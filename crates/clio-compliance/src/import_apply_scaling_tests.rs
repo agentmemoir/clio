@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //! Test-only units owned by `import_apply.rs`: the bundle id index built once at
-//! planner construction, its first-row-wins rule for duplicate ids, and its
-//! coverage of opaque rows. Fixture builders live in `import_fixture.rs`. Never
-//! compiled into production builds.
-
-use std::collections::{HashMap, HashSet};
+//! planner construction, its first-row-wins rule for duplicate ids, its coverage
+//! of opaque rows, and the probe bound that keeps lookup work per id constant.
+//! Fixture builders live in `import_fixture.rs`. Never compiled into production
+//! builds.
 
 use crate::bundle::ExportContentMode;
+use crate::import_apply_seam::{probe_count, reset_probes};
 use crate::import_fixture::{Harness, write_bundle};
 
 use super::Planner;
@@ -46,10 +46,28 @@ fn bundle_lookup_keeps_first_duplicate_and_owns_opaque_ids() {
     assert!(planner.bundle_owns(&opaque_id));
 }
 
-/// The index holds one entry per item and is built before planning starts, so a
-/// lookup is a hash probe instead of a walk over the item array.
+/// The index must answer each lookup with a small, fixed number of probes: a
+/// walk of the bundle arrays performs none, and a scan that hashes per row
+/// exceeds the ceiling.
+fn assert_bounded_lookup_probes(probes: usize, ids: usize, kind: &str) {
+    let lookups = 2 * ids;
+    assert!(
+        probes >= lookups,
+        "{probes} index probes for {lookups} {kind} lookups over {ids} ids: \
+         at least one lookup walked the bundle arrays instead of probing the index"
+    );
+    assert!(
+        probes <= 2 * lookups,
+        "{probes} index probes for {lookups} {kind} lookups over {ids} ids: \
+         lookup work is not bounded per id"
+    );
+}
+
+/// Lookup work stays bounded at scale: the index holds one entry per bundled
+/// item, every present id resolves, every absent id is rejected, and each
+/// lookup costs at least one and at most two hash probes.
 #[test]
-fn planner_indexes_every_item_and_rejects_thousands_of_absent_ids() {
+fn planner_lookup_work_stays_bounded_at_thousands_of_ids() {
     const COUNT: usize = 4_000;
     let h = Harness::new();
     let entities = h.bulk_entities(COUNT);
@@ -62,14 +80,10 @@ fn planner_indexes_every_item_and_rejects_thousands_of_absent_ids() {
     let args = h.args(&ctx, h.policy(), bundle.path(), true, false, None);
     let planner = Planner::new(&args, &parsed.envelope);
 
-    // A hash table answers a key lookup in constant time on average, so the
-    // container types are the structural proof that lookup cost does not follow
-    // the number of items.
-    let items: &HashMap<_, _> = &planner.bundle_items;
-    let opaque: &HashSet<_> = &planner.bundle_opaque;
-    assert_eq!(items.len(), COUNT);
-    assert!(opaque.is_empty());
+    assert_eq!(planner.bundle_items.len(), COUNT);
+    assert!(planner.bundle_opaque.is_empty());
 
+    reset_probes();
     for id in &ids {
         assert!(
             planner.bundle_item(id).is_some(),
@@ -77,6 +91,10 @@ fn planner_indexes_every_item_and_rejects_thousands_of_absent_ids() {
         );
         assert!(planner.bundle_owns(id));
     }
+    let present = probe_count();
+    assert_bounded_lookup_probes(present, COUNT, "present");
+
+    reset_probes();
     for i in 0..COUNT {
         let absent = format!("absent-{i}");
         assert!(
@@ -85,6 +103,9 @@ fn planner_indexes_every_item_and_rejects_thousands_of_absent_ids() {
         );
         assert!(!planner.bundle_owns(&absent));
     }
-    assert_eq!(planner.bundle_items.len(), COUNT);
-    assert_eq!(planner.bundle_opaque.len(), 0);
+    let absent = probe_count();
+    assert_bounded_lookup_probes(absent, COUNT, "absent");
+    // Measured, not gated: the probe bound above is the claim, and this line
+    // keeps the actual count visible in a run log.
+    println!("index probes: present {present}, absent {absent}, ids {COUNT}");
 }
