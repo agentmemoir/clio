@@ -56,7 +56,7 @@ fn codex_binary_that_resolves_but_cannot_run_refuses_with_the_snippet() {
     let fixture = Fixture::new("codex-unspawnable");
     let stand_in = fixture.root.join("not-an-executable");
     fs::create_dir_all(&stand_in).expect("the stand-in path can be created");
-    let env = fixture.env_with_lookup(move |_| Some(stand_in.clone()));
+    let env = fixture.env_with_lookup(move |_| vec![stand_in.clone()]);
     let err = install(codex, SERVER_NAME, &fixture.exe(), &env)
         .expect_err("a lookup hit that cannot be spawned must refuse");
     let DelegateError::BinaryMissing {

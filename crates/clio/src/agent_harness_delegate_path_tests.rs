@@ -3,17 +3,20 @@
 //
 //! # Responsibility
 //!
-//! This module tests the binary lookup and the held descriptor: what `Held`
-//! opens, what it refuses, and that a name replaced after the open is not what
-//! the descriptor names.
+//! This module tests the `PATH` candidate list and the held binary: what
+//! `Held` opens, what it refuses, and that the descriptor starts the file that
+//! was opened after its name is replaced.
 //!
 //! ## Owns
-//! - The descriptor identity after a replace, and the refuses and accepts of
-//!   `Held::open`
-//! - The directory-safety truth table the no-descriptor platform uses
+//! - The candidate list's order and join, and the descriptor identity after a
+//!   replace
+//! - The accepts and refuses of `Held::open`
+//! - The directory- and file-safety truth tables the no-descriptor platform
+//!   uses
 //!
 //! ## Does not own
-//! - The lookup and hold implementation (`agent_harness_delegate_path`)
+//! - The candidate list and hold implementation
+//!   (`agent_harness_delegate_path`)
 //! - Starting a vendor command and judging its output (`agent_harness_delegate`)
 //!
 //! ## Boundary
@@ -22,6 +25,8 @@
 
 use super::*;
 use crate::agent_harness_delegate::test_support_tests::Fixture;
+#[cfg(target_os = "linux")]
+use crate::agent_harness_delegate::test_support_tests::exec_dir;
 use std::fs;
 
 #[cfg(unix)]
@@ -37,32 +42,35 @@ fn write_file(fixture: &Fixture, name: &str, contents: &str, mode: u32) -> PathB
 }
 
 #[test]
-fn lookup_on_path_misses_a_binary_no_host_ships() {
+fn path_candidates_keep_the_path_order() {
+    let value = std::ffi::OsString::from("/first/bin:/second/bin");
     assert_eq!(
-        lookup_on_path("clio-no-such-binary-anywhere"),
-        None,
-        "a binary absent from every PATH entry is not found"
+        path_candidates_from(&value, "claude"),
+        vec![
+            PathBuf::from("/first/bin/claude"),
+            PathBuf::from("/second/bin/claude"),
+        ],
+        "the candidates keep the order of the PATH entries"
     );
 }
 
-#[cfg(unix)]
 #[test]
-fn is_runnable_follows_the_exec_bits_of_a_real_file() {
-    let fixture = Fixture::new("is-runnable");
-    let script = fixture.root.join("runnable");
-    fs::write(&script, "#!/bin/sh\n").expect("the script can be written");
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
-        .expect("the script can be made executable");
-    assert!(is_runnable(&script), "an executable file is runnable");
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o644))
-        .expect("the exec bits can be removed");
-    assert!(
-        !is_runnable(&script),
-        "a file without exec bits is not runnable"
+fn path_candidates_join_the_binary_name_to_each_directory() {
+    let value = std::ffi::OsString::from("/opt/homebrew/bin/");
+    assert_eq!(
+        path_candidates_from(&value, "claude"),
+        vec![PathBuf::from("/opt/homebrew/bin/claude")],
+        "a trailing slash does not change the joined candidate"
     );
-    assert!(
-        !is_runnable(&fixture.root.join("missing")),
-        "a missing file is not runnable"
+}
+
+#[test]
+fn path_candidates_of_an_empty_path_name_the_binary_itself() {
+    let value = std::ffi::OsString::new();
+    assert_eq!(
+        path_candidates_from(&value, "claude"),
+        vec![PathBuf::from("claude")],
+        "an empty PATH entry names the binary in the current directory"
     );
 }
 
@@ -102,9 +110,60 @@ fn held_program_names_the_opened_file_after_the_path_is_replaced() {
 
     let expected = format!("/proc/self/fd/{}", held.file.as_raw_fd());
     assert_eq!(
-        held.command(&first).get_program(),
+        held.command().get_program(),
         std::ffi::OsStr::new(expected.as_str())
     );
+    assert_eq!(held.path(), first, "the stored path stays the candidate");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn held_command_runs_the_opened_file_after_the_path_is_replaced() {
+    let dir = exec_dir("held-after-replace").expect("the stub needs a directory that permits exec");
+    let first = dir.join("first");
+    let second = dir.join("second");
+    fs::write(&first, "#!/bin/sh\nprintf 'A\\n'\n").expect("the first stub can be written");
+    fs::write(&second, "#!/bin/sh\nprintf 'B\\n'\n").expect("the second stub can be written");
+    fs::set_permissions(&first, fs::Permissions::from_mode(0o755))
+        .expect("the first stub can be made executable");
+    fs::set_permissions(&second, fs::Permissions::from_mode(0o755))
+        .expect("the second stub can be made executable");
+
+    let held = Held::open(&first).expect("the first stub is a runnable regular file");
+    fs::rename(&second, &first).expect("the second stub replaces the first name");
+
+    let out = held.command().output().expect("the held stub can start");
+    assert!(out.status.success(), "the held stub exits cleanly: {out:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "A\n",
+        "the held file runs, not the file now at the candidate name"
+    );
+    fs::remove_dir_all(&dir).expect("the stub directory is removed");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_script_started_through_the_descriptor_sees_the_descriptor_as_zero() {
+    let dir = exec_dir("script-zero").expect("the stub needs a directory that permits exec");
+    let fixture = Fixture::new("script-zero");
+    let record = fixture.root.join("zero.txt");
+    let script = format!("#!/bin/sh\nprintf '%s' \"$0\" > '{}'\n", record.display());
+    let stub = dir.join("stub");
+    fs::write(&stub, script).expect("the stub script can be written");
+    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755))
+        .expect("the stub script can be made executable");
+
+    let held = Held::open(&stub).expect("the stub is a runnable regular file");
+    let out = held.command().output().expect("the held script can start");
+    assert!(out.status.success(), "the script exits cleanly: {out:?}");
+
+    let zero = fs::read_to_string(&record).expect("the script recorded $0");
+    assert!(
+        zero.starts_with("/proc/self/fd/"),
+        "a script cannot keep the candidate argv0; the kernel passes the descriptor path: {zero}"
+    );
+    fs::remove_dir_all(&dir).expect("the stub directory is removed");
 }
 
 #[cfg(unix)]
@@ -140,14 +199,58 @@ fn open_accepts_a_symlink_to_an_executable() {
 
 #[cfg(unix)]
 #[test]
+fn a_non_executable_candidate_falls_through_to_the_next() {
+    let fixture = Fixture::new("candidate-fallthrough");
+    let plain = write_file(&fixture, "plain", "#!/bin/sh\nexit 0\n", 0o644);
+    let real = write_file(&fixture, "real", "#!/bin/sh\nexit 0\n", 0o755);
+    let candidates = [plain, real.clone()];
+    let held = candidates
+        .iter()
+        .find_map(|candidate| Held::open(candidate).ok())
+        .expect("the first candidate that opens is held");
+    assert_eq!(
+        held.path(),
+        real,
+        "the non-executable first candidate is skipped"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn dir_is_safe_truth_table() {
     const EUID: u32 = 1000;
     assert!(dir_is_safe(0, 0o755, EUID), "root-owned 0755 is safe");
     assert!(dir_is_safe(EUID, 0o755, EUID), "euid-owned 0755 is safe");
     assert!(
+        dir_is_safe(EUID, 0o775, EUID),
+        "euid-owned 0775 is safe, as a Homebrew install directory"
+    );
+    assert!(dir_is_safe(EUID, 0o700, EUID), "euid-owned 0700 is safe");
+    assert!(
         !dir_is_safe(EUID + 1, 0o755, EUID),
         "another user's 0755 is unsafe"
     );
-    assert!(!dir_is_safe(0, 0o775, EUID), "group-writable is unsafe");
+    assert!(!dir_is_safe(0, 0o775, EUID), "root-owned 0775 is unsafe");
+    assert!(!dir_is_safe(0, 0o757, EUID), "root-owned 0757 is unsafe");
     assert!(dir_is_safe(0, 0o700, EUID), "root-owned 0700 is safe");
+}
+
+#[cfg(unix)]
+#[test]
+fn file_is_safe_truth_table() {
+    const EUID: u32 = 1000;
+    assert!(file_is_safe(0, 0o755, EUID), "root-owned 0755 is safe");
+    assert!(file_is_safe(EUID, 0o755, EUID), "euid-owned 0755 is safe");
+    assert!(
+        !file_is_safe(EUID + 1, 0o755, EUID),
+        "another user's 0755 is unsafe"
+    );
+    assert!(
+        !file_is_safe(EUID, 0o775, EUID),
+        "euid-owned 0775 is unsafe"
+    );
+    assert!(
+        !file_is_safe(EUID, 0o757, EUID),
+        "euid-owned 0757 is unsafe"
+    );
 }
