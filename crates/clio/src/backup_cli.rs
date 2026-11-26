@@ -10,8 +10,8 @@
 //! ## Owns
 //! - The `backup` group dispatch and its did-you-mean hint, both worked over
 //!   the subcommand list the registry derives (see `cli_help_groups`)
-//! - `backup dir`: directory creation, owner-only tightening of the fresh
-//!   leaf, the writability probe, and its text and JSON views
+//! - `backup dir`: creating the directory owner-only when it is missing, the
+//!   writability probe, and its text and JSON views
 //! - The restore selectors: the snapshot-id rule and the target resolution
 //!
 //! ## Does not own
@@ -170,9 +170,9 @@ fn dir_spec() -> FlagSpec {
     }
 }
 
-/// Create the backup directory when missing, then tighten the fresh leaf to
-/// owner-only. An existing directory is left untouched — the operator may
-/// have widened it deliberately — and reports `created: false`.
+/// Create the backup directory when missing, owner-only. An existing directory
+/// is left untouched — the operator may have widened it deliberately — and
+/// reports `created: false`.
 ///
 /// The rule itself lives in the archive half, so `create` and `dir` cannot
 /// drift apart.

@@ -15,6 +15,7 @@
 //!   must stay an internal fault
 //!
 //! ## Does not own
+//! - The backup directory's creation and its mode (see `staging_dir_tests`)
 //! - The atomic publish (see `atomic_publish_tests`)
 //! - Create, verify, or inventory cases (see their own test modules)
 //!
@@ -119,25 +120,6 @@ fn a_missing_source_is_an_error_and_stages_nothing() {
         .filter(|name| has_extension(name, "tmp"))
         .collect();
     assert!(temporaries.is_empty(), "{temporaries:?}");
-}
-
-#[test]
-fn the_backup_directory_is_created_owner_only_and_left_alone_when_present() {
-    let scratch = Scratch::new("dir-create");
-    let fresh = scratch.join("backups");
-
-    assert!(ensure_backup_dir(&fresh).expect("create"));
-    assert!(fresh.is_dir());
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&fresh).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o700);
-    }
-    assert!(
-        !ensure_backup_dir(&fresh).expect("second call"),
-        "already there"
-    );
 }
 
 #[test]

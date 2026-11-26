@@ -341,13 +341,12 @@ pub fn ensure_backup_dir(path: &Path) -> Result<bool, AmError> {
     if path.is_dir() {
         return Ok(false);
     }
-    std::fs::create_dir_all(path).map_err(|e| {
+    clio_config::config::create_private_dir(path).map_err(|e| {
         AmError::new(
             ErrorCode::Internal,
             format!("cannot create backup directory `{}`: {e}", path.display()),
         )
     })?;
-    clio_config::config::restrict_dir(path);
     Ok(true)
 }
 
@@ -397,3 +396,7 @@ pub(crate) fn create_owner_only(path: &Path) -> Result<std::fs::File, AmError> {
 #[cfg(test)]
 #[path = "staging_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "staging_dir_tests.rs"]
+mod dir_tests;
