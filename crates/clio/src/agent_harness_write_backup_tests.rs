@@ -24,6 +24,9 @@
 //! ## Does not own
 //! - The behaviour tests of the editor (`agent_harness_write_tests`)
 //! - The resolution-before-write tests (`agent_harness_write_toctou_tests`)
+//! - The tests that fix the clock's stamp, so an entry can be planted at the
+//!   name the shipped path will build (`agent_harness_write_backup_entry_tests`,
+//!   which reuses the `Scratch` guard and `mode_bits` defined here)
 //!
 //! ## Boundary
 //!
@@ -40,13 +43,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// One test's own directory, removed when the guard drops. No other test
-/// shares it.
-struct Scratch {
+/// shares it. Visible to the parent so the stamped-name tests reuse this guard
+/// rather than carrying a second, drifting copy.
+pub(super) struct Scratch {
     root: PathBuf,
 }
 
 impl Scratch {
-    fn new(label: &str) -> Self {
+    pub(super) fn new(label: &str) -> Self {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| since.as_nanos());
@@ -59,11 +63,11 @@ impl Scratch {
         Self { root }
     }
 
-    fn path(&self, name: &str) -> PathBuf {
+    pub(super) fn path(&self, name: &str) -> PathBuf {
         self.root.join(name)
     }
 
-    fn write(&self, name: &str, contents: &[u8]) -> PathBuf {
+    pub(super) fn write(&self, name: &str, contents: &[u8]) -> PathBuf {
         let path = self.path(name);
         fs::write(&path, contents).expect("fixture can be written");
         path
@@ -88,7 +92,7 @@ fn fixtures(scratch: &Scratch) -> (PathBuf, PathBuf) {
 
 /// The permission bits of an entry, without the file-type bits that an `fstat`
 /// mode also carries.
-fn mode_bits(path: &Path) -> u32 {
+pub(super) fn mode_bits(path: &Path) -> u32 {
     fs::metadata(path)
         .expect("the entry exists")
         .permissions()

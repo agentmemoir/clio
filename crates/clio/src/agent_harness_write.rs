@@ -78,11 +78,27 @@ pub(crate) enum RemoveOutcome {
 /// given the source's permission bits; or an entry already exists at the
 /// stamped name.
 pub(crate) fn backup_file(path: &Path) -> Result<Option<PathBuf>, WriteError> {
+    backup_file_at(path, unix_nanos())
+}
+
+/// Back up `path` under the stamp `nanos` rather than the clock's.
+///
+/// The stamp is `backup_file`'s only input that cannot be observed before the
+/// call, so it is taken as a parameter and the name it builds can be known in
+/// advance. Nothing else differs from `backup_file`: the same name is built
+/// beside the source, the same exclusive create runs, and the same `Ok(None)`
+/// applies when there is no file. This is the seam that lets a test plant an
+/// entry at the exact name the shipped path will choose and watch the shipped
+/// path refuse it; a test that had to guess the clock's stamp could only ever
+/// exercise a fresh name.
+///
+/// Private to this module: a stamp is not part of the caller's contract, and
+/// `backup_file` is the entry point they get.
+fn backup_file_at(path: &Path, nanos: u128) -> Result<Option<PathBuf>, WriteError> {
     if !path.exists() {
         return Ok(None);
     }
     let name = file_name(path);
-    let nanos = unix_nanos();
     let target = path.with_file_name(format!("{name}.clio-backup-{nanos}"));
     write_backup(path, &target)?;
     Ok(Some(target))
@@ -396,3 +412,7 @@ mod toctou_tests;
 #[cfg(all(test, unix))]
 #[path = "agent_harness_write_backup_tests.rs"]
 mod backup_tests;
+
+#[cfg(all(test, unix))]
+#[path = "agent_harness_write_backup_entry_tests.rs"]
+mod backup_entry_tests;
