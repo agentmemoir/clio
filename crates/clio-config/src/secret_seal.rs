@@ -10,6 +10,7 @@
 //! ## Owns
 //! - The `sealed:v1:` envelope, its nonce, and its authenticated context
 //! - Which config paths are sealed, as an explicit list
+//! - The rule that decides a stored value is sealed, from its path and its value
 //! - The strict read rule: only a sealed envelope opens, and a value with no
 //!   prefix is refused
 //!
@@ -38,9 +39,11 @@
 //! # Why a constant authenticated context, not the config path
 //!
 //! The authenticated context is the constant `clio-secret-seal-v1`, not the
-//! dot-path. Moving a secret from one path to another is a real future need, and
-//! binding the path would turn a readable secret into a permanent error the
-//! moment it moved.
+//! dot-path. Moving a secret between two paths that are both sealed is a real
+//! need, and binding the path would turn a readable secret into a permanent
+//! error the moment it moved. Which path an envelope opens at is decided by
+//! `must_seal` on the opened plaintext when an overlay file is read, not by
+//! the authenticated context.
 //!
 //! # Why a blank value is sealed too
 //!
@@ -95,7 +98,9 @@ thread_local! {
 /// True when a stored value is a sealed envelope.
 ///
 /// This is what decides whether [`open`] accepts a value at all. It looks at
-/// the value, never at the path, so a secret that moved keeps opening.
+/// the value, never at the path; the reader that walks an overlay file decides
+/// with `must_seal` whether the opened plaintext belongs at the path it sits
+/// at, so an envelope moved to a path Clio does not seal there stays opaque.
 #[must_use]
 pub fn is_sealed(value: &str) -> bool {
     value.starts_with(SEALED_PREFIX)
@@ -115,6 +120,22 @@ pub fn is_sealed_path(path: &str) -> bool {
         || SEALED_PREFIXES
             .iter()
             .any(|prefix| lower.starts_with(prefix))
+}
+
+/// True when the value stored at `path` must be sealed on disk.
+///
+/// Either half is enough: a path the sealed list names, or a value that carries
+/// a secret wherever it sits — a URL endpoint with userinfo credentials is one,
+/// because the password travels inside the value. Reading the value here is what
+/// keeps a save and the load that follows from disagreeing: a value that is
+/// masked on the way out and readable on disk would be a disclosure nobody was
+/// told about.
+///
+/// A path that is not sealed and a value that carries nothing secret stay
+/// plaintext, which is what keeps ordinary config readable.
+#[must_use]
+pub(crate) fn must_seal(path: &str, value: &str) -> bool {
+    is_sealed_path(path) || crate::secret::value_is_secret(path, value)
 }
 
 /// Seal a plaintext value under the Clio encryption key.

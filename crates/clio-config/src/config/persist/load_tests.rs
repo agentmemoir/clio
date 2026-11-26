@@ -9,20 +9,29 @@
 //! ## Owns
 //! - The file the check opened, and the refusal to replace a path that no
 //!   longer names that file
+//! - The gate that opens an envelope where the save would have sealed it, and
+//!   leaves plain config alone
 //!
 //! ## Does not own
 //! - Production load logic under test
 //! - The save side that uses the guard (see `save_tests`)
+//! - The refusal shapes for a plaintext secret at a sealed path (see
+//!   `seal_gate_tests`)
 //!
 //! ## Boundary
 //!
 //! Changes to what the overwrite check accepts should normally update tests
 //! here. Changes to what a save writes should not.
 //!
-//! Keep this module focused on the overwrite check.
+//! Keep this module focused on the overwrite check and the value gate.
 
 use super::*;
+use crate::secret_seal::test_key;
+use serde_json::json;
 use std::path::PathBuf;
+
+/// The key the gate tests here seal under.
+const KEY: [u8; crate::secret_key::KEY_LEN] = [0x7c; crate::secret_key::KEY_LEN];
 
 /// A scratch directory that cleans itself up when the guard drops.
 struct Scratch(PathBuf);
@@ -151,4 +160,177 @@ fn guard_refuses_when_the_path_becomes_a_directory() {
         .ensure_unchanged(&path)
         .expect_err("a directory at the path is not the checked file");
     assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+}
+
+#[test]
+fn an_envelope_at_a_path_that_is_not_sealed_opens() {
+    test_key::use_key(KEY);
+    let scratch = Scratch::new("gate-envelope");
+    let path = scratch.config();
+    let url = "https://user:DUMMY_PASSWORD@host";
+    let envelope = crate::secret_seal::seal(url).expect("seal");
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&json!({ "extract.url": envelope })).expect("serialize"),
+    )
+    .expect("write a file holding one envelope");
+
+    let loaded = load_overlay_file(&path).expect("an envelope opens where a save would seal it");
+    assert_eq!(loaded.get("extract.url"), Some(&json!(url)));
+}
+
+#[test]
+fn plain_values_at_ordinary_paths_come_back_unchanged() {
+    let scratch = Scratch::new("gate-plain");
+    let path = scratch.config();
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&json!({
+            "extract.url": "https://host/v1",
+            "log.level": "debug",
+            "history.lesson_max_tokens": 40,
+        }))
+        .expect("serialize"),
+    )
+    .expect("write a plain file");
+
+    let loaded = load_overlay_file(&path).expect("plain config loads");
+    assert_eq!(loaded.get("extract.url"), Some(&json!("https://host/v1")));
+    assert_eq!(loaded.get("log.level"), Some(&json!("debug")));
+    assert_eq!(loaded.get("history.lesson_max_tokens"), Some(&json!(40)));
+}
+
+#[test]
+fn a_plaintext_secret_at_a_sealed_path_still_refuses_the_file() {
+    // The refusal this gate has always applied must survive the value rule: a
+    // readable credential in the file is still a plaintext secret.
+    let scratch = Scratch::new("gate-unsealed");
+    let path = scratch.config();
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&json!({ "credentials.api_key": "sk-plain-123456" }))
+            .expect("serialize"),
+    )
+    .expect("write a legacy file");
+
+    let error = load_overlay_file(&path).expect_err("a plaintext credential must not load");
+    assert_eq!(error.code, ErrorCode::ConfigCorrupt);
+    assert!(
+        error.message.contains("credentials.api_key"),
+        "the message names the dot-path: {}",
+        error.message
+    );
+}
+
+#[test]
+fn a_text_that_only_looks_like_an_envelope_stays_plain_and_costs_no_other_value() {
+    // The save writes this text as a plain string, because the value is not a
+    // secret. Reading it back must not try to open it: a refusal here would drop
+    // every other value in the file and leave `config set` unable to repair it.
+    test_key::use_key(KEY);
+    let literal = "sealed:v1:notarealenvelope";
+    let scratch = Scratch::new("gate-lookalike");
+    let path = scratch.config();
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&json!({
+            "backend": "postgres",
+            "store.database_url": crate::secret_seal::seal("postgres://user:pw@host/db")
+                .expect("seal"),
+            "credentials.api_key": crate::secret_seal::seal("sk-live-abcdef0123456789")
+                .expect("seal"),
+            "extract.model": literal,
+        }))
+        .expect("serialize"),
+    )
+    .expect("write a file holding one lookalike envelope");
+
+    let loaded = load_overlay_file(&path).expect("one lookalike value must not refuse the file");
+    assert_eq!(loaded.get("extract.model"), Some(&json!(literal)));
+    assert_eq!(loaded.get("backend"), Some(&json!("postgres")));
+    assert_eq!(
+        loaded.get("store.database_url"),
+        Some(&json!("postgres://user:pw@host/db"))
+    );
+    assert_eq!(
+        loaded.get("credentials.api_key"),
+        Some(&json!("sk-live-abcdef0123456789"))
+    );
+}
+
+#[test]
+fn an_envelope_moved_to_an_ordinary_path_stays_the_opaque_text() {
+    // A copy or a key rename can put an envelope at a path the save never sealed.
+    // Opening it there would hand back a secret the display mask does not cover
+    // for that path, so the stored text is what the overlay carries.
+    test_key::use_key(KEY);
+    let scratch = Scratch::new("gate-moved");
+    let path = scratch.config();
+    let envelope = crate::secret_seal::seal("sk-live-TOPSECRET-9999").expect("seal");
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&json!({ "extract.model": envelope })).expect("serialize"),
+    )
+    .expect("write the moved envelope");
+
+    let loaded = load_overlay_file(&path).expect("a moved envelope loads rather than refusing");
+    assert_eq!(
+        loaded.get("extract.model"),
+        Some(&json!(envelope)),
+        "the overlay must not hold the plaintext the mask would leave readable"
+    );
+}
+
+#[test]
+fn an_envelope_at_a_sealed_path_that_cannot_open_still_refuses_the_file() {
+    // The mirror rule must not soften the failure the sealed paths already have:
+    // a value at a credential path that will not open is a secret nobody can
+    // read, and continuing with the stored text would be worse than stopping.
+    test_key::use_key(KEY);
+    let scratch = Scratch::new("gate-sealed-corrupt");
+    let path = scratch.config();
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&json!({ "credentials.api_key": "sealed:v1:notbase64!" }))
+            .expect("serialize"),
+    )
+    .expect("write a malformed credential envelope");
+
+    let error = load_overlay_file(&path).expect_err("a sealed path that will not open is refused");
+    assert_eq!(error.code, ErrorCode::ConfigCorrupt);
+    assert!(
+        error.message.contains("credentials.api_key"),
+        "the message names the dot-path: {}",
+        error.message
+    );
+}
+
+#[test]
+fn a_file_that_is_not_json_is_refused_and_names_the_parse() {
+    let scratch = Scratch::new("gate-bad-json");
+    let path = scratch.config();
+    fs::write(&path, "{ not json").expect("write a broken file");
+
+    let error = load_overlay_file(&path).expect_err("a broken file must not load");
+    assert_eq!(error.code, ErrorCode::ConfigCorrupt);
+    assert!(
+        error.message.contains("parse error"),
+        "the message names the parse: {}",
+        error.message
+    );
+}
+
+#[test]
+fn a_path_that_cannot_be_read_is_refused() {
+    let scratch = Scratch::new("gate-unreadable");
+    let path = scratch.config();
+    fs::create_dir(&path).expect("a directory at the config path");
+
+    let error = load_overlay_file(&path).expect_err("a directory cannot be read as a file");
+    assert_eq!(error.code, ErrorCode::ConfigCorrupt);
+    assert!(
+        error.message.contains("failed to read"),
+        "the message names the read: {}",
+        error.message
+    );
 }

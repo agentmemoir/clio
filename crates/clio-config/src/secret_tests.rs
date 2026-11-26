@@ -274,6 +274,24 @@ fn value_is_secret_reads_userinfo_credentials_from_the_value() {
 }
 
 #[test]
+fn value_is_secret_reads_a_userinfo_password_that_contains_an_at_sign() {
+    // The userinfo ends at the last `@`, because an `@` is legal inside a
+    // password. Splitting at the first one would read `user@name:REALPASS@host`
+    // as a bare user name and let the password through in the clear.
+    let value = "https://user@name:REALPASS@host";
+    assert!(value_is_secret("extract.url", value));
+    assert_eq!(
+        masked_at_path("extract.url", &json!(value)),
+        json!("[REDACTED]")
+    );
+    // The shapes the rule already handled keep their answer: an empty user and
+    // an empty password are still a userinfo, and a bare user name still is not.
+    assert!(value_is_secret("extract.url", "https://:pass@host/db"));
+    assert!(value_is_secret("extract.url", "https://user:@host/db"));
+    assert!(!value_is_secret("extract.url", "https://user@host/db"));
+}
+
+#[test]
 fn mask_string_secrets_masks_strings_and_keeps_non_strings() {
     // `mask_string_secrets` is the view-safe walk: it masks secret-keyed string
     // leaves but must not rewrite non-string leaves or rename keys, so a numeric
