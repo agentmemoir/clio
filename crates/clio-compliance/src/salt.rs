@@ -54,12 +54,14 @@ const SALT_FINGERPRINT_DOMAIN: &str = "clio-compliance-salt-fingerprint-v1";
 
 /// The deployment tombstone salt for the journal at `journal_path`.
 ///
-/// A non-blank `CLIO_COMPLIANCE_SALT` wins. Otherwise the salt is read from the
-/// owner-only sidecar beside the journal, and generated there on first use.
+/// A `CLIO_COMPLIANCE_SALT` of at least thirty-two bytes wins. Otherwise the
+/// salt is read from the owner-only sidecar beside the journal, and generated
+/// there on first use.
 ///
 /// # Errors
-/// The override is set but blank, the sidecar holds anything but thirty-two
-/// bytes, or the sidecar could not be read, created, or flushed.
+/// The override is set but blank or shorter than thirty-two bytes, the sidecar
+/// holds anything but thirty-two bytes, or the sidecar could not be read,
+/// created, or flushed.
 pub fn tombstone_salt_at(journal_path: &Path) -> Result<Vec<u8>, AmError> {
     resolve_salt(std::env::var(SALT_ENV).ok().as_deref(), journal_path)
 }
@@ -89,8 +91,9 @@ pub fn tombstone_salt_fingerprint_of(salt: &[u8]) -> String {
 /// holds the value never consults the process environment.
 ///
 /// # Errors
-/// The override is set but blank, the sidecar holds anything but thirty-two
-/// bytes, or the sidecar could not be read, created, or flushed.
+/// The override is set but blank or shorter than thirty-two bytes, the sidecar
+/// holds anything but thirty-two bytes, or the sidecar could not be read,
+/// created, or flushed.
 pub(crate) fn resolve_salt(raw: Option<&str>, journal_path: &Path) -> Result<Vec<u8>, AmError> {
     match raw {
         Some(value) => configured_salt(value),
@@ -98,8 +101,9 @@ pub(crate) fn resolve_salt(raw: Option<&str>, journal_path: &Path) -> Result<Vec
     }
 }
 
-/// An operator-supplied salt. A blank value is a configuration mistake rather
-/// than an absent one, so it is refused instead of deferred to the sidecar.
+/// An operator-supplied salt. A blank value, or one shorter than thirty-two
+/// bytes, is a configuration mistake rather than an absent one, so it is
+/// refused instead of deferred to the sidecar.
 fn configured_salt(value: &str) -> Result<Vec<u8>, AmError> {
     if value.trim().is_empty() {
         return Err(AmError::new(
@@ -111,7 +115,20 @@ fn configured_salt(value: &str) -> Result<Vec<u8>, AmError> {
             ),
         ));
     }
-    Ok(value.as_bytes().to_vec())
+    let bytes = value.as_bytes();
+    if bytes.len() < SALT_LEN {
+        return Err(AmError::new(
+            ErrorCode::ConfigCorrupt,
+            format!(
+                "{SALT_ENV} holds {} bytes; at least {SALT_LEN} are required. A salt that short \
+                 is guessable, which makes the subject hash recorded in the erasure journal \
+                 guessable too: set a salt of at least {SALT_LEN} bytes, or unset it to use the \
+                 deployment salt file beside the journal",
+                bytes.len()
+            ),
+        ));
+    }
+    Ok(bytes.to_vec())
 }
 
 /// The salt persisted beside the journal, read or generated on first use.
