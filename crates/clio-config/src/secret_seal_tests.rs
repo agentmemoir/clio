@@ -24,7 +24,7 @@
 //! Keep this file focused on the envelope. Every test here passes an explicit
 //! key, so none of them reads the process cache or the machine's key store.
 
-use super::{AAD, KEY_LEN, SEALED_PREFIX, is_sealed, is_sealed_path, open, seal};
+use super::{AAD, KEY_LEN, SEALED_PREFIX, is_sealed, is_sealed_path, must_seal, open, seal};
 use clio_types::ErrorCode;
 
 /// The key most tests seal under: one random value drawn once per process.
@@ -263,6 +263,63 @@ fn the_sealed_path_list_is_explicit_and_covers_both_targets() {
 
     // The object itself is not a leaf, so it is not a sealed path.
     assert!(!is_sealed_path("credentials"));
+}
+
+#[test]
+fn a_url_with_userinfo_must_be_sealed_at_an_ordinary_path() {
+    // The password travels inside the value, so the path alone would let it
+    // reach the file in the clear.
+    assert!(must_seal("extract.url", "https://user:DUMMY_PASSWORD@host"));
+    assert!(must_seal(
+        "embed.url",
+        "https://user:DUMMY_PASSWORD@host/v1"
+    ));
+    assert!(must_seal("rerank.url", "https://:DUMMY_PASSWORD@host"));
+}
+
+#[test]
+fn a_userinfo_password_that_contains_an_at_sign_must_be_sealed() {
+    // An `@` is legal inside a password, so the userinfo runs to the last one.
+    // Reading it to the first would judge this value an ordinary address and
+    // write the password out in the clear.
+    let value = "https://user@name:REALPASS@host";
+    assert!(must_seal("extract.url", value));
+    assert!(must_seal("embed.url", value));
+    // A user name with no password stays an ordinary address.
+    assert!(!must_seal("extract.url", "https://user@host/v1"));
+}
+
+#[test]
+fn a_sealed_path_must_be_sealed_whatever_its_value() {
+    for value in ["sk-live-1234", "", "https://host/v1", "40"] {
+        assert!(must_seal("store.database_url", value), "{value}");
+        assert!(must_seal("credentials.embed_api_key", value), "{value}");
+    }
+    // An envelope is already sealed, and the rule keeps saying so.
+    assert!(must_seal("credentials.api_key", &seal_with("sk-live-1234")));
+}
+
+#[test]
+fn an_ordinary_value_at_an_ordinary_path_must_not_be_sealed() {
+    for (path, value) in [
+        ("log.level", "debug"),
+        ("extract.url", "https://host/v1"),
+        ("embed.url", "https://user@host"),
+        ("history.lesson_max_tokens", "40"),
+        ("injection.budget_tokens", "2048"),
+        ("reply", "postgres://host/db"),
+    ] {
+        assert!(!must_seal(path, value), "{path} must stay readable");
+    }
+}
+
+#[test]
+fn an_envelope_is_recognised_by_its_prefix() {
+    let sealed = seal_with("sk-envelope-check");
+    assert!(is_sealed(&sealed));
+    assert!(sealed.starts_with(SEALED_PREFIX));
+    assert!(!must_seal("log.level", &sealed), "an envelope is not a URL");
+    assert!(!is_sealed("sk-envelope-check"));
 }
 
 #[test]

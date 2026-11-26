@@ -24,7 +24,11 @@ use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Run one `config` verb against an injected runtime.
-fn run(args: &[&str], runtime: &mut Runtime, is_tty: bool) -> (ExitCode, String, String) {
+pub(super) fn run(
+    args: &[&str],
+    runtime: &mut Runtime,
+    is_tty: bool,
+) -> (ExitCode, String, String) {
     run_group(&ConfigGroup, "config", args, runtime, is_tty)
 }
 
@@ -329,7 +333,7 @@ fn render_use_covers_missing_bank_policy_and_present_diff() {
 }
 
 /// Parse a JSON output line (test helper).
-fn json_of(text: &str) -> Value {
+pub(super) fn json_of(text: &str) -> Value {
     serde_json::from_str(text.trim()).expect("json output")
 }
 
@@ -349,7 +353,7 @@ const TEST_SEAL_KEY: [u8; clio_config::secret_key::KEY_LEN] =
 
 /// A runtime whose deployment overlay lives in a fresh scratch directory, with a
 /// test seal key installed so a secret can be saved and read back.
-fn runtime_with_deployment_file() -> (Runtime, ScratchDir) {
+pub(super) fn runtime_with_deployment_file() -> (Runtime, ScratchDir) {
     clio_config::secret_seal::test_key::use_key(TEST_SEAL_KEY);
     let dir = ScratchDir::new();
     let rt = Runtime::with_env_and_deployment_file(&|_key: &str| None, dir.join("deployment.json"));
@@ -357,7 +361,7 @@ fn runtime_with_deployment_file() -> (Runtime, ScratchDir) {
 }
 
 /// Per-test scratch directory, removed on drop.
-struct ScratchDir(std::path::PathBuf);
+pub(super) struct ScratchDir(std::path::PathBuf);
 
 impl ScratchDir {
     fn new() -> Self {
@@ -369,7 +373,7 @@ impl ScratchDir {
         Self(dir)
     }
 
-    fn join(&self, name: &str) -> std::path::PathBuf {
+    pub(super) fn join(&self, name: &str) -> std::path::PathBuf {
         self.0.join(name)
     }
 }

@@ -80,13 +80,14 @@ pub fn path_is_secret(path: &str) -> bool {
 ///
 /// A URL field is not secret by name: an endpoint with no credentials is an
 /// ordinary address. Only `scheme://user:password@host` puts a secret inside the
-/// value, so only that shape is masked.
+/// value, so only that shape is masked. The userinfo ends at the last `@`,
+/// because an `@` is legal inside a password.
 fn value_has_userinfo_credentials(value: &str) -> bool {
     let Some((_, rest)) = value.split_once("://") else {
         return false;
     };
     let authority = rest.split('/').next().unwrap_or(rest);
-    let Some((userinfo, _)) = authority.split_once('@') else {
+    let Some((userinfo, _)) = authority.rsplit_once('@') else {
         return false;
     };
     userinfo.contains(':')
