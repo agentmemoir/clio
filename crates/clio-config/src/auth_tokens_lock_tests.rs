@@ -110,6 +110,43 @@ fn a_lock_file_that_cannot_be_opened_is_an_internal_refusal_naming_it() {
     let _ = std::fs::remove_file(&blocker);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_symlink_at_the_lock_path_is_refused_and_its_target_is_unchanged() {
+    // A link at the lock path must not hand the hold to whatever it points at.
+    // The open refuses the link, and the file it points at keeps its bytes.
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("am-auth-lock-symlink-{n}"));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let store = dir.join("auth_tokens.json");
+    let victim = dir.join("victim.json");
+    std::fs::write(&victim, b"unchanged").expect("write the victim");
+    let lock_path = lock_file_path(&store);
+    std::os::unix::fs::symlink(&victim, &lock_path).expect("plant the link at the lock path");
+
+    let err = ExclusiveHold::acquire(&store).expect_err("a link at the lock path is refused");
+    assert_eq!(err.code, crate::error::ErrorCode::Internal);
+    assert!(
+        err.message.contains("failed to open the token store lock")
+            && err
+                .message
+                .contains(&lock_path.display().to_string()),
+        "the refusal names the lock file: {err}"
+    );
+    assert_eq!(
+        std::fs::read(&victim).expect("the victim is still readable"),
+        b"unchanged",
+        "the refused open must not write through the link"
+    );
+
+    let _ = std::fs::remove_file(&lock_path);
+    let _ = std::fs::remove_file(&victim);
+    let _ = std::fs::remove_dir(&dir);
+}
+
 #[test]
 fn a_contended_hold_still_reports_its_lock_path() {
     // The refusal path names the lock through the hold it could not take, so
