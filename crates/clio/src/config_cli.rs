@@ -336,3 +336,7 @@ fn render_use(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "config_cli_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "config_cli_seal_tests.rs"]
+mod seal_tests;
