@@ -178,6 +178,16 @@ fn post_json_status_error_has_no_embed_label() {
 }
 
 #[test]
+fn post_json_status_error_hides_response_body() {
+    const SECRET: &str = "sk-live-abc123-response-secret";
+    let server = FakeEmbedServer::spawn_status_with_body(503, SECRET);
+    let err = post_json(&server.url, &json!({"inputs": ["a"]}), FAST, None).unwrap_err();
+    assert_eq!(err.message, "endpoint returned HTTP 503");
+    let text = err.to_string();
+    assert!(!text.contains(SECRET), "response body leaked: {text}");
+}
+
+#[test]
 fn get_ok_status_error_has_no_embed_label() {
     let server = FakeEmbedServer::spawn_status(503);
     let err = get_ok(&server.url, FAST, None).unwrap_err();

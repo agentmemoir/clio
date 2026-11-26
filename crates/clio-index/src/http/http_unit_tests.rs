@@ -170,7 +170,7 @@ fn endpoint_gate_hides_credentials_from_error() {
 #[test]
 fn parse_response_json_hides_body_for_every_error_status() {
     let secret_body = b"token abc123 must not leak";
-    for code in [401_u16, 403, 429, 500, 503] {
+    for code in (100_u16..=599).filter(|code| !(200..300).contains(code)) {
         let err = parse_response_json(code, secret_body).unwrap_err();
         assert_eq!(err.message, format!("endpoint returned HTTP {code}"));
         assert!(!err.message.contains("abc123"), "{err}");
