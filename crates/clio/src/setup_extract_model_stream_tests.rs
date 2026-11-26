@@ -189,15 +189,54 @@ fn a_complete_download_is_renamed_into_place() {
     );
 }
 
-/// Every name in `dest`'s directory that looks like a temporary file, sorted so a
-/// failure reads the same way on a filesystem that returns names in any order.
+/// Passing the check is what earns the destination: a download that matches its
+/// stated length and its published digest replaces the bytes that were already
+/// there, and leaves nothing of its own behind.
+#[test]
+fn a_verified_download_replaces_the_file_already_at_the_destination() {
+    let dir = temp_dir("stream-replaces");
+    let dest = dir.join(GGUF_FILE_NAME);
+    let older = b"an older model this run replaces".to_vec();
+    std::fs::write(&dest, &older).expect("write the file already at the destination");
+    let body = vec![b'z'; 200_000];
+
+    let written = stream_to_file(
+        &mut Cursor::new(body.clone()),
+        &dest,
+        Some(200_000),
+        &digest_of(&body),
+        &mut |_| {},
+    )
+    .expect("a matching body is written");
+
+    assert_eq!(written, 200_000);
+    assert_eq!(
+        std::fs::read(&dest).expect("the model is on disk"),
+        body,
+        "a verified download replaces the bytes that were at the destination"
+    );
+    let parts = part_files_beside(&dest);
+    assert!(
+        parts.is_empty(),
+        "no temporary file is left beside the destination: {parts:?}"
+    );
+}
+
+/// Every entry beside `dest` that has this run's temporary-file shape: the
+/// destination's file name, then the suffix that marks it as half-written. Sorted,
+/// so a failure reads the same way on a filesystem that returns names in any order.
 fn part_files_beside(dest: &Path) -> Vec<String> {
     let dir = dest.parent().expect("the destination has a directory");
+    let dest_name = dest
+        .file_name()
+        .expect("the destination has a file name")
+        .to_string_lossy()
+        .into_owned();
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .expect("read the destination's directory")
         .filter_map(std::result::Result::ok)
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name.contains(".part"))
+        .filter(|name| name.starts_with(&dest_name) && name.strip_suffix(".part").is_some())
         .collect();
     names.sort_unstable();
     names
@@ -246,7 +285,7 @@ fn a_checksum_miss_leaves_the_file_already_at_the_destination_in_place() {
 /// With nothing at the destination, a refused download leaves nothing there
 /// either.
 #[test]
-fn a_checksum_miss_with_no_file_at_the_destination_leaves_it_absent() {
+fn a_checksum_miss_with_no_file_at_the_destination_leaves_no_file_behind() {
     let dir = temp_dir("stream-digest-absent");
     let dest = dir.join(GGUF_FILE_NAME);
     let body = vec![b'z'; 200_000];

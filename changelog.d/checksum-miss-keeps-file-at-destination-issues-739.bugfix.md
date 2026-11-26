@@ -1,1 +1,1 @@
-A failed checksum no longer deletes a file that was already at the model download destination: the download is refused with nothing at the destination changed, and only a download that passes the check replaces the file that was there. [Issue #739](https://github.com/agentmemoir/clio/issues/739)
+A refused model download no longer deletes a file that is at the destination: only the temporary download file is removed, and a file already there is left untouched until a download passes the check and replaces it. [Issue #739](https://github.com/agentmemoir/clio/issues/739)
