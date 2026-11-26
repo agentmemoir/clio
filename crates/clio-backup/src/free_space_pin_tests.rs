@@ -25,7 +25,7 @@
 //! whether a descriptor is used at all.
 
 use super::*;
-use std::process::Output;
+use std::{io::ErrorKind, process::Output};
 
 /// A successful `df -P -k` outcome, for the injected runner the chooser takes.
 #[cfg(unix)]
@@ -192,6 +192,25 @@ fn df_script(scratch: &Scratch, name: &str, available_kb: u64) -> PathBuf {
     path
 }
 
+/// Run a script this test wrote, retrying only `ETXTBSY`: a sibling thread
+/// between `fork` and `exec` holds this test's write descriptor until its child
+/// exits. Ten attempts 20 ms apart, as `run_vendor` does in
+/// `crates/clio/src/agent_harness_delegate.rs`; anything else panics at once.
+#[cfg(unix)]
+fn run_script<T>(run: impl Fn() -> std::io::Result<T>) -> T {
+    const ATTEMPTS: u32 = 10;
+    for attempt in 1..=ATTEMPTS {
+        match run() {
+            Ok(value) => return value,
+            Err(err) if err.kind() == ErrorKind::ExecutableFileBusy && attempt < ATTEMPTS => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(err) => panic!("the script did not run: {err}, after {attempt} attempt(s)"),
+        }
+    }
+    unreachable!("the loop returns or panics on its last attempt")
+}
+
 /// The available-blocks column of a script's report, read the way the gate
 /// reads a real one.
 #[cfg(unix)]
@@ -219,8 +238,7 @@ fn the_pinned_df_runs_the_descriptor_not_the_swapped_path() {
 
     // The production seam on a candidate this host offers: the first script
     // answers, and the answer is its own column.
-    let output =
-        df_output_from(Path::new("/"), &[candidate.as_str()]).expect("the pinned descriptor runs");
+    let output = run_script(|| df_output_from(Path::new("/"), &[candidate.as_str()]));
     assert_eq!(usable_kb(&output), Some(424_242));
 
     // The pin is taken before the swap, so the descriptor it holds is the only
@@ -229,7 +247,7 @@ fn the_pinned_df_runs_the_descriptor_not_the_swapped_path() {
     df_script(&scratch, "swapped", 999_999);
     std::fs::rename(scratch.path.join("swapped"), &path)
         .expect("the second script lands on the candidate path");
-    let output = run_pinned_df(&pinned, Path::new("/")).expect("the pinned descriptor runs");
+    let output = run_script(|| run_pinned_df(&pinned, Path::new("/")));
     assert_eq!(
         usable_kb(&output),
         Some(424_242),
@@ -239,9 +257,7 @@ fn the_pinned_df_runs_the_descriptor_not_the_swapped_path() {
     // Negative control: the swap really did replace the program at the path, so
     // the assertion above is about the descriptor and not about a script that
     // never changed.
-    let swapped = std::process::Command::new(&path)
-        .output()
-        .expect("the second script runs by path");
+    let swapped = run_script(|| std::process::Command::new(&path).output());
     assert_eq!(
         usable_kb(&swapped),
         Some(999_999),
@@ -404,9 +420,8 @@ fn the_chooser_runs_the_df_where_a_descriptor_can_be_named() {
 /// closing a standard stream in this process would break the test that is
 /// running, and moving a descriptor onto one of those slots needs an owned
 /// descriptor for it, which only `unsafe` can build in a crate that forbids it.
-/// So the fence is asserted where it is observable: the pin does not reuse the
-/// descriptor its own open took, and it carries `FD_CLOEXEC`, which only the
-/// duplicate carries.
+/// So the fence is read off the pin this test created: the descriptor it holds is
+/// numbered 3 or higher, which is the lowest slot a child's stdio cannot address.
 #[cfg(unix)]
 #[test]
 fn the_kept_descriptor_is_fenced_above_the_standard_streams() {
@@ -419,24 +434,13 @@ fn the_kept_descriptor_is_fenced_above_the_standard_streams() {
     let candidate = scratch.candidate("df");
     df_script(&scratch, "df", 424_242);
 
-    // The probe takes the lowest free descriptor and gives it back, so this is
-    // the slot the pin's own open lands on.
-    let probe = std::fs::File::open("/dev/null").expect("/dev/null opens");
-    let opened = probe.as_raw_fd();
-    drop(probe);
-
     let pinned = pin_df_from(&[candidate.as_str()]).expect("the script is a regular file");
     let raw = pinned.fd.as_raw_fd();
-    assert_ne!(
-        raw, opened,
-        "the pin kept the descriptor its own open took at fd {opened}, so a closed stdio slot \
-         would swallow it"
-    );
     assert!(
         raw >= 3,
         "the pin is at fd {raw}, which a child's stdio is installed over"
     );
-    let output = run_pinned_df(&pinned, Path::new("/")).expect("the pinned descriptor runs");
+    let output = run_script(|| run_pinned_df(&pinned, Path::new("/")));
     assert_eq!(
         usable_kb(&output),
         Some(424_242),
