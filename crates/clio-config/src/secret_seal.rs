@@ -10,6 +10,7 @@
 //! ## Owns
 //! - The `sealed:v1:` envelope, its nonce, and its authenticated context
 //! - Which config paths are sealed, as an explicit list
+//! - The rule that decides a stored value is sealed, from its path and its value
 //! - The strict read rule: only a sealed envelope opens, and a value with no
 //!   prefix is refused
 //!
@@ -115,6 +116,22 @@ pub fn is_sealed_path(path: &str) -> bool {
         || SEALED_PREFIXES
             .iter()
             .any(|prefix| lower.starts_with(prefix))
+}
+
+/// True when the value stored at `path` must be sealed on disk.
+///
+/// Either half is enough: a path the sealed list names, or a value that carries
+/// a secret wherever it sits — a URL endpoint with userinfo credentials is one,
+/// because the password travels inside the value. Reading the value here is what
+/// keeps a save and the load that follows from disagreeing: a value that is
+/// masked on the way out and readable on disk would be a disclosure nobody was
+/// told about.
+///
+/// A path that is not sealed and a value that carries nothing secret stay
+/// plaintext, which is what keeps ordinary config readable.
+#[must_use]
+pub(crate) fn must_seal(path: &str, value: &str) -> bool {
+    is_sealed_path(path) || crate::secret::value_is_secret(path, value)
 }
 
 /// Seal a plaintext value under the Clio encryption key.

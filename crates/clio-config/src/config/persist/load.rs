@@ -8,7 +8,8 @@
 //!
 //! ## Owns
 //! - Reading flat or nested JSON into an overlay, with missing files empty
-//! - The seal gate: an unsealed string at a sealed path is refused
+//! - The seal gate: an envelope opens at any path, and an unsealed string at a
+//!   sealed path is refused
 //! - The overwrite guard that reads the file once, holds it open, refuses a
 //!   file that no longer loads, and refuses to replace a different entry or a
 //!   symbolic link at the path
@@ -37,13 +38,13 @@ use std::path::Path;
 
 /// Load a flat `{ "dot.path": value, ... }` or nested JSON object into an overlay.
 ///
-/// Missing files yield an empty overlay (not an error). Every value at a
-/// sealed path must be a sealed envelope and is opened, so the overlay a
-/// caller receives holds plaintext and the rest of the runtime needs no
-/// knowledge of the envelope. An unsealed string at a sealed path is refused:
-/// the file was hand-edited or written by something other than the save path,
-/// and reading it would accept a plaintext secret. Values at ordinary paths
-/// come back unchanged, which is what keeps plain config plain.
+/// Missing files yield an empty overlay (not an error). Every sealed envelope is
+/// opened wherever it sits, so the overlay a caller receives holds plaintext and
+/// the rest of the runtime needs no knowledge of the envelope. An unsealed string
+/// at a sealed path is refused: the file was hand-edited or written by something
+/// other than the save path, and reading it would accept a plaintext secret.
+/// Values at ordinary paths come back unchanged, which is what keeps plain config
+/// plain.
 ///
 /// # Errors
 /// I/O or JSON parse failures, an unsealed value at a sealed path, or a sealed
@@ -259,21 +260,24 @@ fn parse_overlay(text: &str, path: &Path) -> Result<Overlay, AmError> {
 /// Open every sealed value in a freshly loaded overlay, and refuse an
 /// unsealed string at a sealed path.
 ///
-/// The gate is the path policy, not the value: a value the overlay places at a
-/// path [`secret_seal::is_sealed_path`] names must carry the envelope prefix.
-/// A failure names the file and the dot-path, and never the value: a
-/// half-opened overlay would hand a consumer a sealed string where it expects
-/// a secret, and the caller has to stop rather than continue with that.
+/// Two rules, one gate. An envelope opens wherever it sits, so a value the save
+/// sealed because of what it holds — a URL with userinfo credentials — comes back
+/// readable at the path it was written to. A stored string that is not an
+/// envelope is refused when [`secret_seal::is_sealed_path`] names its path, and
+/// otherwise left alone as plain config. A failure names the file and the
+/// dot-path, and never the value: a half-opened overlay would hand a consumer a
+/// sealed string where it expects a secret, and the caller has to stop rather
+/// than continue with that.
 fn open_sealed(overlay: &mut Overlay, path: &Path) -> Result<(), AmError> {
     let paths: Vec<String> = overlay.keys().cloned().collect();
     for key in paths {
         let Some(stored) = overlay.get(&key).and_then(Value::as_str) else {
             continue;
         };
-        if !secret_seal::is_sealed_path(&key) {
-            continue;
-        }
         if !secret_seal::is_sealed(stored) {
+            if !secret_seal::is_sealed_path(&key) {
+                continue;
+            }
             return Err(unsealed_failure(&key, path));
         }
         let opened = secret_seal::open(stored).map_err(|err| {

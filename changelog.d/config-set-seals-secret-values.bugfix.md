@@ -1,0 +1,3 @@
+`clio config set` now seals a value on disk whenever the value itself carries a secret, not only when the config path is one Clio stores sealed. Setting an endpoint such as `extract.url`, `embed.url`, or `rerank.url` to a URL with userinfo credentials used to print the value as `[REDACTED]` while writing the password into the deployment config file in the clear; the file now holds the same sealed envelope any other secret gets, and the value reads back unchanged.
+
+A saved envelope is now opened on load wherever it sits, so the sealed value at an ordinary path reads back normally and the existing refusal of a plaintext secret at a path Clio stores sealed is unchanged.

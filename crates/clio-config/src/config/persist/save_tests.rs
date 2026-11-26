@@ -10,10 +10,13 @@
 //! - A save that refuses a deployment file the check did not judge
 //! - A save that replaces the file it judged
 //! - No temp file left after a refusal
+//! - The stored bytes of a save: a secret value sealed, an ordinary one plain,
+//!   and a sealed value that opens back after a reload
 //!
 //! ## Does not own
 //! - Production save logic under test
 //! - The overwrite check itself (see `load_tests`)
+//! - The load-side refusal shapes (see `seal_gate_tests`)
 //! - The shared atomic writer (see `write_tests`)
 //!
 //! ## Boundary
@@ -21,11 +24,24 @@
 //! Changes to what the checked save accepts or writes should normally update
 //! tests here. Changes to the check alone should not.
 //!
-//! Keep this module focused on the checked save.
+//! Keep this module focused on the save and the bytes it writes.
 
 use super::super::load::check_overwritable;
 use super::*;
+use crate::secret_seal::test_key;
 use std::path::PathBuf;
+
+/// The key the sealing tests here write and read under.
+const KEY: [u8; crate::secret_key::KEY_LEN] = [0x5a; crate::secret_key::KEY_LEN];
+
+/// A URL whose userinfo carries the password a user pasted into it.
+const USERINFO_URL: &str = "https://user:DUMMY_PASSWORD@host";
+
+/// The JSON the save wrote to `path`.
+fn saved_file(path: &Path) -> Value {
+    serde_json::from_str(&fs::read_to_string(path).expect("read the saved file"))
+        .expect("the saved file is JSON")
+}
 
 /// A scratch directory that cleans itself up when the guard drops.
 struct Scratch(PathBuf);
@@ -198,5 +214,149 @@ fn checked_save_refuses_a_symlink_entry_and_leaves_its_target() {
         fs::read_to_string(&target).expect("read"),
         r#"{"log.level":"info"}"#,
         "the link target must keep its bytes"
+    );
+}
+
+#[test]
+fn a_url_with_userinfo_is_sealed_at_a_path_that_is_not_sealed() {
+    test_key::use_key(KEY);
+    let scratch = Scratch::new("userinfo");
+    let path = scratch.config();
+
+    save_overlay_file(&path, &overlay(&[("extract.url", USERINFO_URL)])).expect("save");
+
+    let text = fs::read_to_string(&path).expect("read");
+    assert!(
+        !text.contains("DUMMY_PASSWORD"),
+        "the password reached the file: {text}"
+    );
+    let Value::String(sealed) = saved_file(&path)["extract.url"].clone() else {
+        panic!("the stored value is a string");
+    };
+    assert!(
+        crate::secret_seal::is_sealed(&sealed),
+        "the stored value is an envelope: {sealed}"
+    );
+}
+
+#[test]
+fn a_plain_value_at_a_path_that_is_not_sealed_stays_plaintext() {
+    test_key::use_key(KEY);
+    let scratch = Scratch::new("plain");
+    let path = scratch.config();
+
+    save_overlay_file(
+        &path,
+        &overlay(&[("extract.url", "https://host/v1"), ("log.level", "debug")]),
+    )
+    .expect("save");
+
+    let saved = saved_file(&path);
+    assert_eq!(saved["extract.url"], Value::from("https://host/v1"));
+    assert_eq!(saved["log.level"], Value::from("debug"));
+}
+
+#[test]
+fn a_saved_url_with_userinfo_opens_back_after_a_reload() {
+    test_key::use_key(KEY);
+    let scratch = Scratch::new("userinfo-round-trip");
+    let path = scratch.config();
+
+    save_overlay_file(
+        &path,
+        &overlay(&[("extract.url", USERINFO_URL), ("log.level", "debug")]),
+    )
+    .expect("save");
+    let reloaded =
+        super::super::load_overlay_file(&path).expect("an envelope at an ordinary path reloads");
+
+    assert_eq!(
+        reloaded.get("extract.url"),
+        Some(&Value::from(USERINFO_URL)),
+        "the round trip returns the value that was set"
+    );
+    assert_eq!(reloaded.get("log.level"), Some(&Value::from("debug")));
+}
+
+#[test]
+fn saving_an_overlay_that_already_holds_an_envelope_does_not_seal_it_again() {
+    test_key::use_key(KEY);
+    let scratch = Scratch::new("envelope-passthrough");
+    let path = scratch.config();
+    save_overlay_file(&path, &overlay(&[("extract.url", USERINFO_URL)])).expect("first save");
+    let Value::String(envelope) = saved_file(&path)["extract.url"].clone() else {
+        panic!("the stored value is a string");
+    };
+
+    save_overlay_file(&path, &overlay(&[("extract.url", &envelope)])).expect("second save");
+
+    assert_eq!(
+        saved_file(&path)["extract.url"],
+        Value::from(envelope),
+        "an envelope is written through rather than wrapped a second time"
+    );
+    assert_eq!(
+        super::super::load_overlay_file(&path)
+            .expect("reload")
+            .get("extract.url"),
+        Some(&Value::from(USERINFO_URL)),
+        "one open returns the value the user set"
+    );
+}
+
+#[test]
+fn a_non_string_value_keeps_its_type_and_its_path() {
+    test_key::use_key(KEY);
+    let scratch = Scratch::new("non-string");
+    let path = scratch.config();
+    let mut pairs = overlay(&[("extract.url", USERINFO_URL)]);
+    pairs.insert("extract.temperature".into(), Value::from(0.5));
+
+    save_overlay_file(&path, &pairs).expect("save");
+
+    let saved = saved_file(&path);
+    assert_eq!(saved["extract.temperature"], Value::from(0.5));
+    assert!(
+        !serde_json::to_string(&saved["extract.url"])
+            .expect("serialize")
+            .contains("DUMMY_PASSWORD"),
+        "the string beside it is still sealed"
+    );
+}
+
+#[test]
+fn save_reports_a_parent_that_cannot_be_created() {
+    let scratch = Scratch::new("blocked-parent");
+    let blocker = scratch.0.join("blocker");
+    fs::write(&blocker, "x").expect("blocker");
+
+    let err = save_overlay_file(
+        &blocker.join("child.json"),
+        &overlay(&[("log.level", "debug")]),
+    )
+    .expect_err("a file cannot hold a directory");
+
+    assert_eq!(err.code, ErrorCode::Internal);
+    assert!(
+        err.message.contains("failed to create"),
+        "the message names the step that failed: {}",
+        err.message
+    );
+}
+
+#[test]
+fn save_reports_a_write_that_fails() {
+    let scratch = Scratch::new("write-fails");
+    let path = scratch.config();
+    fs::create_dir(&path).expect("a directory at the config path");
+
+    let err = save_overlay_file(&path, &overlay(&[("log.level", "debug")]))
+        .expect_err("a directory cannot be replaced by a file");
+
+    assert_eq!(err.code, ErrorCode::Internal);
+    assert!(
+        err.message.contains("failed to write deployment config"),
+        "the message names the step that failed: {}",
+        err.message
     );
 }

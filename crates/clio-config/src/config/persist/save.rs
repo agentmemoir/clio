@@ -8,6 +8,7 @@
 //!
 //! ## Owns
 //! - The one serialization point, where a secret becomes unreadable on the way out
+//! - Asking the sealing rule about each value, path and value together
 //! - Refusing to write a sealed value in plaintext
 //! - The stable flat-file shape a reload expects
 //! - The checked save, which asks the guard to confirm the judged file just
@@ -99,18 +100,23 @@ fn sealed_text(path: &Path, overlay: &Overlay) -> Result<String, AmError> {
     Ok(serde_json::to_string_pretty(&Value::Object(map)).expect("serialize overlay"))
 }
 
-/// The stored form of one overlay value: sealed when the path calls for it.
+/// The stored form of one overlay value: sealed when the rule calls for it.
+///
+/// The rule reads the value as well as the path, so a URL whose userinfo carries
+/// a password is sealed wherever a user sets it, and not only under a path on the
+/// sealed list. A value that is already an envelope passes through, which is what
+/// keeps a second save of one overlay from sealing the same text twice.
 ///
 /// # Errors
 /// The value cannot be sealed, which includes the Clio encryption key not being
 /// loadable. The message names the path and never the value.
 fn seal_value(path: &str, value: &Value, file: &Path) -> Result<Value, AmError> {
-    if !secret_seal::is_sealed_path(path) {
-        return Ok(value.clone());
-    }
     let Some(plain) = value.as_str() else {
         return Ok(value.clone());
     };
+    if !secret_seal::must_seal(path, plain) {
+        return Ok(value.clone());
+    }
     secret_seal::seal(plain).map(Value::String).map_err(|err| {
         AmError::new(
             err.code,
