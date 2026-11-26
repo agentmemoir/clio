@@ -39,9 +39,11 @@
 //! # Why a constant authenticated context, not the config path
 //!
 //! The authenticated context is the constant `clio-secret-seal-v1`, not the
-//! dot-path. Moving a secret from one path to another is a real future need, and
-//! binding the path would turn a readable secret into a permanent error the
-//! moment it moved.
+//! dot-path. Moving a secret between two paths that are both sealed is a real
+//! need, and binding the path would turn a readable secret into a permanent
+//! error the moment it moved. Which path an envelope opens at is decided by
+//! `must_seal` on the opened plaintext when an overlay file is read, not by
+//! the authenticated context.
 //!
 //! # Why a blank value is sealed too
 //!
@@ -96,7 +98,9 @@ thread_local! {
 /// True when a stored value is a sealed envelope.
 ///
 /// This is what decides whether [`open`] accepts a value at all. It looks at
-/// the value, never at the path, so a secret that moved keeps opening.
+/// the value, never at the path; the reader that walks an overlay file decides
+/// with `must_seal` whether the opened plaintext belongs at the path it sits
+/// at, so an envelope moved to a path Clio does not seal there stays opaque.
 #[must_use]
 pub fn is_sealed(value: &str) -> bool {
     value.starts_with(SEALED_PREFIX)

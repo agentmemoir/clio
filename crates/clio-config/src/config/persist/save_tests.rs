@@ -325,6 +325,54 @@ fn a_non_string_value_keeps_its_type_and_its_path() {
 }
 
 #[test]
+fn a_url_with_a_password_containing_an_at_sign_is_sealed() {
+    // The userinfo ends at the last `@`, so a password that contains one is
+    // still a password and the value is still a secret.
+    test_key::use_key(KEY);
+    let scratch = Scratch::new("userinfo-at");
+    let path = scratch.config();
+
+    save_overlay_file(
+        &path,
+        &overlay(&[("extract.url", "https://user@name:REALPASS@host")]),
+    )
+    .expect("save");
+
+    let text = fs::read_to_string(&path).expect("read");
+    assert!(
+        !text.contains("REALPASS"),
+        "the password reached the file: {text}"
+    );
+    let Value::String(sealed) = saved_file(&path)["extract.url"].clone() else {
+        panic!("the stored value is a string");
+    };
+    assert!(
+        crate::secret_seal::is_sealed(&sealed),
+        "the stored value is an envelope: {sealed}"
+    );
+}
+
+#[test]
+fn a_text_that_only_looks_like_an_envelope_is_written_and_read_back_verbatim() {
+    // The value carries nothing secret, so the save writes it as the plain
+    // string the user typed, and the load hands the same string back.
+    test_key::use_key(KEY);
+    let scratch = Scratch::new("lookalike");
+    let path = scratch.config();
+    let literal = "sealed:v1:notarealenvelope";
+
+    save_overlay_file(&path, &overlay(&[("extract.model", literal)])).expect("save");
+
+    assert_eq!(saved_file(&path)["extract.model"], Value::from(literal));
+    assert_eq!(
+        super::super::load_overlay_file(&path)
+            .expect("a lookalike value at an ordinary path reloads")
+            .get("extract.model"),
+        Some(&Value::from(literal))
+    );
+}
+
+#[test]
 fn save_reports_a_parent_that_cannot_be_created() {
     let scratch = Scratch::new("blocked-parent");
     let blocker = scratch.0.join("blocker");

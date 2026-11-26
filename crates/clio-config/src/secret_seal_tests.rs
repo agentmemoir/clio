@@ -278,6 +278,18 @@ fn a_url_with_userinfo_must_be_sealed_at_an_ordinary_path() {
 }
 
 #[test]
+fn a_userinfo_password_that_contains_an_at_sign_must_be_sealed() {
+    // An `@` is legal inside a password, so the userinfo runs to the last one.
+    // Reading it to the first would judge this value an ordinary address and
+    // write the password out in the clear.
+    let value = "https://user@name:REALPASS@host";
+    assert!(must_seal("extract.url", value));
+    assert!(must_seal("embed.url", value));
+    // A user name with no password stays an ordinary address.
+    assert!(!must_seal("extract.url", "https://user@host/v1"));
+}
+
+#[test]
 fn a_sealed_path_must_be_sealed_whatever_its_value() {
     for value in ["sk-live-1234", "", "https://host/v1", "40"] {
         assert!(must_seal("store.database_url", value), "{value}");
