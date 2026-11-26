@@ -1,0 +1,1 @@
+The directory Clio creates for its configuration and state files is now created owner-only in one step, so a local user who can write the parent can no longer swap a directory in between the create and the mode change and keep the wider mode. A directory that already exists keeps the mode it had, so a mode an operator chose is not overridden by a later write.

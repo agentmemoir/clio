@@ -215,7 +215,7 @@ pub fn restrict_dir(_path: &Path) {}
 /// A component is a file, a component is not a directory, or the caller lacks
 /// permission to create the directory.
 #[cfg(unix)]
-pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
+pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
     fs::DirBuilder::new()
         .recursive(true)
@@ -229,7 +229,7 @@ pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
 /// A component is a file, or the caller lacks permission to create the
 /// directory.
 #[cfg(not(unix))]
-pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
+pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
     fs::create_dir_all(path)
 }
 

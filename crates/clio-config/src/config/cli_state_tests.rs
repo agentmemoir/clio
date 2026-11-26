@@ -3,86 +3,33 @@
 //
 //! # Responsibility
 //!
-//! This module tests the durable CLI state file: path resolution, the ranking
+//! This module tests the durable CLI state file's path resolution, its ranking
 //! round trip across two `Runtime` boots, the missing and corrupt cases, and
-//! what a hand-written file may and may not restore.
+//! the permissions of the directory a flush creates.
 //!
 //! ## Owns
-//! - Behavior tests for the CLI state file and its `Runtime` hooks
-//! - Behavior tests for the checks a loaded overlay entry has to pass
+//! - Behavior tests for path resolution and the ranking round trip
+//! - Behavior tests for what a flush does and does not write
+//! - Behavior tests for the mode of the directory the state file lands in
 //!
 //! ## Does not own
 //! - The implementation under test (`cli_state`)
-//! - The path and value rules themselves (see `validate`)
+//! - What a hand-written file may restore (see `restore_tests`)
+//! - The shared scaffolding these tests use (see `cli_state_test_support`)
 //! - Ranking weight math (see `crate::ranking`)
 //!
 //! ## Boundary
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::*;
-use crate::ranking::RankingEnvPatch;
-use crate::{config::ConfigScope, error::ToolResult};
+use super::cli_state_test_support::{Scratch, boot, ranking_of, set_and_flush, theta_patch};
+use super::{Runtime, resolve_cli_state_path, resolve_cli_state_path_with};
+use crate::config::ConfigScope;
+use crate::error::ToolResult;
+use crate::ranking::RankingEnv;
 use serde_json::json;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-/// Per-test scratch directory, removed on drop and unique by process and order.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new() -> Self {
-        static SEQ: AtomicU64 = AtomicU64::new(0);
-        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("clio-cli-state-{}-{seq}", std::process::id()));
-        fs::create_dir_all(&dir).expect("create scratch dir");
-        Self(dir)
-    }
-
-    fn state_file(&self) -> PathBuf {
-        self.0.join(CLI_STATE_FILE_NAME)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-/// A patch that changes only the admission threshold.
-fn theta_patch(theta: f64) -> RankingEnvPatch {
-    RankingEnvPatch {
-        theta_admit: Some(theta),
-        ..RankingEnvPatch::default()
-    }
-}
-
-/// Boot a runtime over `path` with no host environment and no deployment overlay.
-fn boot(path: PathBuf) -> Runtime {
-    Runtime::with_env_and_cli_state_file(&|_key: &str| None, path)
-}
-
-/// The ranking environment a runtime reports.
-fn ranking_of(rt: &Runtime) -> RankingEnv {
-    let ToolResult::Ok { data, .. } = rt.ranking_env_get() else {
-        panic!("ranking_env_get must succeed");
-    };
-    data
-}
-
-/// Set `theta_admit` on a runtime, both in memory and on disk.
-fn set_and_flush(rt: &mut Runtime, theta: f64) {
-    let ToolResult::Ok { data, .. } = rt.ranking_env_set(&theta_patch(theta), false) else {
-        panic!("ranking_env_set must succeed");
-    };
-    assert!(data.applied, "a non-dry-run set applies in memory");
-    let flushed = rt.flush_cli_state().expect("flush");
-    assert!(flushed.written(), "flush must write");
-    assert!(
-        flushed.dropped().is_empty(),
-        "a ranking flush drops nothing"
-    );
-}
+use std::fs;
+use std::path::PathBuf;
 
 #[test]
 fn explicit_path_wins_and_the_default_hangs_off_the_config_dir() {
@@ -216,235 +163,48 @@ fn a_profile_url_with_userinfo_is_not_saved_in_clear() {
     }
 }
 
-/// The profile an `effective_raw` read reports as active.
-fn active_of(rt: &Runtime) -> Option<String> {
-    rt.effective_raw()
-        .pointer("/profile/active")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-}
-
-/// The `log.level` a runtime's effective config carries.
-fn log_level_of(rt: &Runtime) -> Value {
-    rt.effective_raw()
-        .pointer("/log/level")
-        .cloned()
-        .unwrap_or(Value::Null)
-}
-
+/// A flush that creates the state file's directory makes it owner-only, so the
+/// state file never lands in a directory another account can list or write.
+#[cfg(unix)]
 #[test]
-fn a_later_boot_reports_the_profile_and_profile_value_a_flush_saved() {
+fn a_flush_creates_the_state_directory_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
     let scratch = Scratch::new();
-    let path = scratch.state_file();
+    let parent = scratch.path().join("config");
+    let path = parent.join(super::CLI_STATE_FILE_NAME);
 
-    let mut first = boot(path.clone());
-    let ToolResult::Ok { .. } = first.config_profile_apply("coding_local") else {
-        panic!("the profile applies");
-    };
-    let ToolResult::Ok { .. } = first.config_set("log.level", json!("debug"), ConfigScope::Profile)
-    else {
-        panic!("a profile-scoped set applies once a profile is active");
-    };
-    // An explicit ranking set wins over the profile's own ranking.
-    set_and_flush(&mut first, 0.61);
+    let flushed = boot(path).flush_cli_state().expect("flush");
 
-    let second = boot(path);
-    assert_eq!(active_profile_of(&second).as_deref(), Some("coding_local"));
-    assert_eq!(active_of(&second).as_deref(), Some("coding_local"));
-    assert_eq!(log_level_of(&second), json!("debug"));
-    assert!((ranking_of(&second).theta_admit - 0.61).abs() < 1e-9);
+    assert!(flushed.written(), "the flush creates the file and its dir");
+    let mode = fs::metadata(&parent).expect("meta").permissions().mode();
+    assert_eq!(
+        mode & 0o777,
+        0o700,
+        "a created state directory must be owner-only, got {mode:o}"
+    );
 }
 
+/// A directory that a flush finds already present keeps the mode it had: the
+/// owner-only rule applies to creation, and a pre-existing wider mode is the
+/// operator's choice rather than something a write silently overrides.
+#[cfg(unix)]
 #[test]
-fn a_persisted_profile_that_no_longer_exists_is_skipped() {
+fn a_flush_leaves_an_existing_state_directory_mode_unchanged() {
+    use std::os::unix::fs::PermissionsExt;
     let scratch = Scratch::new();
-    let path = scratch.state_file();
-    let mut ranking = serde_json::to_value(RankingEnv::system_defaults()).expect("serialize");
-    ranking["theta_admit"] = json!(0.61);
-    let saved = json!({
-        "active_profile": "a_profile_that_was_removed",
-        "profile_overlay": {"log.level": "debug"},
-        "ranking": ranking,
-    });
-    fs::write(
-        &path,
-        serde_json::to_string(&saved).expect("serialize state"),
-    )
-    .expect("write state");
+    let parent = scratch.path().join("config");
+    fs::create_dir_all(&parent).expect("dir");
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o750)).expect("mode");
 
-    let rt = boot(path);
+    let flushed = boot(parent.join(super::CLI_STATE_FILE_NAME))
+        .flush_cli_state()
+        .expect("flush");
+
+    assert!(flushed.written(), "the flush writes into the existing dir");
+    let mode = fs::metadata(&parent).expect("meta").permissions().mode();
     assert_eq!(
-        active_of(&rt),
-        None,
-        "an unknown profile leaves no active one"
-    );
-    assert!(
-        (ranking_of(&rt).theta_admit - 0.61).abs() < 1e-9,
-        "the rest of the state still loads"
-    );
-    // A runtime with no state file at all: the comparison the stale profile needs.
-    let default_level = log_level_of(&boot(scratch.0.join("absent.json")));
-    assert_eq!(
-        log_level_of(&rt),
-        default_level,
-        "a vanished profile's overlay is not applied"
-    );
-}
-
-/// The active profile `config_profiles` reports.
-fn active_profile_of(rt: &Runtime) -> Option<String> {
-    let ToolResult::Ok { data, .. } = rt.config_profiles() else {
-        panic!("config_profiles must succeed");
-    };
-    data.active
-}
-
-/// Write a state file carrying `overlay`, under the profile that overlay
-/// belongs to, so the restore path actually applies it.
-fn write_overlay_state(path: &Path, overlay: &Value) {
-    let saved = json!({
-        "active_profile": "coding_local",
-        "profile_overlay": overlay,
-    });
-    fs::write(
-        path,
-        serde_json::to_string(&saved).expect("serialize state"),
-    )
-    .expect("write state");
-}
-
-/// The effective value at `pointer`, for comparing a loaded file with a boot
-/// that had no file at all.
-fn value_at(rt: &Runtime, pointer: &str) -> Value {
-    rt.effective_raw()
-        .pointer(pointer)
-        .cloned()
-        .unwrap_or(Value::Null)
-}
-
-/// A file that carries a gate key, a packaging claim, or a secret path must not
-/// reach the effective config through the overlay: `config set` refuses those
-/// paths, and this file is not sealed.
-#[test]
-fn a_forbidden_or_secret_overlay_entry_is_not_restored_from_the_file() {
-    let scratch = Scratch::new();
-    let path = scratch.state_file();
-    write_overlay_state(
-        &path,
-        &json!({
-            "gates.admission_enabled": false,
-            "gates.admission.enabled": false,
-            "fr10_satisfied": true,
-            "credentials.api_key": "sk-handwritten-0123456789",
-            "log.level": "debug",
-        }),
-    );
-
-    let rt = boot(path);
-    let baseline = boot(scratch.0.join("absent.json"));
-    assert_eq!(
-        value_at(&rt, "/gates/admission_enabled"),
-        value_at(&baseline, "/gates/admission_enabled"),
-        "a forbidden gate path leaves the default in place"
-    );
-    assert_eq!(
-        value_at(&rt, "/gates/admission/enabled"),
-        Value::Null,
-        "a forbidden gate path is not created at all"
-    );
-    assert_eq!(
-        value_at(&rt, "/fr10_satisfied"),
-        value_at(&baseline, "/fr10_satisfied"),
-        "a packaging claim cannot be written through the file"
-    );
-    assert_eq!(
-        value_at(&rt, "/credentials/api_key"),
-        Value::Null,
-        "the unsealed file must never carry a secret"
-    );
-    assert_eq!(
-        value_at(&rt, "/log/level"),
-        json!("debug"),
-        "the valid entry beside them still loads"
-    );
-}
-
-/// A well-allowlisted key with a value of the wrong type is dropped, and the
-/// rest of the overlay still applies.
-#[test]
-fn a_wrong_typed_overlay_value_is_dropped_and_the_valid_entry_loads() {
-    let scratch = Scratch::new();
-    let path = scratch.state_file();
-    write_overlay_state(
-        &path,
-        &json!({
-            "history.default_limit": "many",
-            "log.level": "debug",
-        }),
-    );
-
-    let rt = boot(path);
-    let baseline = boot(scratch.0.join("absent.json"));
-    assert_eq!(
-        value_at(&rt, "/history/default_limit"),
-        value_at(&baseline, "/history/default_limit"),
-        "a wrong-typed value leaves the default in place"
-    );
-    assert_eq!(
-        value_at(&rt, "/log/level"),
-        json!("debug"),
-        "the valid entry beside it still loads"
-    );
-}
-
-/// A ranking object that predates a knob still restores the values it carries
-/// instead of being thrown away whole.
-#[test]
-fn a_saved_ranking_env_missing_a_group_still_loads_from_the_file() {
-    let scratch = Scratch::new();
-    let path = scratch.state_file();
-    let mut ranking = serde_json::to_value(RankingEnv::system_defaults()).expect("serialize");
-    ranking["theta_admit"] = json!(0.61);
-    ranking
-        .as_object_mut()
-        .expect("the ranking env is an object")
-        .remove("maintenance_triggers");
-    fs::write(
-        &path,
-        serde_json::to_string(&json!({ "ranking": ranking })).expect("serialize state"),
-    )
-    .expect("write state");
-
-    let restored = ranking_of(&boot(path));
-    assert!(
-        (restored.theta_admit - 0.61).abs() < 1e-9,
-        "the present value survives: {restored:?}"
-    );
-    assert_eq!(
-        restored.maintenance_triggers,
-        RankingEnv::system_defaults().maintenance_triggers,
-        "the omitted group falls back to its default"
-    );
-}
-
-#[test]
-fn a_persisted_profile_outranks_the_environment_log_level_at_boot() {
-    let scratch = Scratch::new();
-    let path = scratch.state_file();
-    let mut first = boot(path.clone());
-    let ToolResult::Ok { .. } = first.config_profile_apply("coding_local") else {
-        panic!("the profile applies");
-    };
-    assert!(first.flush_cli_state().expect("flush").written());
-
-    let second = Runtime::with_env_and_cli_state_file(
-        &|key: &str| (key == "CLIO_LOG_LEVEL").then(|| "trace".to_owned()),
-        path,
-    );
-    let profile = lookup_profile("coding_local").expect("coding_local exists");
-    assert_eq!(
-        log_level_of(&second),
-        json!(profile.log_level),
-        "the restored profile's log.level wins over CLIO_LOG_LEVEL"
+        mode & 0o777,
+        0o750,
+        "an existing state directory keeps its mode, got {mode:o}"
     );
 }
