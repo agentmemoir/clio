@@ -131,9 +131,7 @@ fn a_symlink_at_the_lock_path_is_refused_and_its_target_is_unchanged() {
     assert_eq!(err.code, crate::error::ErrorCode::Internal);
     assert!(
         err.message.contains("failed to open the token store lock")
-            && err
-                .message
-                .contains(&lock_path.display().to_string()),
+            && err.message.contains(&lock_path.display().to_string()),
         "the refusal names the lock file: {err}"
     );
     assert_eq!(
