@@ -270,3 +270,58 @@ fn failed_rename_removes_the_temp_file() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[cfg(unix)]
+#[test]
+fn create_private_dir_makes_every_new_level_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tmp("private-nested");
+    let nested = root.join("a").join("b");
+
+    create_private_dir(&nested).expect("create");
+
+    for dir in [&root, &root.join("a"), &nested] {
+        let mode = fs::metadata(dir).expect("meta").permissions().mode();
+        assert_eq!(
+            mode & 0o077,
+            0,
+            "{} must be owner-only: {mode:o}",
+            dir.display()
+        );
+    }
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn create_private_dir_keeps_an_existing_directory_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tmp("private-keep");
+    fs::create_dir_all(&dir).expect("dir");
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("mode");
+
+    create_private_dir(&dir).expect("create");
+
+    let mode = fs::metadata(&dir).expect("meta").permissions().mode();
+    assert_eq!(mode & 0o777, 0o755, "an existing directory keeps its mode");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn create_private_dir_refuses_a_path_that_is_a_file() {
+    let dir = tmp("private-file");
+    fs::create_dir_all(&dir).expect("dir");
+    let file = dir.join("file");
+    fs::write(&file, "x").expect("file");
+
+    assert!(
+        create_private_dir(&file).is_err(),
+        "an existing file is not a directory"
+    );
+    assert!(
+        create_private_dir(&file.join("child")).is_err(),
+        "a file cannot hold a child directory"
+    );
+    assert_eq!(fs::read_to_string(&file).expect("read"), "x");
+    let _ = fs::remove_dir_all(&dir);
+}

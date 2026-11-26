@@ -39,6 +39,7 @@ mod validate_set;
 mod tests;
 
 pub use env::bearer_for_effective;
+pub(crate) use persist::create_private_dir;
 pub use persist::{
     DEPLOYMENT_CONFIG_ENV, DEPLOYMENT_CONFIG_FILE_NAME, backup_config_file, default_config_dir,
     resolve_deployment_path, restrict_dir, write_private_atomic,

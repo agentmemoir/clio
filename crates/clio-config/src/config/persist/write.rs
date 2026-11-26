@@ -14,6 +14,7 @@
 //! - The pre-rename check that refuses to replace a different entry at the
 //!   target path
 //! - `restrict_dir`, the owner-only directory rule
+//! - `create_private_dir`, which makes a missing directory owner-only
 //!
 //! ## Does not own
 //! - What is written into the file (see `save`)
@@ -205,6 +206,32 @@ pub fn restrict_dir(path: &Path) {
 
 #[cfg(not(unix))]
 pub fn restrict_dir(_path: &Path) {}
+
+/// Create `path` and any missing parent, owner-only on Unix. The mode is set
+/// by the `mkdir` call itself, so no later path lookup can be swapped for a
+/// different directory. An existing directory keeps its mode.
+///
+/// # Errors
+/// A component is a file, a component is not a directory, or the caller lacks
+/// permission to create the directory.
+#[cfg(unix)]
+pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
+}
+
+/// Non-Unix platforms have no mode bits, so this creates the directory only.
+///
+/// # Errors
+/// A component is a file, or the caller lacks permission to create the
+/// directory.
+#[cfg(not(unix))]
+pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(path)
+}
 
 #[cfg(test)]
 #[path = "write_tests.rs"]
