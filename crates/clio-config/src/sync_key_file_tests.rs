@@ -351,7 +351,7 @@ fn a_sidecar_symlink_never_supplies_the_creation_time() {
     let dir = TempDir::new("created-is-link");
     let marker = "2030-12-31T23:59:59Z";
     let target = dir.join("marker");
-    fs::write(&target, marker).expect("marker");
+    seed(&target, marker.as_bytes());
     let sidecar = sidecar_path(Some(&dir.key())).expect("path");
     symlink(&target, &sidecar).expect("a link where the record goes");
 
@@ -369,6 +369,49 @@ fn a_sidecar_symlink_never_supplies_the_creation_time() {
         "the refusal names the sidecar: {}",
         err.message
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_group_readable_sidecar_is_refused_as_not_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("created-readable");
+    let sidecar = sidecar_path(Some(&dir.key())).expect("path");
+    seed(&sidecar, b"2030-12-31T23:59:59Z");
+    fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o644)).expect("chmod");
+    let err = read_created(Some(&dir.key())).expect_err("not owner-only");
+
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
+    assert!(err.message.contains("not owner-only"), "{}", err.message);
+    assert!(err.message.contains("0600"), "{}", err.message);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fifo_at_the_sidecar_is_refused_without_hanging() {
+    let dir = TempDir::new("created-fifo");
+    let sidecar = sidecar_path(Some(&dir.key())).expect("path");
+    let created = std::process::Command::new("mkfifo")
+        .arg(&sidecar)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    let Ok(created) = created else {
+        return eprintln!("skipping: mkfifo unavailable for {}", sidecar.display());
+    };
+    assert!(created.success(), "mkfifo failed: {created}");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let key = dir.key();
+    let handle = std::thread::spawn(move || {
+        let _ = tx.send(read_created(Some(&key)));
+    });
+    let err = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("reading a FIFO blocked instead of refusing")
+        .expect_err("a FIFO is not a record");
+    handle.join().expect("reader thread");
+
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
 }
 
 #[test]
