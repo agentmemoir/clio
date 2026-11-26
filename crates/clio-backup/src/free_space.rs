@@ -9,7 +9,9 @@
 //! ## Owns
 //! - `require_room`: the refusal when the staging directory cannot hold the
 //!   payload the manifest records
-//! - The POSIX `df` lookup and report parser that answer the free-space question
+//! - The `df` candidate list, the descriptor that is pinned from it, the report
+//!   parser, and the file-system-statistics answer used when no descriptor can
+//!   be pinned
 //!
 //! ## Does not own
 //! - Staging or removing the payload file (see `staging`)
@@ -26,6 +28,8 @@
 
 use clio_types::{AmError, ErrorCode};
 use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 /// The absolute paths `df` is looked for, in order: `/bin/df` is macOS and
 /// BusyBox, `/usr/bin/df` is the merged-`/usr` Linux, NixOS, and Gentoo layout,
@@ -40,12 +44,16 @@ use std::path::Path;
 /// both when a host layout or the report shape changes.
 const DF_PATHS: [&str; 4] = ["/bin/df", "/usr/bin/df", "/usr/sbin/df", "/sbin/df"];
 
+/// The directory that names an open descriptor as a path this host can
+/// execute. Its presence is the precondition for running `df` at all.
+const FD_LINK_DIR: &str = "/proc/self/fd";
+
 /// Refuse when `dir` cannot hold `bytes` of payload.
 ///
 /// # Errors
 /// `QuotaExceeded` when the filesystem reports less free space than the
-/// payload needs. `Internal` when `df` is missing, fails, or reports nothing
-/// readable: a check that could not run must not answer "there is room".
+/// payload needs. `Internal` when no free-space answer can be read: a check
+/// that could not run must not answer "there is room".
 pub(crate) fn require_room(dir: &Path, bytes: u64) -> Result<(), AmError> {
     if bytes == 0 {
         return Ok(());
@@ -64,9 +72,61 @@ pub(crate) fn require_room(dir: &Path, bytes: u64) -> Result<(), AmError> {
     Ok(())
 }
 
-/// The filesystem's available bytes for `dir`, from the POSIX `df` report.
+/// The filesystem's available bytes for `dir`.
+///
+/// A `df` report is used only when a descriptor can be pinned for it. Without
+/// that precondition the answer comes from the file-system statistics, so no
+/// path is ever executed.
 fn available_bytes(dir: &Path) -> Result<u64, AmError> {
-    run_available_bytes(dir, &df_output)
+    if fd_link_available() {
+        return run_available_bytes(dir, &df_output);
+    }
+    available_bytes_without_df(dir)
+}
+
+/// Whether a descriptor can be named as a path this host will execute.
+#[cfg(unix)]
+fn fd_link_available() -> bool {
+    Path::new(FD_LINK_DIR).is_dir()
+}
+
+/// A host that does not name a descriptor as a path cannot run `df` this way,
+/// so it answers from the file-system statistics instead.
+#[cfg(not(unix))]
+fn fd_link_available() -> bool {
+    false
+}
+
+/// The available bytes on `dir`'s filesystem, from its statistics.
+///
+/// This is the answer when no descriptor can be pinned, so the gate never hands
+/// its decision to a path that was checked before it was used.
+#[cfg(unix)]
+fn available_bytes_without_df(dir: &Path) -> Result<u64, AmError> {
+    let space = rustix::fs::statvfs(dir).map_err(|error| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!(
+                "cannot check free space in {}: `statvfs` failed: {error}",
+                dir.display()
+            ),
+        )
+    })?;
+    Ok(space.f_bavail.saturating_mul(space.f_frsize))
+}
+
+/// A host with neither a pinned `df` nor file-system statistics answers
+/// nothing, and must not guess.
+#[cfg(not(unix))]
+fn available_bytes_without_df(dir: &Path) -> Result<u64, AmError> {
+    Err(AmError::new(
+        ErrorCode::Internal,
+        format!(
+            "cannot check free space in {}: `df` failed: {}",
+            dir.display(),
+            missing_df_error()
+        ),
+    ))
 }
 
 /// Run one `df` and read its report.
@@ -111,26 +171,103 @@ fn run_available_bytes(
         })
 }
 
-/// Build and run `df -P -k <dir>` against the absolute `df` this host provides.
+/// Build and run `df -P -k <dir>` from the descriptor pinned for it.
+///
+/// The candidate is opened once and inspected through that descriptor, and the
+/// child is executed from the descriptor, so the program whose type was checked
+/// is the program that runs. The path is never resolved a second time.
+#[cfg(unix)]
 fn df_output(dir: &Path) -> std::io::Result<std::process::Output> {
-    let program = DF_PATHS
-        .iter()
-        .map(std::path::PathBuf::from)
-        .find(|candidate| candidate.is_file())
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!(
-                    "no `df` at any of these absolute paths: {}",
-                    DF_PATHS.join(", ")
-                ),
-            )
-        })?;
-    std::process::Command::new(program)
+    use std::os::unix::process::CommandExt as _;
+
+    let pinned = pin_df_from(&DF_PATHS)?.ok_or_else(missing_df_error)?;
+    inherit_for_child(&pinned.fd)?;
+    std::process::Command::new(&pinned.program)
+        .arg0(&pinned.source)
         .arg("-P")
         .arg("-k")
         .arg(dir)
         .output()
+}
+
+/// A host with no descriptor path executes nothing, so the gate cannot answer
+/// from `df` there.
+#[cfg(not(unix))]
+fn df_output(_dir: &Path) -> std::io::Result<std::process::Output> {
+    Err(missing_df_error())
+}
+
+/// A `df` candidate whose type was checked through its own descriptor.
+#[cfg(unix)]
+struct PinnedDf {
+    /// Held open for the whole run, so the descriptor the child executes is the
+    /// one that was inspected.
+    fd: rustix::fd::OwnedFd,
+    /// The descriptor's own path, which is the exec target.
+    program: PathBuf,
+    /// The candidate path that was opened, which stays `argv[0]`.
+    source: PathBuf,
+}
+
+/// Pin the first candidate that is a regular file, judged by its descriptor.
+///
+/// A candidate that cannot be opened is skipped, and so is one that is not a
+/// regular file. `O_NONBLOCK` is deliberate: it stops a planted FIFO from
+/// blocking the open. The descriptor is left inheritable, because the child
+/// executes it.
+///
+/// The `Result` stays unused because opening a candidate is file-system work
+/// and the caller reads the pin with `?` beside its own file-system calls. A
+/// candidate that cannot be opened is skipped, never reported.
+#[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)]
+fn pin_df_from(candidates: &[&str]) -> std::io::Result<Option<PinnedDf>> {
+    use std::os::fd::AsRawFd as _;
+
+    for candidate in candidates {
+        let Ok(fd) = rustix::fs::open(
+            *candidate,
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::empty(),
+        ) else {
+            continue;
+        };
+        let Ok(stat) = rustix::fs::fstat(&fd) else {
+            continue;
+        };
+        if rustix::fs::FileType::from_raw_mode(stat.st_mode as rustix::fs::RawMode)
+            != rustix::fs::FileType::RegularFile
+        {
+            continue;
+        }
+        return Ok(Some(PinnedDf {
+            program: PathBuf::from(format!("{FD_LINK_DIR}/{}", fd.as_raw_fd())),
+            source: PathBuf::from(*candidate),
+            fd,
+        }));
+    }
+    Ok(None)
+}
+
+/// Keep the pinned descriptor inheritable, so the child holds the descriptor it
+/// is executed from.
+#[cfg(unix)]
+fn inherit_for_child(fd: &rustix::fd::OwnedFd) -> std::io::Result<()> {
+    if rustix::io::fcntl_getfd(fd)?.contains(rustix::io::FdFlags::CLOEXEC) {
+        rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::empty())?;
+    }
+    Ok(())
+}
+
+/// The failure for a host with no `df` at any of the fixed paths.
+fn missing_df_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        format!(
+            "no `df` at any of these absolute paths: {}",
+            DF_PATHS.join(", ")
+        ),
+    )
 }
 
 /// The available-space column of a POSIX `df -P -k` report: the header line is

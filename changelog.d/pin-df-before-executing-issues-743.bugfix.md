@@ -1,0 +1,1 @@
+The free-space check now opens the `df` it found once, judges that open file rather than the path, and executes the very same file, so replacing the `df` path between the check and the run can no longer make Clio run a different program; a host where an open file cannot be executed instead answers from its file-system statistics and runs nothing.
