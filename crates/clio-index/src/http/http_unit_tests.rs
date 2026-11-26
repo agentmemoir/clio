@@ -12,7 +12,7 @@
 //! - Custom root CA configuration failure (`agent` with a malformed PEM)
 //! - `transport_error` retryability classification, including rustls
 //!   certificate-verification failures that arrive as I/O errors
-//! - `parse_response_json` status/snippet handling and 401/403 secret hiding
+//! - `parse_response_json` status-only errors for every non-2xx status
 //!
 //! ## Does not own
 //! - Live sidecar round trips and retry behavior (see `http_tests`)
@@ -168,24 +168,20 @@ fn endpoint_gate_hides_credentials_from_error() {
 }
 
 #[test]
-fn parse_response_json_hides_body_for_401_403() {
+fn parse_response_json_hides_body_for_every_error_status() {
     let secret_body = b"token abc123 must not leak";
-    for code in [401_u16, 403] {
+    for code in (100_u16..=599).filter(|code| !(200..300).contains(code)) {
         let err = parse_response_json(code, secret_body).unwrap_err();
-        let text = err.to_string();
-        assert!(text.contains(&format!("HTTP {code}")), "{text}");
-        assert!(!text.contains("abc123"), "{text}");
+        assert_eq!(err.message, format!("endpoint returned HTTP {code}"));
+        assert!(!err.message.contains("abc123"), "{err}");
     }
-    let err = parse_response_json(503, secret_body).unwrap_err();
-    assert!(err.to_string().contains("abc123"), "{err}");
 }
 
 #[test]
 fn parse_response_json_semantics() {
     assert!(parse_response_json(200, b"[[0.1]]").unwrap().is_array());
     let err = parse_response_json(503, b"busy right now").unwrap_err();
-    assert!(err.to_string().contains("HTTP 503"), "{err}");
-    assert!(err.to_string().contains("busy"), "{err}");
+    assert_eq!(err.message, "endpoint returned HTTP 503");
     let err = parse_response_json(200, b"not-json").unwrap_err();
     assert!(err.to_string().contains("non-JSON body"), "{err}");
 }

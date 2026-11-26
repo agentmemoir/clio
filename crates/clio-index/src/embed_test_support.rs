@@ -195,6 +195,15 @@ impl FakeEmbedServer {
         Self::spawn_with(Duration::ZERO, 200, Some(response))
     }
 
+    /// Spawn a server answering with a non-2xx status and this exact body.
+    pub fn spawn_status_with_body(status: u16, body: &str) -> Self {
+        let raw = format!(
+            "HTTP/1.1 {status} Server Error\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        Self::spawn_raw(raw.into_bytes())
+    }
+
     fn spawn_with(delay: Duration, status: u16, raw: Option<Vec<u8>>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("fake bind");
         let port = listener.local_addr().expect("local addr").port();

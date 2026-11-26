@@ -1,0 +1,1 @@
+A failed request to a remote embedding endpoint now reports only the HTTP status, because the non-2xx status error no longer carries the response body. An endpoint that echoes the credential it was sent could previously persist that secret in logs and stored index errors.
