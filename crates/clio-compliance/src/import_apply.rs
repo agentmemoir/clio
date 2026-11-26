@@ -436,3 +436,7 @@ mod import_apply_tests;
 #[cfg(test)]
 #[path = "import_apply_scaling_tests.rs"]
 mod import_apply_scaling_tests;
+
+#[cfg(test)]
+#[path = "import_apply_plan_tests.rs"]
+mod import_apply_plan_tests;
