@@ -38,6 +38,13 @@ use serde_json::json;
 use super::{ImportArgs, SkippedInvalid};
 use crate::bundle::BundleEnvelope;
 
+// The bundle id maps use the default hasher in production and a counting hasher
+// in tests, so the scaling test can bound index probes per lookup.
+#[cfg(not(test))]
+type IndexHasher = std::collections::hash_map::RandomState;
+#[cfg(test)]
+type IndexHasher = crate::import_apply_seam::CountingBuildHasher;
+
 // Persona row planning lives in its own module (extracted to keep this file
 // within the source-size bound); it shares the same `Planner` state.
 #[path = "import_apply_persona.rs"]
@@ -65,6 +72,10 @@ pub(super) enum CarrierBlock {
 pub(super) struct Planner<'a> {
     pub(super) args: &'a ImportArgs<'a>,
     pub(super) envelope: &'a BundleEnvelope,
+    /// Bundle item rows by id, first row wins on a duplicate id.
+    pub(super) bundle_items: HashMap<&'a str, &'a MemoryItem, IndexHasher>,
+    /// Ids carried by the bundle's opaque array.
+    pub(super) bundle_opaque: HashSet<&'a str, IndexHasher>,
     pub(super) staged: Vec<BatchWrite>,
     pub(super) create: usize,
     pub(super) skip: usize,
@@ -93,9 +104,21 @@ pub(super) struct Planner<'a> {
 
 impl<'a> Planner<'a> {
     pub(super) fn new(args: &'a ImportArgs<'a>, envelope: &'a BundleEnvelope) -> Self {
+        let mut bundle_items: HashMap<&'a str, &'a MemoryItem, IndexHasher> = HashMap::default();
+        for item in &envelope.entities.items {
+            bundle_items.entry(item.id.as_str()).or_insert(item);
+        }
+        let bundle_opaque: HashSet<&'a str, IndexHasher> = envelope
+            .entities
+            .opaque_items
+            .iter()
+            .map(|opaque| opaque.id.as_str())
+            .collect();
         Self {
             args,
             envelope,
+            bundle_items,
+            bundle_opaque,
             staged: Vec::new(),
             create: 0,
             skip: 0,
@@ -207,7 +230,7 @@ impl<'a> Planner<'a> {
     }
 
     pub(super) fn bundle_item(&self, id: &str) -> Option<&MemoryItem> {
-        self.envelope.entities.items.iter().find(|i| i.id == id)
+        self.bundle_items.get(id).copied()
     }
 
     /// True when `id` names a row the bundle itself carries — an item or an
@@ -216,13 +239,7 @@ impl<'a> Planner<'a> {
     /// empty `items` array and put every row in `opaque_items`, so both arrays
     /// have to count.
     pub(super) fn bundle_owns(&self, id: &str) -> bool {
-        self.bundle_item(id).is_some()
-            || self
-                .envelope
-                .entities
-                .opaque_items
-                .iter()
-                .any(|o| o.id == id)
+        self.bundle_items.contains_key(id) || self.bundle_opaque.contains(id)
     }
 
     fn plan_items(&mut self) -> Result<(), AmError> {
@@ -422,3 +439,11 @@ impl<'a> Planner<'a> {
 #[cfg(test)]
 #[path = "import_apply_tests.rs"]
 mod import_apply_tests;
+
+#[cfg(test)]
+#[path = "import_apply_scaling_tests.rs"]
+mod import_apply_scaling_tests;
+
+#[cfg(test)]
+#[path = "import_apply_plan_tests.rs"]
+mod import_apply_plan_tests;
