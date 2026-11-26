@@ -523,6 +523,7 @@ dependencies = [
  "postgres_rustls",
  "rand",
  "rusqlite",
+ "rustix",
  "rustls",
  "serde",
  "serde_json",
