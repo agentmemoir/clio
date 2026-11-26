@@ -104,7 +104,23 @@ fn copy_then_swap(staged: &Path, destination: &Path) -> KeySwapReport {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.subsec_nanos());
     let temp = dir.join(format!(".clio-key-swap-{}-{nanos}", std::process::id()));
-    let mut staged_copy = match create_staging_file(&temp) {
+    copy_then_swap_at(staged, destination, &temp)
+}
+
+/// Copy the staged key to `temp`, then rename `temp` over the destination.
+///
+/// `temp` is a parameter so a test can plant an entry at the exact path the
+/// staging create will pick. The create, the copy, the cleanup and the rename
+/// all live here, so the exclusive-create rule the swap depends on is exercised
+/// through the swap itself, not only through `create_staging_file`.
+fn copy_then_swap_at(staged: &Path, destination: &Path, temp: &Path) -> KeySwapReport {
+    // `copy_then_swap` refuses a destination with no directory before it calls
+    // this; the lookup here only names that directory in a failure.
+    let dir = destination
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or(Path::new(""));
+    let mut staged_copy = match create_staging_file(temp) {
         Ok(file) => file,
         Err(error) => {
             return KeySwapReport {
@@ -119,7 +135,7 @@ fn copy_then_swap(staged: &Path, destination: &Path) -> KeySwapReport {
     let copied = File::open(staged).and_then(|mut src| std::io::copy(&mut src, &mut staged_copy));
     drop(staged_copy);
     if let Err(error) = copied {
-        let _ = std::fs::remove_file(&temp);
+        let _ = std::fs::remove_file(temp);
         return KeySwapReport {
             replaced: false,
             failure: Some(format!(
@@ -128,13 +144,13 @@ fn copy_then_swap(staged: &Path, destination: &Path) -> KeySwapReport {
             )),
         };
     }
-    match std::fs::rename(&temp, destination) {
+    match std::fs::rename(temp, destination) {
         Ok(()) => KeySwapReport {
             replaced: true,
             failure: None,
         },
         Err(error) => {
-            let _ = std::fs::remove_file(&temp);
+            let _ = std::fs::remove_file(temp);
             KeySwapReport {
                 replaced: false,
                 failure: Some(format!(
