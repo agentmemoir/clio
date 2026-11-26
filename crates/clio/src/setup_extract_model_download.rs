@@ -217,8 +217,9 @@ fn stream_to_file(
         // only the verified rename below replaces it.
         return Err(format!(
             "the file does not match the published checksum: expected {sha256}, found {found}, \
-             so the download was refused and nothing at the destination was changed; run \
-             `clio setup` again"
+             so the download was refused and nothing at the destination was changed; remove any \
+             file at {} and run `clio setup` again",
+            dest.display()
         ));
     }
     std::fs::rename(&part, dest).map_err(|e| {
