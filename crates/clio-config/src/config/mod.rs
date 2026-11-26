@@ -41,7 +41,7 @@ mod tests;
 pub use env::bearer_for_effective;
 pub use persist::{
     DEPLOYMENT_CONFIG_ENV, DEPLOYMENT_CONFIG_FILE_NAME, backup_config_file, create_private_dir,
-    default_config_dir, resolve_deployment_path, restrict_dir, write_private_atomic,
+    default_config_dir, resolve_deployment_path, write_private_atomic,
 };
 pub use types::{
     ConfigGetData, ConfigProfileApplyData, ConfigProfilesData, ConfigSetData, ProfileSummary,

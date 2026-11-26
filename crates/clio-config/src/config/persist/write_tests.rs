@@ -152,21 +152,6 @@ fn atomic_write_removes_the_temp_file_when_the_rename_fails() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-#[cfg(unix)]
-#[test]
-fn restrict_dir_sets_owner_only_mode() {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = tmp("restrict");
-    fs::create_dir_all(&dir).expect("dir");
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("mode");
-
-    restrict_dir(&dir);
-
-    let mode = fs::metadata(&dir).expect("meta").permissions().mode();
-    assert_eq!(mode & 0o777, 0o700, "config dir must be owner-only");
-    let _ = fs::remove_dir_all(&dir);
-}
-
 // A symlink planted at the temp name is refused, so the file it points at is
 // never truncated. `create_new` is `O_CREAT|O_EXCL`, which fails with
 // `AlreadyExists` on an existing final component, a symlink included.

@@ -41,6 +41,30 @@ fn the_backup_directory_is_created_owner_only_and_left_alone_when_present() {
     );
 }
 
+/// Every level the call has to create is owner-only, not only the innermost
+/// one: an intermediate level left at whatever the umask allows still lets
+/// another account walk down to the staged members.
+#[cfg(unix)]
+#[test]
+fn every_new_level_of_a_nested_backup_directory_is_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = Scratch::new("dir-nested");
+    let outer = scratch.join("clio");
+    let leaf = outer.join("backups");
+
+    assert!(ensure_backup_dir(&leaf).expect("create"));
+
+    for level in [&outer, &leaf] {
+        let mode = std::fs::metadata(level).expect("meta").permissions().mode();
+        assert_eq!(
+            mode & 0o077,
+            0,
+            "{} must be owner-only, got {mode:o}",
+            level.display()
+        );
+    }
+}
+
 /// A directory the operator widened on purpose is not this function's to
 /// tighten, so it keeps its mode and still reports that it created nothing.
 #[cfg(unix)]

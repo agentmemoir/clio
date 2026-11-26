@@ -12,8 +12,9 @@
 //! - `store_slug`: a filesystem-safe, credential-free short id for a database
 //!
 //! ## Does not own
-//! - Creating the directory or its permissions (the CLI does, with
-//!   `restrict_dir`)
+//! - Creating the directory or its permissions (the CLI does: a missing
+//!   directory is created owner-only by the creating call, and one that already
+//!   exists keeps the mode it had)
 //! - Database-target resolution (see `db_path`) or key-store resolution (see
 //!   `kms_path`)
 //! - Archive format details (see `clio-backup`)

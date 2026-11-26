@@ -184,6 +184,36 @@ fn a_flush_creates_the_state_directory_owner_only() {
     );
 }
 
+/// Every level a flush has to create is owner-only, not only the innermost one:
+/// the state file's directory is made recursively, and an intermediate level
+/// left at whatever the umask allows still lets another account walk the path.
+#[cfg(unix)]
+#[test]
+fn a_flush_creates_every_new_state_directory_level_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = Scratch::new();
+    let outer = scratch.path().join("clio");
+    let parent = outer.join("config");
+
+    let flushed = boot(parent.join(super::CLI_STATE_FILE_NAME))
+        .flush_cli_state()
+        .expect("flush");
+
+    assert!(
+        flushed.written(),
+        "the flush creates the file and its levels"
+    );
+    for dir in [&outer, &parent] {
+        let mode = fs::metadata(dir).expect("meta").permissions().mode();
+        assert_eq!(
+            mode & 0o077,
+            0,
+            "{} must be owner-only, got {mode:o}",
+            dir.display()
+        );
+    }
+}
+
 /// A directory that a flush finds already present keeps the mode it had: the
 /// owner-only rule applies to creation, and a pre-existing wider mode is the
 /// operator's choice rather than something a write silently overrides.

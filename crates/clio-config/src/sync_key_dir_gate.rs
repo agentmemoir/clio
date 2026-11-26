@@ -108,9 +108,10 @@ const NOT_DIR_SHAPE: &str = "not a directory";
 /// is compared against the descriptor's `st_dev` and `st_ino`, so a directory
 /// replaced after the open is refused instead of tightened.
 ///
-/// The shared `config::restrict_dir` is deliberately not used here: it ignores
-/// the `chmod` error, and a silent failure would leave key material in a
-/// directory another account can enter.
+/// A path-based mode change whose error is ignored is deliberately not used
+/// here: a silent failure would leave key material in a directory another
+/// account can enter, so the mode is set through the held descriptor and read
+/// back.
 ///
 /// # Errors
 /// [`ErrorCode::Forbidden`] when `parent` is a link, is not a directory, is owned
