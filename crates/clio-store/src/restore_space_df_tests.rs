@@ -15,7 +15,7 @@
 //!
 //! ## Does not own
 //! - The pinned descriptor itself: where it sits, that it is executable, and
-//!   both arms of the chooser (see `restore_space_pin_tests`)
+//!   both arms of the chooser (see `df_pin_tests`)
 //! - The pre-flight's own grouping and refusal message (see
 //!   `restore_space_tests`)
 //!
@@ -25,7 +25,7 @@
 //! report is parsed belong in the sibling `restore_space_tests`, not here.
 
 use super::*;
-use crate::restore_space::restore_space_pin::*;
+use crate::restore_space::df_pin::*;
 
 /// A scratch directory removed when the guard drops.
 struct Scratch(PathBuf);

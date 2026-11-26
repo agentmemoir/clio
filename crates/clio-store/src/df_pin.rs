@@ -26,6 +26,8 @@
 //! not.
 //!
 //! Keep this module focused on one pinned `df` descriptor.
+//!
+//! This module owns its tests, declared below and kept in `df_pin_tests`.
 
 use clio_types::{AmError, ErrorCode};
 use std::path::{Path, PathBuf};
@@ -232,3 +234,7 @@ pub(super) fn missing_df_error(candidates: &[&str]) -> std::io::Error {
         format!("no `df` at any of these absolute paths: {tried}"),
     )
 }
+
+#[cfg(test)]
+#[path = "df_pin_tests.rs"]
+mod tests;

@@ -26,7 +26,7 @@
 //! report is parsed belong in the sibling `df` test module, not here.
 
 use super::*;
-use crate::restore_space::restore_space_pin::*;
+use crate::restore_space::parse_available_kb;
 #[cfg(unix)]
 use std::process::Output;
 

@@ -17,7 +17,7 @@
 //!
 //! ## Does not own
 //! - Pinning a `df` candidate, running its descriptor, and the statistics answer
-//!   used where no descriptor can be pinned (see `restore_space_pin`)
+//!   used where no descriptor can be pinned (see `df_pin`)
 //! - The swap itself (see `restore_swap`)
 //! - Directory resolution (see `clio-config`) or the snapshot's own size
 //!   estimate (see the create command)
@@ -65,10 +65,10 @@
 use clio_types::{AmError, ErrorCode};
 use std::path::{Path, PathBuf};
 
-use self::restore_space_pin::{available_bytes_with, df_output_from, fd_link_available};
+use self::df_pin::{available_bytes_with, df_output_from, fd_link_available};
 
-#[path = "restore_space_pin.rs"]
-mod restore_space_pin;
+#[path = "df_pin.rs"]
+mod df_pin;
 
 /// One directory's restore footprint.
 ///
@@ -306,7 +306,7 @@ fn run_available_bytes(
 ///
 /// The verify pass's free-space gate in `clio-backup` (`free_space`) holds its
 /// own copy of this list, of the report parser below, and of the pin in
-/// `restore_space_pin`. The copies stay separate so the backup container crate
+/// `df_pin`. The copies stay separate so the backup container crate
 /// does not depend on the store crate; keep them in step, and change both when a
 /// host layout, the report shape, or the pin changes.
 const DF_PATHS: [&str; 4] = ["/bin/df", "/usr/bin/df", "/usr/sbin/df", "/sbin/df"];
@@ -314,10 +314,10 @@ const DF_PATHS: [&str; 4] = ["/bin/df", "/usr/bin/df", "/usr/sbin/df", "/sbin/df
 /// The `df` this host pins, from [`DF_PATHS`] only, without running anything.
 ///
 /// Only the tests call this; production reaches the same pin through
-/// `restore_space_pin`'s `df_output_from`.
+/// `df_pin`'s `df_output_from`.
 #[cfg(all(test, unix))]
 fn resolve_df() -> Option<PathBuf> {
-    use self::restore_space_pin::pin_df;
+    use self::df_pin::pin_df;
 
     pin_df(&DF_PATHS).ok().map(|pinned| pinned.source)
 }
@@ -342,7 +342,3 @@ mod tests;
 #[cfg(test)]
 #[path = "restore_space_df_tests.rs"]
 mod df_tests;
-
-#[cfg(test)]
-#[path = "restore_space_pin_tests.rs"]
-mod pin_tests;
