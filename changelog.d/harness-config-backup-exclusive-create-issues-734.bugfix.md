@@ -1,0 +1,1 @@
+The harness config backup file is now created exclusively, so an entry already holding the backup name — a regular file, a directory, or a planted symlink — is refused rather than followed or overwritten.
