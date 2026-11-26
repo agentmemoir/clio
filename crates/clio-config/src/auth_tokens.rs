@@ -157,8 +157,9 @@ pub fn load_auth_tokens(path: &Path) -> Result<Vec<AuthTokenRecord>, AmError> {
 /// Save the store: owner-only, atomic (temp file + rename), full replacement.
 ///
 /// The parent directory is created when missing and restricted to the owner
-/// only when this call created it. A directory the operator already had keeps
-/// its mode: tightening a directory the store did not create changes what
+/// only when this call created it, and every missing ancestor created with it
+/// is restricted the same way. A directory the operator already had keeps its
+/// mode: tightening a directory the store did not create changes what
 /// every other file in it can be read by, which is a side effect the
 /// deployment-config writer (`config::persist::save_overlay_file`) does not
 /// have either. The file's own `0600` mode is what the load-time refusal

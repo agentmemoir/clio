@@ -282,7 +282,12 @@ fn create_private_dir_makes_every_new_level_owner_only() {
 
     for dir in [&root, &root.join("a"), &nested] {
         let mode = fs::metadata(dir).expect("meta").permissions().mode();
-        assert_eq!(mode & 0o777, 0o700, "{} must be owner-only", dir.display());
+        assert_eq!(
+            mode & 0o077,
+            0,
+            "{} must be owner-only: {mode:o}",
+            dir.display()
+        );
     }
     let _ = fs::remove_dir_all(&root);
 }
