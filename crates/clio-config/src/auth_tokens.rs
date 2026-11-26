@@ -47,6 +47,7 @@
 //! secret. The hold follows the item store's rule (`crates/clio-store/src/
 //! store_lock.rs`): advisory, bounded, refusing rather than waiting forever.
 
+use crate::config::create_private_dir;
 use crate::context::Actor;
 use crate::error::{AmError, ErrorCode};
 use base64::Engine;
@@ -171,16 +172,12 @@ pub fn load_auth_tokens(path: &Path) -> Result<Vec<AuthTokenRecord>, AmError> {
 /// panics rather than writing a partial store.
 pub fn save_auth_tokens(path: &Path, records: &[AuthTokenRecord]) -> Result<(), AmError> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        let existed = parent.exists();
-        std::fs::create_dir_all(parent).map_err(|e| {
+        create_private_dir(parent).map_err(|e| {
             AmError::new(
                 ErrorCode::Internal,
                 format!("failed to create {}: {e}", parent.display()),
             )
         })?;
-        if !existed {
-            crate::config::restrict_dir(parent);
-        }
     }
     let text = serde_json::to_string_pretty(records).expect("serialize auth token records");
     crate::config::write_private_atomic(path, &text).map_err(|e| {
@@ -274,13 +271,12 @@ fn exclusive_hold(path: &Path) -> Result<ExclusiveHold, AmError> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty())
         && !parent.exists()
     {
-        std::fs::create_dir_all(parent).map_err(|e| {
+        create_private_dir(parent).map_err(|e| {
             AmError::new(
                 ErrorCode::Internal,
                 format!("failed to create {}: {e}", parent.display()),
             )
         })?;
-        crate::config::restrict_dir(parent);
     }
     ExclusiveHold::acquire(path)
 }
@@ -409,7 +405,7 @@ fn owner_only_refusal(path: &Path, meta: &std::fs::Metadata, euid: u32) -> Resul
 }
 
 /// Non-Unix platforms have no mode bits to check; the owner-only rule is a
-/// no-op there, matching `persist::restrict_dir`.
+/// no-op there.
 #[cfg(not(unix))]
 fn owner_only_refusal(_path: &Path, _meta: &std::fs::Metadata, _euid: u32) -> Result<(), AmError> {
     Ok(())
