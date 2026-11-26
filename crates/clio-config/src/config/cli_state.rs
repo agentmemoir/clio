@@ -19,8 +19,9 @@
 //!   this file is hand-writable and seals nothing
 //! - The boot order they are restored in: profile, then its overlay, then the
 //!   ranking, so an explicit ranking set wins over the profile's own ranking
-//! - Writing the current three-part state owner-only, into an owner-only
-//!   directory, atomically
+//! - Writing the current three-part state owner-only, atomically, into a
+//!   directory this module creates owner-only when it is missing; a directory
+//!   that already exists keeps the mode it had
 //! - Reporting which overlay keys a write had to leave out, because the file
 //!   seals nothing and a secret cannot be written there
 //!
@@ -41,7 +42,7 @@
 
 use super::Runtime;
 use super::merge::Overlay;
-use super::persist::{default_config_dir, restrict_dir, write_private_atomic};
+use super::persist::{create_private_dir, default_config_dir, write_private_atomic};
 use super::validate::{validate_set_path, validate_set_value};
 use crate::error::{AmError, ErrorCode};
 use crate::profile::lookup_profile;
@@ -339,16 +340,16 @@ fn checked_overlay_entry(key: &str, value: &Value) -> Result<(), AmError> {
     validate_set_value(key, value)
 }
 
-/// Write `state` as the file's keys, into an owner-only directory.
+/// Write `state` as the file's keys, creating a missing parent directory
+/// owner-only.
 fn save_state(path: &Path, state: &CliState) -> Result<(), AmError> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        fs::create_dir_all(parent).map_err(|e| {
+        create_private_dir(parent).map_err(|e| {
             AmError::new(
                 ErrorCode::Internal,
                 format!("failed to create {}: {e}", parent.display()),
             )
         })?;
-        restrict_dir(parent);
     }
     let mut root = Map::new();
     root.insert(
@@ -383,6 +384,12 @@ fn save_state(path: &Path, state: &CliState) -> Result<(), AmError> {
     })
 }
 
+#[cfg(test)]
+#[path = "cli_state_test_support.rs"]
+pub(crate) mod cli_state_test_support;
+#[cfg(test)]
+#[path = "cli_state_restore_tests.rs"]
+mod restore_tests;
 #[cfg(test)]
 #[path = "cli_state_tests.rs"]
 mod tests;

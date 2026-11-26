@@ -4,7 +4,7 @@
 //! # Responsibility
 //!
 //! This module is responsible for owner-only file writes and the owner-only
-//! (0700) directory permission rule other crates call.
+//! (0700) directory rule other crates call.
 //!
 //! ## Owns
 //! - Atomic temp-file-plus-rename writes with 0600 permissions
@@ -13,8 +13,8 @@
 //! - The monotonic counter that keeps concurrent temp files distinct
 //! - The pre-rename check that refuses to replace a different entry at the
 //!   target path
-//! - `restrict_dir`, the owner-only directory rule
-//! - `create_private_dir`, which makes a missing directory owner-only
+//! - `create_private_dir`, the owner-only directory rule, applied by the
+//!   creating call to every level it makes
 //!
 //! ## Does not own
 //! - What is written into the file (see `save`)
@@ -198,15 +198,6 @@ pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result
     Ok(())
 }
 
-#[cfg(unix)]
-pub fn restrict_dir(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
-}
-
-#[cfg(not(unix))]
-pub fn restrict_dir(_path: &Path) {}
-
 /// Create `path` and any missing parent, owner-only on Unix. The mode is set
 /// by the `mkdir` call itself, so no later path lookup can be swapped for a
 /// different directory. An existing directory keeps its mode.
@@ -215,7 +206,7 @@ pub fn restrict_dir(_path: &Path) {}
 /// A component is a file, a component is not a directory, or the caller lacks
 /// permission to create the directory.
 #[cfg(unix)]
-pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
+pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
     fs::DirBuilder::new()
         .recursive(true)
@@ -229,7 +220,7 @@ pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
 /// A component is a file, or the caller lacks permission to create the
 /// directory.
 #[cfg(not(unix))]
-pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
+pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
     fs::create_dir_all(path)
 }
 
