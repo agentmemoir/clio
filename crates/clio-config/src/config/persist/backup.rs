@@ -8,7 +8,8 @@
 //!
 //! ## Owns
 //! - The `backups/` sibling directory and its timestamped file names
-//! - The owner-only permission of the backup directory and file
+//! - The owner-only mode of a newly created backup directory, and of the backup
+//!   file
 //!
 //! ## Does not own
 //! - Deciding when to back up (the caller does)
@@ -23,7 +24,7 @@
 //! Keep this module focused on the pre-replace backup.
 
 use super::path::DEPLOYMENT_CONFIG_FILE_NAME;
-use super::write::{restrict_dir, write_private};
+use super::write::{create_private_dir, write_private};
 use crate::error::{AmError, ErrorCode};
 use std::fs;
 use std::io::Read;
@@ -32,9 +33,11 @@ use std::path::{Path, PathBuf};
 /// Directory holding timestamped backups of replaced deployment configs.
 pub(crate) const BACKUP_DIR_NAME: &str = "backups";
 
-/// Back up `path` into a timestamped `backups/` sibling with owner-only
-/// permissions. Returns the backup path, or `None` when `path` does not exist
-/// (nothing to protect).
+/// Back up `path` into a timestamped `backups/` sibling, creating that
+/// directory owner-only when it is missing. Returns the backup path, or `None`
+/// when `path` does not exist (nothing to protect).
+///
+/// A `backups/` directory that already exists keeps the mode it had.
 ///
 /// # Errors
 /// [`ErrorCode::Forbidden`] when the source is a symbolic link or is not a
@@ -93,13 +96,12 @@ pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .join(BACKUP_DIR_NAME);
-    fs::create_dir_all(&dir).map_err(|e| {
+    create_private_dir(&dir).map_err(|e| {
         AmError::new(
             ErrorCode::Internal,
             format!("failed to create backup dir {}: {e}", dir.display()),
         )
     })?;
-    restrict_dir(&dir);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());

@@ -133,8 +133,9 @@ fn planted_symlink_at_backup_source_is_refused() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// The backup dir is created by the backup itself and tightened to owner-only, so
-// the copied config is not left readable by other users of the machine.
+// The backup dir is created by the backup itself and is owner-only from the
+// moment it exists, so the copied config is not left readable by other users of
+// the machine.
 #[cfg(unix)]
 #[test]
 fn backup_creates_a_owner_only_backups_dir() {
@@ -150,6 +151,31 @@ fn backup_creates_a_owner_only_backups_dir() {
     let backups = dir.join(BACKUP_DIR_NAME);
     let mode = fs::metadata(&backups).expect("meta").permissions().mode();
     assert_eq!(mode & 0o777, 0o700, "the backups dir must be owner-only");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// A backups directory the operator already made keeps the mode they chose: the
+// backup creates a missing directory owner-only, it does not retighten one that
+// exists.
+#[cfg(unix)]
+#[test]
+fn backup_keeps_an_existing_backups_dir_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("dir-mode-existing");
+    let backups = dir.join(BACKUP_DIR_NAME);
+    fs::create_dir_all(&backups).expect("dir");
+    fs::set_permissions(&backups, fs::Permissions::from_mode(0o750)).expect("mode");
+    let cfg = dir.join("deployment.json");
+    fs::write(&cfg, "{}").expect("write");
+
+    backup_config_file(&cfg).expect("backup").expect("some");
+
+    let mode = fs::metadata(&backups).expect("meta").permissions().mode();
+    assert_eq!(
+        mode & 0o777,
+        0o750,
+        "an existing backups dir keeps the mode it had"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
