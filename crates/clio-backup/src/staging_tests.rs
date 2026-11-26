@@ -15,6 +15,7 @@
 //!   must stay an internal fault
 //!
 //! ## Does not own
+//! - Who removes a staged path and when (see `staging_guard_tests`)
 //! - The backup directory's creation and its mode (see `staging_dir_tests`)
 //! - The atomic publish (see `atomic_publish_tests`)
 //! - Create, verify, or inventory cases (see their own test modules)
@@ -89,20 +90,74 @@ fn a_staged_member_is_owner_only() {
     assert_eq!(mode & 0o777, 0o600);
 }
 
+/// Bytes the caller already holds are staged the same way a copied file is:
+/// measured, digested, owner-only, and owned by the returned value.
 #[test]
-fn a_reserved_path_does_not_exist_yet() {
-    let scratch = Scratch::new("staging-reserve");
+fn staged_bytes_report_the_length_and_digest_of_the_input() {
+    let scratch = Scratch::new("staging-bytes");
+    let bytes: Vec<u8> = br#"{"format":1,"members":[]}"#.repeat(60);
 
-    let path = reserve_path(scratch.path(), "payload").expect("reserve");
+    let staged = stage_bytes(&bytes, scratch.path(), "member").expect("stage");
 
-    assert!(
-        !path.exists(),
-        "VACUUM INTO needs a path that does not exist"
+    let expected = {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(&bytes);
+        let mut hex = String::new();
+        for byte in &digest {
+            let _ = std::fmt::Write::write_fmt(&mut hex, format_args!("{byte:02x}"));
+        }
+        hex
+    };
+    assert_eq!(staged.bytes(), bytes.len() as u64, "reported size");
+    assert_eq!(staged.sha256(), expected, "reported digest");
+    assert_eq!(
+        std::fs::read(staged.path()).expect("read the staged member"),
+        bytes,
+        "the staged member holds the input bytes"
     );
-    assert!(path.starts_with(scratch.path()));
-    // A second reservation in the same instant gets a different name.
-    let again = reserve_path(scratch.path(), "payload").expect("reserve again");
-    assert_ne!(path, again);
+    assert_eq!(
+        staged_temporaries(scratch.path()).len(),
+        1,
+        "the staged member is the only staged file in the directory"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(staged.path())
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    drop(staged);
+    assert!(
+        staged_temporaries(scratch.path()).is_empty(),
+        "nothing staged survives the value that owns it"
+    );
+}
+
+/// A staged member that is gone by the time the assembly pass asks for it is
+/// reported as a fault in this code, and the message names the reopen.
+#[test]
+fn opening_a_staged_member_that_was_removed_names_the_reopen() {
+    let scratch = Scratch::new("staging-reopen");
+    let source = scratch.join("source.bin");
+    std::fs::write(&source, b"clio snapshot payload").expect("write the source");
+    let staged = stage_copy(&source, scratch.path(), "member").expect("stage");
+
+    std::fs::remove_file(staged.path()).expect("remove the staged member");
+
+    let error = staged
+        .open()
+        .expect_err("a removed member cannot be reopened");
+
+    assert_eq!(error.code, clio_types::ErrorCode::Internal);
+    assert!(
+        error.message.contains("reopening a staged member"),
+        "the message names the step: {}",
+        error.message
+    );
 }
 
 #[test]
@@ -136,44 +191,6 @@ fn begin_and_adopt_staged_bracket_a_stream() {
     assert_eq!(std::fs::metadata(&path).unwrap().len(), 14);
     drop(staged);
     assert!(!path.exists());
-}
-
-/// A guard that was never released removes the staged file, which is the whole
-/// point of wrapping the path: a copy that fails cannot leave the file behind.
-#[test]
-fn an_unreleased_staged_path_is_removed_when_the_guard_drops() {
-    let scratch = Scratch::new("staging-guard-drop");
-    let path = reserve_path(scratch.path(), "member").expect("reserve");
-    std::fs::write(&path, b"key material").expect("write the staged bytes");
-    assert!(path.exists());
-
-    drop(StagedGuard::new(path.clone()));
-
-    assert!(
-        !path.exists(),
-        "a guard that never released removes its file"
-    );
-}
-
-/// A released path survives the guard, so the returned `StagedFile` — and only
-/// it — removes the file, once, when the run ends.
-#[test]
-fn a_released_staged_path_survives_the_guard_and_is_removed_by_its_staged_file() {
-    let scratch = Scratch::new("staging-guard-release");
-    let path = reserve_path(scratch.path(), "member").expect("reserve");
-    std::fs::write(&path, b"key material").expect("write the staged bytes");
-
-    let released = StagedGuard::new(path.clone()).release();
-
-    assert_eq!(released, path, "release hands the same path on");
-    assert!(
-        path.exists(),
-        "a released path is not removed by the guard that held it"
-    );
-
-    let staged = StagedFile::adopt(released, 12, "a".repeat(64));
-    drop(staged);
-    assert!(!path.exists(), "the staged file removes it exactly once");
 }
 
 /// A source that opens but cannot be read: on a Unix host a directory opens for

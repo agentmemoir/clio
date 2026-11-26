@@ -58,3 +58,22 @@ fn an_existing_backup_directory_keeps_its_widened_mode() {
     let mode = std::fs::metadata(&existing).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o750, "the widened mode is left as it was");
 }
+
+/// A path that cannot become a directory because its parent is a regular file
+/// is a fault in this code, and the message names the path it could not make.
+#[test]
+fn a_path_a_file_stands_in_for_is_an_internal_fault_naming_the_path() {
+    let scratch = Scratch::new("dir-impossible");
+    let file = scratch.join("not-a-directory");
+    std::fs::write(&file, b"a regular file").expect("write the parent");
+    let blocked = file.join("backups");
+
+    let error = ensure_backup_dir(&blocked).expect_err("a file cannot hold a directory");
+
+    assert_eq!(error.code, clio_types::ErrorCode::Internal);
+    assert!(
+        error.message.contains(blocked.to_string_lossy().as_ref()),
+        "the message names the path: {}",
+        error.message
+    );
+}

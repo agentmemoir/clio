@@ -398,5 +398,9 @@ pub(crate) fn create_owner_only(path: &Path) -> Result<std::fs::File, AmError> {
 mod tests;
 
 #[cfg(test)]
+#[path = "staging_guard_tests.rs"]
+mod guard_tests;
+
+#[cfg(test)]
 #[path = "staging_dir_tests.rs"]
 mod dir_tests;
