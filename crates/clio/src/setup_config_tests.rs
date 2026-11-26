@@ -310,10 +310,10 @@ fn write_reports_backup_failure_before_replacing() {
 }
 
 #[test]
-fn write_reports_flush_failure_without_replacing() {
-    let dir = temp_dir("flush-fail");
-    // A file occupies the directory slot the config path needs, so the flush
-    // cannot create parents and fails before replacing anything.
+fn write_reports_backup_failure_when_a_file_blocks_the_parent() {
+    let dir = temp_dir("backup-blocked-parent");
+    // A file occupies the parent directory slot. Opening the config path for
+    // backup fails with "not a directory" before a flush could be attempted.
     let blocker = dir.join("blocker");
     std::fs::write(&blocker, "not a directory").expect("blocker");
     let path = blocker.join("deployment.json");
@@ -323,11 +323,44 @@ fn write_reports_flush_failure_without_replacing() {
         &path,
         &[("embed.provider".to_owned(), json!("openai"))],
     )
-    .expect_err("flush fails");
-    assert!(err.contains("failed to write"), "{err}");
+    .expect_err("backup fails");
+    assert!(err.contains("backup failed"), "{err}");
+    assert!(err.contains("for backup"), "{err}");
     // Nothing was written and no backup was taken (nothing existed).
     assert!(!path.exists());
     assert!(!dir.join("backups").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn write_reports_flush_failure_without_replacing() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = temp_dir("flush-fail");
+    let path = dir.join("deployment.json");
+    std::fs::write(&path, r#"{"embed.provider":"tei"}"#).expect("seed");
+    // A writable backups dir lets backup succeed. The read-only parent then
+    // blocks the atomic write, which needs a temp file in that parent.
+    std::fs::create_dir(dir.join("backups")).expect("backups dir");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555))
+        .expect("read-only parent");
+
+    let mut rt = Runtime::with_env(&env_at(&path));
+    let err = write(
+        &mut rt,
+        &path,
+        &[("embed.provider".to_owned(), json!("openai"))],
+    )
+    .expect_err("flush fails");
+    assert!(err.contains("failed to write"), "{err}");
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).expect("restore mode");
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read"),
+        r#"{"embed.provider":"tei"}"#,
+        "the previous config was not replaced"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
