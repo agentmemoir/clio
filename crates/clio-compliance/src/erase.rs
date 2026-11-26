@@ -63,7 +63,8 @@ pub struct EraseArgs<'a> {
     pub reason_code: Option<&'a str>,
     /// `true` performs the erasure; `false` is rejected (no dry-run path).
     pub confirm: bool,
-    /// Deployment salt for the one-way tombstone hashes.
+    /// Deployment salt for the one-way tombstone hashes. It must be at least
+    /// 32 bytes, as the deployment salt resolver returns it.
     pub salt: &'a [u8],
     /// Erasure timestamp (UTC text).
     pub timestamp: &'a str,

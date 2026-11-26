@@ -371,14 +371,39 @@ fn a_blank_configured_value_is_refused() {
     let journal = scratch.journal();
     let err = resolve_salt(Some("   "), &journal).expect_err("a blank override is refused");
     assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    let message = err.message.as_str();
     assert!(
-        err.message.contains("CLIO_COMPLIANCE_SALT"),
-        "the refusal names the override: {}",
-        err.message
+        message.contains("CLIO_COMPLIANCE_SALT"),
+        "the refusal names the override: {message}"
     );
+    assert!(
+        message.contains("holds no salt"),
+        "the blank rule: {message}"
+    );
+    assert!(!message.contains("bytes"), "not the length rule: {message}");
     assert!(
         !sidecar(&journal).exists(),
         "a refused override creates no sidecar and falls back to nothing"
+    );
+}
+
+/// Whitespace is what the blank rule refuses, and that check runs first, so an
+/// all-space override of the required thirty-two bytes is still refused as blank.
+#[test]
+fn a_whitespace_only_override_of_the_required_length_is_refused() {
+    let scratch = Scratch::new();
+    let journal = scratch.journal();
+    let err = resolve_salt(Some(&" ".repeat(32)), &journal).expect_err("a blank override refused");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    let message = err.message.as_str();
+    assert!(
+        message.contains("holds no salt"),
+        "the blank rule: {message}"
+    );
+    assert!(!message.contains("bytes"), "not the length rule: {message}");
+    assert!(
+        !sidecar(&journal).exists(),
+        "a refused override leaves no sidecar"
     );
 }
 
@@ -390,18 +415,17 @@ fn a_blank_configured_value_is_refused() {
 fn a_short_configured_value_is_refused() {
     let scratch = Scratch::new();
     let journal = scratch.journal();
-    let err = resolve_salt(Some("short"), &journal).expect_err("a five-byte override is refused");
+    let literal = "~~~~~~~~";
+    let err = resolve_salt(Some(literal), &journal).expect_err("an eight-byte override is refused");
     assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    let message = err.message.as_str();
     assert!(
-        err.message.contains("CLIO_COMPLIANCE_SALT"),
-        "the refusal names the override: {}",
-        err.message
+        message.contains("CLIO_COMPLIANCE_SALT"),
+        "the refusal names the override: {message}"
     );
-    assert!(
-        err.message.contains("32"),
-        "the refusal names the length required: {}",
-        err.message
-    );
+    assert!(message.contains("32"), "the minimum: {message}");
+    assert!(message.contains("8 bytes"), "the bytes seen: {message}");
+    assert!(!message.contains(literal), "the value: {message}");
     assert!(
         !sidecar(&journal).exists(),
         "a refused override creates no sidecar and falls back to nothing"

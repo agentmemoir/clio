@@ -42,7 +42,8 @@ use crate::export_custody::export_custody_files::{fsync_dir, io_error, open_owne
 /// The environment override an operator sets to supply the salt directly.
 const SALT_ENV: &str = "CLIO_COMPLIANCE_SALT";
 
-/// The exact salt length the persisted sidecar must hold.
+/// The length the persisted sidecar must hold exactly, and the minimum the
+/// `CLIO_COMPLIANCE_SALT` override must reach.
 const SALT_LEN: usize = 32;
 
 /// The suffix that turns the erasure-journal path into its salt sibling.
