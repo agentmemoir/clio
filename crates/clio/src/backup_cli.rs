@@ -428,3 +428,7 @@ mod backup_cli_help_words_tests;
 #[cfg(test)]
 #[path = "backup_cli_probe_tests.rs"]
 mod backup_cli_probe_tests;
+
+#[cfg(test)]
+#[path = "backup_cli_target_tests.rs"]
+mod backup_cli_target_tests;

@@ -213,6 +213,22 @@ fn cli_t12b_bad_flags_and_extra_args_fail_closed() {
     assert_eq!(code, ExitCode::from(2), "{err}");
 }
 
+/// `backup dir --help` prints the command's own usage rather than resolving a
+/// directory, so asking for help never creates one.
+#[test]
+fn cli_t12c_help_prints_the_usage_and_creates_nothing() {
+    let scratch = Scratch::new("t12c");
+    let cwd = scratch.path().to_path_buf();
+    let (code, out, err) = run_backup(&["dir", "--help"], &[], Ok(cwd.clone()), true);
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert!(out.contains("usage: clio backup dir"), "{out}");
+    assert!(out.contains("--output"), "{out}");
+    assert!(
+        !cwd.join("clio-backups").exists(),
+        "asking for help must not create the backup directory"
+    );
+}
+
 #[test]
 fn cli_t13_no_database_is_needed_or_opened() {
     let scratch = Scratch::new("t13");
