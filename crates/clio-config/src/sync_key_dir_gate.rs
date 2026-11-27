@@ -332,13 +332,17 @@ fn restrict_held(dir: &OwnedFd, parent: &Path) -> Result<(), AmError> {
 /// # Errors
 /// [`ErrorCode::Internal`] naming the path when it cannot be read at all.
 #[cfg(unix)]
-// macOS reports st_dev as i32, but a device number is never negative.
-#[allow(clippy::cast_sign_loss)]
 fn still_the_held_entry(parent: &Path, held: &rustix::fs::Stat) -> Result<bool, AmError> {
     use std::os::unix::fs::MetadataExt;
     let now =
         std::fs::symlink_metadata(parent).map_err(|err| dir_error(parent, READ_ACTION, &err))?;
-    Ok(now.dev() == held.st_dev as u64 && now.ino() == held.st_ino)
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let same_dev = now.dev() == held.st_dev;
+    // macOS reports st_dev as i32, but a device number is never negative.
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    #[allow(clippy::cast_sign_loss)]
+    let same_dev = now.dev() == held.st_dev as u64;
+    Ok(same_dev && now.ino() == held.st_ino)
 }
 
 /// Judge the parent by its one path lookup, for a platform with no descriptor to
