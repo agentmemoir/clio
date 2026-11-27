@@ -348,6 +348,12 @@ fn inside<'path>(backup_dir: &Path, root: &Path, path: &'path Path) -> Option<&'
 #[path = "prune_delete_tests.rs"]
 mod tests;
 
+/// The confirmed run on a platform with no directory descriptor: every candidate
+/// is inspected, refused, and left on disk.
+#[cfg(all(test, not(unix)))]
+#[path = "prune_delete_non_unix_tests.rs"]
+mod non_unix_tests;
+
 /// The descriptor-relative mechanics a removal uses: the directory held open for
 /// the run, the one inspection of a bare name, the identity confirm, the unlink.
 #[path = "prune_delete_dir.rs"]
