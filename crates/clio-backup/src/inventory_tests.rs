@@ -257,6 +257,7 @@ fn t11g_read_manifest_missing_file_is_not_found() {
 }
 /// A file that cannot be opened for a reason other than "not found" (here
 /// a symlink loop) is an Internal error, not NotFound.
+#[cfg(unix)]
 #[test]
 fn t11h_open_error_other_than_not_found() {
     let dir = temp_dir("symlinkloop");

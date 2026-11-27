@@ -15,6 +15,8 @@
 //!   the backup directory
 //! - The `remove` refusals a real name can produce: a name too long to inspect,
 //!   and an unlink a read-only directory will not make
+//! - The `refuse_unconfirmed` refusal a platform without a descriptor and an
+//!   inode identity reports for every confirmed candidate
 //!
 //! ## Does not own
 //! - The removal rules themselves (see `prune_delete`)
@@ -356,4 +358,54 @@ fn an_entry_removed_between_the_inspection_and_the_unlink_reports_already_gone()
     assert_eq!(report.reclaimed_bytes, 0, "and the run freed nothing");
     assert!(!report.has_failures(), "an absent entry is not a failure");
     assert!(!archive.exists(), "the entry really is gone");
+}
+
+/// A removal this platform cannot confirm is refused, and the refusal is a
+/// failure that credits nothing.
+///
+/// The non-unix `remove` body is compiled out on this host, so the test calls
+/// `refuse_unconfirmed` directly: that is the call the non-unix confirmed path
+/// makes once the entry is a plain file and removal was asked for. A
+/// cross-target check proves only that the refusal code compiles for that target;
+/// no run on this host can execute that body, so this test proves the refusal
+/// itself and not the dispatch. The outcome is decided from the candidate alone,
+/// so no file is written and no clock is read.
+#[test]
+fn a_removal_this_platform_cannot_confirm_is_refused() {
+    let path = PathBuf::from(format!("unconfirmed{SNAPSHOT_EXTENSION}"));
+    let archive = candidate("unconfirmed", &path, 4096);
+    let pending = CandidateOutcome {
+        id: archive.id.clone(),
+        path: archive.path.clone(),
+        created_at: archive.created_at.clone(),
+        backend: archive.backend.clone(),
+        slug: archive.slug.clone(),
+        listed_bytes: archive.listed_bytes,
+        reclaimed_bytes: 0,
+        state: CandidateState::Pending,
+        detail: None,
+    };
+
+    let refused = refuse_unconfirmed(&archive, pending);
+
+    assert_eq!(
+        refused.state,
+        CandidateState::Failed,
+        "a removal this platform cannot confirm is not a removal"
+    );
+    assert_eq!(refused.state.label(), "failed", "so a report says so");
+    assert!(refused.state.is_failure(), "and the caller sees a failure");
+    let detail = detail_of(&refused);
+    assert!(
+        detail.contains("cannot confirm"),
+        "{refused:?} must say what the platform cannot do"
+    );
+    assert!(
+        detail.contains("not removed"),
+        "{refused:?} must say the archive was left in place"
+    );
+    assert_eq!(
+        refused.reclaimed_bytes, 0,
+        "a refusal frees nothing, so it credits nothing"
+    );
 }

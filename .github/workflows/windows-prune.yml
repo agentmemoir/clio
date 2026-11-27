@@ -1,0 +1,104 @@
+# Windows prune: the only place the non-unix prune branch runs.
+#
+# `prune_delete` refuses every confirmed removal on a platform with no directory
+# descriptor, and no Linux runner can reach that branch. This workflow runs just
+# the prune tests on Windows, so unrelated Windows behavior cannot make it red,
+# and it needs no service because those tests touch a scratch directory and
+# nothing else. The job and its setup are the same as the ubuntu jobs in ci.yml;
+# only the runner and the warning allowance differ.
+name: Windows prune
+
+on:
+  push:
+    branches: [master, main]
+    # Copied from ci.yml so the two files run on the same changes.
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'sql/**'
+      - 'Makefile'
+      - 'mk/**'
+      - 'scripts/**'
+      - 'hooks.d/**'
+      - 'rust-toolchain.toml'
+      - '.config/nextest.toml'
+      - 'changelog.d/**'
+      - 'CHANGELOG.md'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/scoped-coverage.yml'
+      - '.github/workflows/secret-service.yml'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [master, main]
+    # Copied from ci.yml so the two files run on the same changes.
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'sql/**'
+      - 'Makefile'
+      - 'mk/**'
+      - 'scripts/**'
+      - 'hooks.d/**'
+      - 'rust-toolchain.toml'
+      - '.config/nextest.toml'
+      - 'changelog.d/**'
+      - 'CHANGELOG.md'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/scoped-coverage.yml'
+      - '.github/workflows/secret-service.yml'
+      - '.github/workflows/**'
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  windows-prune:
+    name: windows-prune
+    runs-on: windows-latest
+    timeout-minutes: 20
+    # The workspace denies warnings, and clio-config has two Windows-only
+    # unused-code warnings today. This job measures the prune refusal, not lint,
+    # so warnings are allowed here and the lint job keeps its own rule.
+    env:
+      RUSTFLAGS: "-A warnings"
+    steps:
+      # Same shared setup as the ubuntu jobs in ci.yml, including full history
+      # and the cache key, so this job does not start cold.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.99.1
+          components: rustfmt, llvm-tools-preview
+
+      # `shell: bash` because the runner's default shell on Windows is pwsh and
+      # this body is POSIX shell. Git Bash ships on the image.
+      - name: Fail if the runner and the pin disagree
+        shell: bash
+        run: |
+          pinned=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          actual=$(rustc --version | cut -d' ' -f2)
+          if [ "$pinned" != "$actual" ]; then
+            echo "::error::runner has rustc $actual but rust-toolchain.toml pins $pinned"
+            exit 1
+          fi
+          echo "rustc $actual matches the pin"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: check
+
+      # The refusal is guarded here and not only by a cross-target compile: a
+      # lost call in the non-unix body fails this step.
+      - name: Prune tests
+        run: cargo test --locked -p clio-backup prune_delete
