@@ -81,7 +81,12 @@ pub(crate) fn dispatch(state: &McpState, name: &str, args: &Value) -> Result<Val
     }
 }
 
-/// Optional unsigned-integer argument (`limit`, `offset`, `depth`, `max_hops`).
+/// Optional unsigned-integer argument (`limit`, `offset`, `budget_tokens`).
+///
+/// A present value `as_u64` cannot read — a float, a negative, or one above
+/// `u64::MAX` — reads as absent here, so the caller applies its default. The
+/// capped `max_hops` and `depth` arguments do not use this reader: `opt_u64`
+/// refuses a value it cannot use instead of reporting it as omitted.
 pub(crate) fn opt_usize(args: &Value, key: &str) -> Option<usize> {
     args.get(key)
         .and_then(Value::as_u64)

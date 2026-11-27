@@ -55,7 +55,7 @@ use crate::read_explain::explain_hit;
 use crate::read_read_policy::{read_fidelity, read_provenance_floor};
 use crate::read_tools::{opt_usize, str_list, time_axis};
 use crate::runtime::McpState;
-use crate::write_tools::{opt_bool, opt_num, opt_str, req_str};
+use crate::write_tools::{opt_bool, opt_num, opt_str, opt_u64, req_str};
 use clio_config::retention::{DuplicateTolerance, RecallScope, RetentionProfile};
 use clio_retrieve::{
     ComposePack, ComposeRequest, Composer, DEFAULT_BUDGET_TOKENS, DEFAULT_LIMIT, PersonaEntry,
@@ -356,18 +356,21 @@ fn associations(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn graph_query(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let requested_hops = args.get("max_hops").and_then(Value::as_u64);
-    if let Some(hops) = requested_hops
-        && hops > MAX_GRAPH_HOPS as u64
-    {
-        return Err(AmError::new(
-            ErrorCode::OutOfRange,
-            format!("graph_query max_hops must be <= {MAX_GRAPH_HOPS}"),
-        ));
-    }
-    // The check above holds every value at or below the cap, so the narrowing
-    // cannot lose anything and the fallback is unreachable.
-    let hops = requested_hops.map(|hops| usize::try_from(hops).unwrap_or(MAX_GRAPH_HOPS));
+    // One refusal for every value that is present but unusable: `opt_u64` has
+    // already turned a float, a negative, and an integer above `u64::MAX` into
+    // an error, and the checked narrowing below covers anything over the cap.
+    let hops = match opt_u64(args, "max_hops")? {
+        None => None,
+        Some(requested) => match usize::try_from(requested) {
+            Ok(hops) if hops <= MAX_GRAPH_HOPS => Some(hops),
+            _ => {
+                return Err(AmError::new(
+                    ErrorCode::OutOfRange,
+                    format!("graph_query max_hops must be <= {MAX_GRAPH_HOPS}"),
+                ));
+            }
+        },
+    };
     let edge_type = match opt_str(args, "edge_type") {
         None => None,
         Some(raw) => Some(AssocKind::parse(raw)?),
@@ -439,3 +442,7 @@ mod read_retrieve_floor_warning_tests;
 #[cfg(test)]
 #[path = "read_retrieve_not_found_tests.rs"]
 mod not_found_tests;
+
+#[cfg(test)]
+#[path = "read_retrieve_graph_hop_tests.rs"]
+mod read_retrieve_graph_hop_tests;

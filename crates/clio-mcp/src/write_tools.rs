@@ -211,6 +211,29 @@ pub(crate) fn opt_num(args: &Value, key: &str) -> Option<f64> {
     args.get(key).and_then(Value::as_f64)
 }
 
+/// Optional whole non-negative number argument (absent/null -> `None`).
+///
+/// Absence and an unusable value are separate answers, because they are
+/// separate mistakes: an absent key means the tool applies its own default,
+/// while a value the caller did send but this reader cannot use is out of
+/// range. `serde_json` reads a float, a negative integer, and an integer above
+/// `u64::MAX` as no `u64` at all, so answering `None` for those would report a
+/// value the caller sent as one it never sent — the silent drop this reader
+/// exists to prevent. A value of the wrong JSON type is refused earlier, as
+/// `invalid_type`, by the argument contract, which types these fields as
+/// numbers.
+pub(crate) fn opt_u64(args: &Value, key: &str) -> Result<Option<u64>, AmError> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value.as_u64().map(Some).ok_or_else(|| {
+            AmError::new(
+                ErrorCode::OutOfRange,
+                format!("{key} must be a whole non-negative number, got {value}"),
+            )
+        }),
+    }
+}
+
 /// Optional boolean argument (absent/null -> `default`).
 ///
 /// A present value of the wrong JSON type is an error, not a silent fallback to
