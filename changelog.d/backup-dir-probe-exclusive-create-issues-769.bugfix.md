@@ -1,0 +1,1 @@
+`clio backup dir` now checks write access by creating its probe file exclusively, so an entry already sitting at the probe name — including a symbolic link — makes the directory report as not writable instead of truncating the file behind that name.

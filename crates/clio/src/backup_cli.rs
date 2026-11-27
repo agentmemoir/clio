@@ -364,9 +364,26 @@ fn probe_writable(path: &Path) -> bool {
         ".clio-backup-dir-probe-{}-{nanos}",
         std::process::id()
     ));
-    match std::fs::File::create(&probe) {
-        Ok(_) => {
-            let _ = std::fs::remove_file(&probe);
+    claim_probe_name(&probe)
+}
+
+/// Take `probe` exclusively, then remove it again, reporting whether the
+/// directory accepted the new entry.
+///
+/// The open is `create_new`, which is one atomic `O_CREAT|O_EXCL`: it fails
+/// when anything already sits at the name, and it never follows a symlink. A
+/// probe that reused an existing entry would have to truncate whatever the
+/// entry pointed at, so an unwritable directory and a planted entry both
+/// report false and neither touches what is there.
+fn claim_probe_name(probe: &Path) -> bool {
+    match std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(probe)
+    {
+        Ok(file) => {
+            drop(file);
+            let _ = std::fs::remove_file(probe);
             true
         }
         Err(_) => false,
@@ -407,3 +424,7 @@ mod tests;
 #[cfg(test)]
 #[path = "backup_cli_help_words_tests.rs"]
 mod backup_cli_help_words_tests;
+
+#[cfg(test)]
+#[path = "backup_cli_probe_tests.rs"]
+mod backup_cli_probe_tests;
