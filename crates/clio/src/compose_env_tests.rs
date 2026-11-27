@@ -9,7 +9,12 @@
 use super::*;
 
 fn temp_root(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("am-compose-env-{name}-{}", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "am-compose-env-{name}-{}-{seq}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create temp root");
     dir
@@ -142,5 +147,155 @@ fn marker_write_failure_is_reported() {
     std::fs::create_dir(root.join(MARKER_FILE)).expect("block the marker path");
     let err = write_marker(&root, "postgres").expect_err("directory marker must fail");
     assert!(err.contains(MARKER_FILE), "{err}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn marker_write_refuses_a_symlink_and_leaves_the_target_unchanged() {
+    let root = temp_root("marker-symlink-write");
+    let victim = root.join("victim");
+    std::fs::write(&victim, b"content this module must not rewrite\n").expect("plant the victim");
+    std::os::unix::fs::symlink(&victim, root.join(MARKER_FILE)).expect("plant the marker symlink");
+
+    let err = write_marker(&root, "postgres").expect_err("a symlinked marker must be refused");
+    assert!(err.contains(MARKER_FILE), "{err}");
+    assert_eq!(
+        std::fs::read(&victim).expect("read the victim"),
+        b"content this module must not rewrite\n",
+        "the write must not reach the file the symlink named"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn marker_read_refuses_a_symlink_instead_of_trusting_the_forged_selection() {
+    let root = temp_root("marker-symlink-read");
+    let elsewhere = root.join("elsewhere");
+    std::fs::write(&elsewhere, b"postgres\n").expect("plant the forged selection");
+    std::os::unix::fs::symlink(&elsewhere, root.join(MARKER_FILE))
+        .expect("plant the marker symlink");
+
+    let err = read_marker_entry(&root).expect_err("a symlinked marker must be refused");
+    assert!(
+        err.contains(MARKER_FILE) && err.contains("symlink"),
+        "the refusal must name the marker and what it found: {err}"
+    );
+    assert_eq!(
+        read_marker(&root),
+        None,
+        "the forged selection must not be recorded as this root's selection"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn marker_read_refuses_a_named_pipe_by_the_descriptor_type() {
+    let root = temp_root("marker-pipe");
+    let path = root.join(MARKER_FILE);
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        path.as_path(),
+        rustix::fs::Mode::from(0o600),
+    )
+    .expect("plant a named pipe at the marker name");
+
+    let err = read_marker_entry(&root).expect_err("a named pipe is not a recordable marker");
+    assert!(
+        err.contains(MARKER_FILE) && err.contains("not a regular file"),
+        "the refusal must name the marker and what it found: {err}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn open_marker_refuses_a_named_pipe_itself() {
+    let root = temp_root("marker-pipe-gate");
+    let path = root.join(MARKER_FILE);
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        path.as_path(),
+        rustix::fs::Mode::from(0o600),
+    )
+    .expect("plant a named pipe at the marker name");
+
+    // Called directly, so the absence pre-check never runs: only the descriptor
+    // check can refuse this. `NONBLOCK` is what keeps the open from waiting for
+    // a writer, so the refusal is an error rather than a hang.
+    let err = open_marker(&path, rustix::fs::OFlags::RDONLY, "read")
+        .expect_err("the gate itself must refuse a named pipe");
+    assert!(
+        err.contains("not a regular file"),
+        "pins the descriptor check: a fifo slipped past the name is refused by \
+         the opened descriptor's type, not by the pre-check: {err}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn open_marker_opens_without_following_a_symlink() {
+    let root = temp_root("marker-symlink-gate");
+    let target = root.join("target");
+    std::fs::write(&target, b"pg\n").expect("plant the link target");
+    let path = root.join(MARKER_FILE);
+    std::os::unix::fs::symlink(&target, &path).expect("plant the marker symlink");
+    assert!(
+        std::fs::File::open(&path).is_ok(),
+        "the link resolves to a readable regular file, so only no-follow refuses it"
+    );
+
+    let err = open_marker(&path, rustix::fs::OFlags::RDONLY, "read")
+        .expect_err("the gate itself must refuse a symlink");
+    assert!(
+        err.contains(MARKER_FILE) && !err.contains("not a regular file"),
+        "pins the NOFOLLOW flag: the open refuses the link name, it does not \
+         follow it and then inspect the target: {err}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn open_marker_refuses_a_hard_linked_marker() {
+    let root = temp_root("marker-hardlink-gate");
+    let shared = root.join("shared");
+    std::fs::write(&shared, b"postgres\n").expect("plant the shared file");
+    let path = root.join(MARKER_FILE);
+    std::fs::hard_link(&shared, &path).expect("plant a hard link at the marker name");
+
+    let err = open_marker(&path, rustix::fs::OFlags::RDONLY, "read")
+        .expect_err("a marker another name shares must be refused");
+    assert!(
+        err.contains("hard links"),
+        "pins the link count: a regular file with another name sharing it is \
+         refused even though its descriptor type is regular: {err}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn marker_read_has_no_selection_without_a_marker() {
+    let root = temp_root("marker-absent");
+    assert_eq!(
+        read_marker_entry(&root),
+        Ok(None),
+        "a missing marker is no recorded selection, not a refusal"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn marker_read_has_no_selection_for_an_empty_marker() {
+    let root = temp_root("marker-empty");
+    std::fs::write(root.join(MARKER_FILE), b"").expect("plant an empty marker");
+    assert_eq!(
+        read_marker_entry(&root),
+        Ok(None),
+        "an empty regular marker records nothing"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
