@@ -36,6 +36,11 @@ use std::sync::Arc;
 /// that is not a whole number in `1..=i32::MAX` is out of range. The store's
 /// column is a signed 32-bit integer, so that type's maximum is the ceiling.
 /// Shared with the batch pre-flight so the two decoders cannot disagree.
+///
+/// `attempt_n` is required, so an explicit `null` is not absent here: it is a
+/// present value this decoder cannot use and answers as out of range. A value of
+/// the wrong JSON type is refused earlier, as `invalid_type`, by the argument
+/// contract, which types this field as a number.
 pub(crate) fn attempt_n_arg(args: &Value) -> Result<i64, AmError> {
     let value = args
         .get("attempt_n")

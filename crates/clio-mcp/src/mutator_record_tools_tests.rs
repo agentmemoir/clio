@@ -284,10 +284,42 @@ fn a_present_attempt_number_outside_the_range_is_out_of_range() {
             err.message
         );
     }
-    // A present value of the wrong JSON type is out of range too, not missing.
+    // A wrong JSON type is this decoder's fallback for a caller that reaches it
+    // directly: on a real call the argument contract refuses the value first as
+    // `invalid_type`, because the published schema types `attempt_n` as a number.
+    let err = crate::arg_contract::check(
+        "failure_record",
+        &json!({
+            "task_id": "t-5", "attempt_n": "2", "what_failed": "f", "lesson": "l",
+            "bank": "bank-a", "actor": "agent"
+        }),
+    )
+    .expect_err("a string attempt_n is refused at the boundary");
+    assert_eq!(err.code, ErrorCode::InvalidType);
+    assert_eq!(err.message, "attempt_n must be a number");
     let err = attempt_n_arg(&json!({"attempt_n": "2"})).expect_err("not a number");
     assert_eq!(err.code, ErrorCode::OutOfRange);
     assert!(err.message.contains("attempt_n"), "{}", err.message);
+    assert_eq!(count(&s), 0, "a refused argument writes nothing");
+}
+
+/// An explicit `null` is not a type fault, so the argument contract passes it and
+/// this decoder answers: out of range, naming the value the caller sent.
+#[test]
+fn a_null_attempt_number_is_out_of_range_and_names_the_value() {
+    let s = state();
+    let args = json!({
+        "task_id": "t-6", "attempt_n": null, "what_failed": "f", "lesson": "l",
+        "bank": "bank-a", "actor": "agent"
+    });
+    assert!(
+        crate::arg_contract::check("failure_record", &args).is_ok(),
+        "null is absent, not a wrong type"
+    );
+    let err = call(&s, "failure_record", &args).expect_err("null attempt_n");
+    assert_eq!(err.code, ErrorCode::OutOfRange);
+    assert!(err.message.contains("attempt_n"), "{}", err.message);
+    assert!(err.message.contains("null"), "{}", err.message);
     assert_eq!(count(&s), 0, "a refused argument writes nothing");
 }
 
