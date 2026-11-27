@@ -173,9 +173,12 @@ where
     })
 }
 
-/// True when `--help` / `-h` appears anywhere in a subcommand's arguments.
+/// True when `--help` / `-h` appears anywhere in a subcommand's arguments
+/// before the `--` delimiter.
 pub(crate) fn wants_help(args: &[String]) -> bool {
-    args.iter().any(|arg| arg == "--help" || arg == "-h")
+    crate::cli_args::before_delimiter(args)
+        .iter()
+        .any(|arg| arg == "--help" || arg == "-h")
 }
 
 fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {

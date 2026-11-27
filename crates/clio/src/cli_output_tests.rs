@@ -128,6 +128,20 @@ fn mode_from_raw_falls_back_for_unusable_short_output_forms() {
 }
 
 #[test]
+fn mode_from_raw_ignores_output_after_the_delimiter() {
+    // After `--` every token is an operand, so neither spelling selects a mode
+    // and the terminal default still decides.
+    assert_eq!(
+        mode_from_raw(&tokens(&["q", "--", "--output", "text"]), false),
+        OutputMode::Json
+    );
+    assert_eq!(
+        mode_from_raw(&tokens(&["--", "-o=text"]), false),
+        OutputMode::Json
+    );
+}
+
+#[test]
 fn color_requires_a_terminal_and_no_no_color() {
     assert!(supports_color(true, false));
     assert!(!supports_color(true, true));

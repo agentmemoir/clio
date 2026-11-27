@@ -88,6 +88,7 @@ pub(crate) fn mode_from_raw(args: &[String], is_tty: bool) -> OutputMode {
 /// A bare `--output` (or `-o`) followed by another flag (or nothing) has no
 /// value and is ignored, mirroring the parser's fail-closed missing-value rule.
 fn explicit_output(args: &[String]) -> Option<&str> {
+    let args = crate::cli_args::before_delimiter(args);
     let mut found = None;
     let mut index = 0;
     while index < args.len() {
