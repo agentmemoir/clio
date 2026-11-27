@@ -109,13 +109,13 @@ pub enum FailureRecordOutcome {
 /// failure and must not be silently truncated, while `lesson` is the
 /// natural-language reinforcement surfaced into later context and therefore the
 /// token-bomb surface the cap defends. Draft invariants (including
-/// `attempt_n >= 1`) are checked here, before the admission gate, so a
-/// malformed draft never emits an accept event. A duplicate
+/// `attempt_n` in `1..=i32::MAX`) are checked here, before the admission gate,
+/// so a malformed draft never emits an accept event. A duplicate
 /// `(bank, task_id, attempt_n)` is rejected by the store's unique constraint.
 ///
 /// # Errors
-/// Missing bank/timestamp, empty required fields, `attempt_n < 1`, over-cap
-/// lesson, or gate/store failures.
+/// Missing bank/timestamp, an empty required field, `attempt_n` outside
+/// `1..=i32::MAX`, an over-cap lesson, or gate/store failures.
 pub fn failure_record(args: &FailureRecordArgs<'_>) -> Result<FailureRecordOutcome, AmError> {
     let bank = require_bank_and_timestamp(args.ctx, args.timestamp)?;
     require_nonempty(args.task_id, "task_id")?;
@@ -132,6 +132,7 @@ pub fn failure_record(args: &FailureRecordArgs<'_>) -> Result<FailureRecordOutco
             "failure record attempt_n must be >= 1",
         ));
     }
+    check_attempt_n_ceiling(args.attempt_n)?;
     let lesson_tokens = args.history_policy.check_lesson(args.lesson)?;
     let item = carrier_item(args, bank, lesson_tokens);
     let req = GateRequest {
@@ -217,6 +218,22 @@ pub fn failure_record(args: &FailureRecordArgs<'_>) -> Result<FailureRecordOutco
         None,
     );
     Ok(FailureRecordOutcome::Stored { record, decision })
+}
+
+/// The store's `attempt_n` column is a signed 32-bit integer, so a larger value
+/// would not fit. It is refused rather than clamped: `attempt_n` identifies the
+/// attempt under `UNIQUE (bank_id, task_id, attempt_n)`.
+fn check_attempt_n_ceiling(attempt_n: i64) -> Result<(), AmError> {
+    if attempt_n > i64::from(i32::MAX) {
+        return Err(AmError::new(
+            ErrorCode::OutOfRange,
+            format!(
+                "failure record attempt_n must be in 1..={}, got {attempt_n}",
+                i32::MAX
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn carrier_item(args: &FailureRecordArgs<'_>, bank: &str, lesson_tokens: usize) -> MemoryItem {

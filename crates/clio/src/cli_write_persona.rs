@@ -28,8 +28,8 @@
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
 use crate::cli_read::{
-    base_args, flag, one_positional, parse_u64, parse_unit_f64, require_flags, required_flags,
-    validate_choice,
+    base_args, flag, one_positional, parse_u64_in_range, parse_unit_f64, require_flags,
+    required_flags, validate_choice,
 };
 use crate::cli_write_group::{Refusal, WriteCall, WriteGroup, decision_refusal};
 use serde_json::{Map, Value, json};
@@ -193,7 +193,7 @@ fn failure_record_call(verb: &str, parsed: &ParsedArgs) -> Result<WriteCall, Cli
     require_flags(parsed, verb, required_flags(verb))?;
     let mut args = base_args(parsed);
     args.insert("task_id".into(), Value::from(task_id));
-    let attempt = parse_u64("attempt-n", flag(parsed, "attempt-n"))?;
+    let attempt = parse_u64_in_range("attempt-n", flag(parsed, "attempt-n"), 1, i32::MAX as u64)?;
     args.insert("attempt_n".into(), json!(attempt));
     args.insert(
         "what_failed".into(),

@@ -262,9 +262,9 @@ impl FailureRecord {
     /// Structural well-formedness (not admission scoring or the lesson cap).
     ///
     /// # Errors
-    /// Empty ids/`what_failed`, `attempt_n < 1`, a non-belief kind, an
-    /// out-of-range admission score, or a `context` that is empty or over the
-    /// published byte maximum.
+    /// Empty ids/`what_failed`, `attempt_n` outside `1..=i32::MAX`, a non-belief
+    /// kind, an out-of-range admission score, or a `context` that is empty or
+    /// over the published byte maximum.
     pub fn validate(&self) -> Result<(), AmError> {
         if self.id.is_empty()
             || self.bank_id.is_empty()
@@ -281,6 +281,17 @@ impl FailureRecord {
             return Err(AmError::new(
                 ErrorCode::OutOfRange,
                 "failure record attempt_n must be >= 1",
+            ));
+        }
+        // The store column is a signed 32-bit integer.
+        if self.attempt_n > i64::from(i32::MAX) {
+            return Err(AmError::new(
+                ErrorCode::OutOfRange,
+                format!(
+                    "failure record attempt_n must be in 1..={}, got {}",
+                    i32::MAX,
+                    self.attempt_n
+                ),
             ));
         }
         if self.what_failed.is_empty() {

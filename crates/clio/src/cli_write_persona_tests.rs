@@ -275,6 +275,33 @@ fn persona_write_usage_errors_exit_two() {
     assert!(err.contains("--attempt-n"), "{err}");
 }
 
+/// An out-of-range `--attempt-n` is refused at the flag boundary: exit 2 with a
+/// usage message naming the flag and the value the caller typed, so the caller
+/// never reaches the domain layer's `out_of_range` for a value it can fix here.
+#[test]
+fn failure_record_refuses_an_out_of_range_attempt_number_at_the_flag() {
+    let s = state();
+    for raw in ["0", "2147483648"] {
+        let (code, _out, err) = run_write_state(
+            "failure record",
+            &[
+                "task-1",
+                "--attempt-n",
+                raw,
+                "--what-failed",
+                "w",
+                "--lesson",
+                "l",
+            ],
+            &s,
+            false,
+        );
+        assert_eq!(code, ExitCode::from(2), "{raw}: {err}");
+        assert!(err.contains("--attempt-n"), "{raw}: {err}");
+        assert!(err.contains(raw), "{raw}: {err}");
+    }
+}
+
 #[test]
 fn persona_write_zero_argument_invocations_exit_two_without_panicking() {
     let s = state();

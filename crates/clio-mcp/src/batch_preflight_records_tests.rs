@@ -266,6 +266,35 @@ fn failure_preflight_refuses_a_missing_attempt_number() {
     assert_eq!(count(&s), 0);
 }
 
+/// A present `attempt_n` the store cannot hold is out of range, not missing: the
+/// pre-flight names the field, the value, and the accepted range, and stages
+/// nothing.
+#[test]
+fn failure_preflight_refuses_an_attempt_number_outside_the_range() {
+    let s = state();
+    for raw in [json!(0), json!(i64::from(i32::MAX) + 1)] {
+        let mut params = failure_params();
+        params["attempt_n"] = raw.clone();
+        let ctx = s.resolve_ctx(&params).expect("ctx");
+        let err = refusal(records_preflight(
+            &s,
+            "failure_record",
+            &ctx,
+            STAMP,
+            &params,
+            &signals(&s, &[]),
+        ));
+        assert_eq!(err.code, ErrorCode::OutOfRange, "{raw}");
+        assert!(err.message.contains("attempt_n"), "{raw}: {}", err.message);
+        assert!(
+            err.message.contains("1..=2147483647"),
+            "{raw}: {}",
+            err.message
+        );
+    }
+    assert_eq!(count(&s), 0);
+}
+
 #[test]
 fn task_preflight_refuses_a_missing_definition() {
     let s = state();
