@@ -144,3 +144,71 @@ fn marker_write_failure_is_reported() {
     assert!(err.contains(MARKER_FILE), "{err}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[cfg(unix)]
+#[test]
+fn marker_write_refuses_a_symlink_and_leaves_the_target_unchanged() {
+    let root = temp_root("marker-symlink-write");
+    let victim = root.join("victim");
+    std::fs::write(&victim, b"content this module must not rewrite\n").expect("plant the victim");
+    std::os::unix::fs::symlink(&victim, root.join(MARKER_FILE)).expect("plant the marker symlink");
+
+    let err = write_marker(&root, "postgres").expect_err("a symlinked marker must be refused");
+    assert!(err.contains(MARKER_FILE), "{err}");
+    assert_eq!(
+        std::fs::read(&victim).expect("read the victim"),
+        b"content this module must not rewrite\n",
+        "the write must not reach the file the symlink named"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn marker_read_refuses_a_symlink_instead_of_trusting_the_forged_selection() {
+    let root = temp_root("marker-symlink-read");
+    let elsewhere = root.join("elsewhere");
+    std::fs::write(&elsewhere, b"postgres\n").expect("plant the forged selection");
+    std::os::unix::fs::symlink(&elsewhere, root.join(MARKER_FILE))
+        .expect("plant the marker symlink");
+
+    let err = read_marker_entry(&root).expect_err("a symlinked marker must be refused");
+    assert!(err.contains(MARKER_FILE), "{err}");
+    assert_eq!(
+        read_marker(&root),
+        None,
+        "the forged selection must not be recorded as this root's selection"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn marker_read_refuses_a_named_pipe_rather_than_waiting_on_it() {
+    let root = temp_root("marker-pipe");
+    let path = root.join(MARKER_FILE);
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        path.as_path(),
+        rustix::fs::Mode::from(0o600),
+    )
+    .expect("plant a named pipe at the marker name");
+
+    let err = read_marker_entry(&root).expect_err("a named pipe is not a recordable marker");
+    assert!(err.contains("not a regular file"), "{err}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn marker_second_write_replaces_the_existing_selection() {
+    let root = temp_root("marker-replace");
+    write_marker(&root, "local-rft").expect("write marker");
+    write_marker(&root, "pg").expect("overwrite marker");
+    assert_eq!(
+        std::fs::read(root.join(MARKER_FILE)).expect("read the marker"),
+        b"pg\n",
+        "the second write must truncate, not append to, the earlier selection"
+    );
+    assert_eq!(read_marker(&root), Some("pg".to_string()));
+    let _ = std::fs::remove_dir_all(&root);
+}

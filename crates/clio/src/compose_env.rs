@@ -11,7 +11,7 @@
 //!   directly with owner-only permissions
 //! - The never-overwrite rule for an existing user-owned `.env`
 //! - The selection marker file recording the stack started by `up` (read by
-//!   `down` so it tears down the same services)
+//!   `down` so it tears down the same services), reached only as a regular file
 //!
 //! ## Does not own
 //! - Asset materialization (see `compose_assets`)
@@ -27,6 +27,8 @@
 //! Keep this module focused on the generated Compose environment file.
 
 use crate::compose_assets;
+use rustix::fs::{FileType, Mode, OFlags, fstat, open};
+use std::io::{Read, Write};
 use std::path::Path;
 
 /// The generated `.env`. Populated from the effective config where applicable
@@ -84,7 +86,6 @@ pub(crate) fn write_env(root: &Path, contents: &str) -> Result<(), String> {
 /// and this write.
 #[cfg(unix)]
 fn create_env_file(path: &Path, contents: &str) -> std::io::Result<()> {
-    use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -103,18 +104,70 @@ fn create_env_file(path: &Path, contents: &str) -> std::io::Result<()> {
 /// `clio compose down` tears down the same services without re-asking.
 pub(crate) const MARKER_FILE: &str = ".am-compose-services";
 
-/// Record the selection after `up` succeeds.
+/// Whether the marker name is absent, refusing a symlink and any other
+/// non-regular entry so the refusal names what it found. The open below decides.
+fn marker_absent(path: &Path, action: &str) -> Result<bool, String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(stat) if stat.file_type().is_symlink() => {
+            Err(format!("cannot {action} {MARKER_FILE}: it is a symlink"))
+        }
+        Ok(stat) if !stat.file_type().is_file() => Err(format!(
+            "cannot {action} {MARKER_FILE}: it is not a regular file"
+        )),
+        Ok(_) => Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(e) => Err(format!("cannot {action} {MARKER_FILE}: {e}")),
+    }
+}
+
+/// Open the marker on the entry the name holds: `NOFOLLOW` refuses a symlink,
+/// `NONBLOCK` makes a fifo an error rather than a wait, and the descriptor is
+/// confirmed a regular file before any byte moves through it.
+fn open_marker(path: &Path, access: OFlags, action: &str) -> Result<std::fs::File, String> {
+    let flags = access | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let fd = open(path, flags, Mode::from(0o644))
+        .map_err(|e| format!("cannot {action} {MARKER_FILE}: {e}"))?;
+    let stat = fstat(&fd).map_err(|e| format!("cannot {action} {MARKER_FILE}: {e}"))?;
+    if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
+        return Err(format!(
+            "cannot {action} {MARKER_FILE}: it is not a regular file"
+        ));
+    }
+    Ok(std::fs::File::from(fd))
+}
+
+/// Record the selection after `up` succeeds. An existing regular marker is
+/// replaced in place, so a second `up` on the same root records the new choice.
 pub(crate) fn write_marker(root: &Path, selection: &str) -> Result<(), String> {
-    std::fs::write(root.join(MARKER_FILE), format!("{selection}\n"))
+    let path = root.join(MARKER_FILE);
+    marker_absent(&path, "write")?;
+    let mut marker = open_marker(&path, OFlags::WRONLY | OFlags::CREATE, "write")?;
+    marker
+        .set_len(0)
+        .and_then(|()| marker.write_all(format!("{selection}\n").as_bytes()))
         .map_err(|e| format!("cannot write {MARKER_FILE}: {e}"))
 }
 
-/// Read the recorded selection, if any.
+/// Read the recorded selection: `Ok(None)` when there is no marker, an error
+/// when the name is there but is not a regular file this module may read.
+fn read_marker_entry(root: &Path) -> Result<Option<String>, String> {
+    let path = root.join(MARKER_FILE);
+    if marker_absent(&path, "read")? {
+        return Ok(None);
+    }
+    let mut marker = open_marker(&path, OFlags::RDONLY, "read")?;
+    let mut text = String::new();
+    marker
+        .read_to_string(&mut text)
+        .map_err(|e| format!("cannot read {MARKER_FILE}: {e}"))?;
+    let trimmed = text.trim().to_string();
+    Ok((!trimmed.is_empty()).then_some(trimmed))
+}
+
+/// Read the recorded selection, if any. An unreadable marker is no recorded
+/// selection, as a plain read of the same file reported.
 pub(crate) fn read_marker(root: &Path) -> Option<String> {
-    std::fs::read_to_string(root.join(MARKER_FILE))
-        .ok()
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty())
+    read_marker_entry(root).ok().flatten()
 }
 
 #[cfg(test)]
