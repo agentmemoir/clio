@@ -1,0 +1,1 @@
+Sync pull coverage now places an unplaceable writer stamp straight into the relay journal, so the pull path again verifies that the row is quarantined as `malformed_stamp`, counted once, and skipped by the pull cursor.
