@@ -353,24 +353,55 @@ fn unsupported_backend(backend: &str, command: &str) -> CliError {
     ))
 }
 
-/// Probe writability by creating and removing a uniquely named empty file
+/// How many distinct candidate names the probe tries before it answers false.
+const PROBE_NAME_ATTEMPTS: u32 = 8;
+
+/// Probe writability by creating and removing one uniquely named empty file
 /// inside the directory. Informational: an unwritable but existing directory
 /// still exits 0.
+///
+/// A candidate name another entry already holds is skipped for the next one,
+/// so a taken name is not read as an unwritable directory. A directory that
+/// refuses the create, or one whose every candidate name is taken, reports
+/// false and touches nothing.
 fn probe_writable(path: &Path) -> bool {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.subsec_nanos());
-    let probe = path.join(format!(
-        ".clio-backup-dir-probe-{}-{nanos}",
-        std::process::id()
-    ));
-    match std::fs::File::create(&probe) {
-        Ok(_) => {
-            let _ = std::fs::remove_file(&probe);
-            true
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let stem = format!(".clio-backup-dir-probe-{}-{nanos}", std::process::id());
+    let candidates: Vec<PathBuf> = (0..PROBE_NAME_ATTEMPTS)
+        .map(|attempt| path.join(format!("{stem}-{attempt}")))
+        .collect();
+    claim_probe_name(&candidates)
+}
+
+/// Try `candidates` in order and report whether the directory accepted a new
+/// entry under one, removing only the entry this call created.
+///
+/// Every open is `create_new`, one atomic `O_CREAT|O_EXCL`: it fails when
+/// anything already sits at the name, and it never follows a symlink. A name
+/// already taken is the only failure that tries the next candidate; any other
+/// error is the answer, because a probe that reused an existing entry would
+/// have to truncate whatever that entry points at.
+fn claim_probe_name(candidates: &[PathBuf]) -> bool {
+    for candidate in candidates {
+        match std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(candidate)
+        {
+            Ok(file) => {
+                // No handle may stay open at removal time: Windows refuses to
+                // delete an entry another handle still holds.
+                drop(file);
+                let _ = std::fs::remove_file(candidate);
+                return true;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return false,
         }
-        Err(_) => false,
     }
+    false
 }
 
 /// Human text for `backup dir`: one line with the path, tier, and state.
@@ -407,3 +438,11 @@ mod tests;
 #[cfg(test)]
 #[path = "backup_cli_help_words_tests.rs"]
 mod backup_cli_help_words_tests;
+
+#[cfg(test)]
+#[path = "backup_cli_probe_tests.rs"]
+mod backup_cli_probe_tests;
+
+#[cfg(test)]
+#[path = "backup_cli_target_tests.rs"]
+mod backup_cli_target_tests;
