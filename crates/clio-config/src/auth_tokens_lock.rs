@@ -169,6 +169,9 @@ fn open_lock_owner_only(lock_path: &Path) -> std::io::Result<File> {
         .create(true)
         .truncate(false)
         .mode(0o600)
+        // A link at the lock path is refused, not followed: the hold belongs to
+        // the lock file the caller named, not to whatever a link points at.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(lock_path)
 }
 

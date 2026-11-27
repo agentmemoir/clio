@@ -384,7 +384,9 @@ fn try_bounded(
 /// A shared hold never needs write access, so when the store's directory does
 /// not permit creating the file, the hold is still taken through a read-only
 /// descriptor of an existing lock file. An exclusive hold must record its
-/// pid, so it requires the writable open.
+/// pid, so it requires the writable open. Neither open follows a symlink at
+/// the lock path, so a planted link cannot carry the hold or the pid
+/// truncation to its target.
 fn open_lock_file(lock_path: &Path, require_writable: bool) -> Result<File, AmError> {
     let context = format!("opening the store lock {}", lock_path.display());
     // The lock sits beside its store, so a store under a fresh directory (a
@@ -402,11 +404,13 @@ fn open_lock_file(lock_path: &Path, require_writable: bool) -> Result<File, AmEr
         .create(true)
         .truncate(false)
         .mode(0o600)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
         .open(lock_path);
     match writable {
         Ok(file) => Ok(file),
         Err(error) if !require_writable => OpenOptions::new()
             .read(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
             .open(lock_path)
             .map_err(|_| map_db_err(&context, error)),
         Err(error) => Err(map_db_err(&context, error)),
