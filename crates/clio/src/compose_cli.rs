@@ -206,12 +206,14 @@ pub(crate) fn compose_down(
             root.display()
         ));
     }
-    let selection = flags
-        .get("services")
-        .map(String::as_str)
-        .map(str::to_owned)
-        .or_else(|| compose_env::read_marker(&root));
-    let stack = match selection {
+    let recorded = match flags.get("services") {
+        Some(raw) => Some(raw.to_owned()),
+        None => match compose_env::read_marker_entry(&root) {
+            Ok(recorded) => recorded,
+            Err(e) => return fail(&e),
+        },
+    };
+    let stack = match recorded {
         Some(raw) => match Stack::parse_selection(&raw) {
             Ok(stack) => stack,
             Err(e) => return fail(&e),

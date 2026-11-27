@@ -298,8 +298,9 @@ impl StatusDeps for RealStatus {
 }
 
 /// Read the Compose project's service state through the existing runner seam.
-/// A missing project, unsupported platform, absent Docker, or non-zero Compose
-/// exit all degrade to a reported [`ComposeView`] rather than failing status.
+/// A missing project, unsupported platform, absent Docker, refused selection
+/// marker, or non-zero Compose exit all degrade to a reported [`ComposeView`]
+/// rather than failing status.
 fn probe_compose(runner: &dyn DockerRunner, root: &Path, os: &str, arch: &str) -> ComposeView {
     if !root.join("compose.yml").exists() {
         return ComposeView::NotMaterialized;
@@ -308,7 +309,11 @@ fn probe_compose(runner: &dyn DockerRunner, root: &Path, os: &str, arch: &str) -
         Ok(target) => target,
         Err(reason) => return ComposeView::Unavailable { reason },
     };
-    let stack = compose_env::read_marker(root)
+    let recorded = match compose_env::read_marker_entry(root) {
+        Ok(recorded) => recorded,
+        Err(reason) => return ComposeView::Unavailable { reason },
+    };
+    let stack = recorded
         .and_then(|raw| Stack::parse_selection(&raw).ok())
         .unwrap_or(Stack::PostgresOnly);
     let args = compose_args(target, stack, "ps", &["-a", "--format", "json"]);

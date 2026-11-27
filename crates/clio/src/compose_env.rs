@@ -122,7 +122,9 @@ fn marker_absent(path: &Path, action: &str) -> Result<bool, String> {
 
 /// Open the marker on the entry the name holds: `NOFOLLOW` refuses a symlink,
 /// `NONBLOCK` makes a fifo an error rather than a wait, and the descriptor is
-/// confirmed a regular file before any byte moves through it.
+/// confirmed to be a regular file with no other name sharing it before any byte
+/// moves through it. The held form in `compose_assets_fs` cannot stand in here,
+/// because it creates the leaf it opens and so cannot report absence as absence.
 fn open_marker(path: &Path, access: OFlags, action: &str) -> Result<std::fs::File, String> {
     let flags = access | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
     let fd = open(path, flags, Mode::from(0o644))
@@ -131,6 +133,12 @@ fn open_marker(path: &Path, access: OFlags, action: &str) -> Result<std::fs::Fil
     if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
         return Err(format!(
             "cannot {action} {MARKER_FILE}: it is not a regular file"
+        ));
+    }
+    if stat.st_nlink != 1 {
+        return Err(format!(
+            "cannot {action} {MARKER_FILE}: it has {} hard links, so another name shares the file",
+            stat.st_nlink
         ));
     }
     Ok(std::fs::File::from(fd))
@@ -149,8 +157,9 @@ pub(crate) fn write_marker(root: &Path, selection: &str) -> Result<(), String> {
 }
 
 /// Read the recorded selection: `Ok(None)` when there is no marker, an error
-/// when the name is there but is not a regular file this module may read.
-fn read_marker_entry(root: &Path) -> Result<Option<String>, String> {
+/// when the name is there but is not a regular file this module may read, so a
+/// refusal reaches the caller as a refusal.
+pub(crate) fn read_marker_entry(root: &Path) -> Result<Option<String>, String> {
     let path = root.join(MARKER_FILE);
     if marker_absent(&path, "read")? {
         return Ok(None);
@@ -164,8 +173,10 @@ fn read_marker_entry(root: &Path) -> Result<Option<String>, String> {
     Ok((!trimmed.is_empty()).then_some(trimmed))
 }
 
-/// Read the recorded selection, if any. An unreadable marker is no recorded
-/// selection, as a plain read of the same file reported.
+/// Read the recorded selection, if any, for the tests that assert the
+/// `Option`-shaped contract of the marker. Production callers report a refusal,
+/// so they call [`read_marker_entry`] directly.
+#[cfg(test)]
 pub(crate) fn read_marker(root: &Path) -> Option<String> {
     read_marker_entry(root).ok().flatten()
 }
