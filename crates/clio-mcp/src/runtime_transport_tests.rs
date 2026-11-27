@@ -100,7 +100,7 @@ fn the_refusal_names_the_transport_and_nothing_else() {
     for secret in ["token", "secret", "/", "\\", "localhost", "127.0.0.1"] {
         assert!(
             !message.contains(secret),
-            "the refusal must not carry `{secret}`: {message}"
+            "the refusal must carry no secret, host, or path"
         );
     }
 }
