@@ -20,9 +20,10 @@
 //! Test-only. Never compiled into production builds.
 
 use super::*;
+#[cfg(unix)]
+use crate::fixtures::write_is_refused;
 use crate::fixtures::{
     Scratch, dir_entries, key_source, names_with_extension, request, staged_payload,
-    write_is_refused,
 };
 
 /// A read-only backup directory is a real refusal of its own: the directory is

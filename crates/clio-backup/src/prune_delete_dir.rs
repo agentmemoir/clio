@@ -12,7 +12,7 @@
 //! - The one inspection of a bare name: its type and the size a removal credits
 //! - The device-and-inode identity confirm between the inspection and the unlink
 //! - The unlink of a bare name in that same held directory
-//! - The path-based removal other platforms keep instead
+//! - The fail-closed refusal other platforms report instead
 //!
 //! ## Does not own
 //! - Which bare name is a candidate (`prune_delete::inside` decides that)
@@ -36,10 +36,12 @@
 //! and inode across the two calls then refuses a name replaced in the gap
 //! instead of removing it.
 //!
-//! Unix only: the calls are POSIX `openat`/`fstatat`/`unlinkat`. Other platforms
-//! have no descriptor to hold and no inode identity to compare, so this module
-//! keeps the path-based `symlink_metadata`/`remove_file` form there (see
-//! `remove`).
+//! Unix only: the calls are POSIX `openat`/`fstatat`/`unlinkat`, so an entry a
+//! run inspected is confirmed by device and inode before it is unlinked. A
+//! platform with no descriptor to hold and no inode identity to compare cannot
+//! confirm that, so a confirmed removal there is refused and nothing is removed
+//! (see `remove`). A report-only run on a non-unix platform still inspects by
+//! path.
 //!
 //! Keep this module focused on the file-system mechanics of one candidate.
 
@@ -220,18 +222,22 @@ pub(super) fn remove(
     outcome
 }
 
-/// Remove one candidate by path, on a platform with no directory descriptor and
-/// no inode identity to compare.
+/// Inspect one candidate by path and refuse the removal it would make.
 ///
-/// This is the pre-descriptor sequence, unchanged in effect: one
-/// `symlink_metadata`, which does not follow a link, then one `remove_file` on
-/// the bare name in the resolved root. The descriptor and the identity confirm
-/// are unix-only, so the check-then-use gap is not narrowed here by any check.
+/// This crate cannot hold a directory descriptor here, and the stable Rust API
+/// has no `openat`/`statat`/`unlinkat` to bind the stat and the removal to one
+/// opened handle; the crate also forbids unsafe code. The entry a run removes
+/// therefore cannot be confirmed as the entry it inspected. The path is
+/// inspected once with `symlink_metadata`, which does not follow a link, so a
+/// symbolic link and a directory are still refused with the same report as on
+/// unix. A name that is still a plain file after that is then refused rather
+/// than removed: the check-then-use gap between the inspection and the
+/// `remove_file` cannot be closed here, so the removal is not taken.
 #[cfg(not(unix))]
 pub(super) fn remove(
-    held: &BackupDir,
+    _held: &BackupDir,
     candidate: &ArchiveRef,
-    file_name: &OsStr,
+    _file_name: &OsStr,
     remove: bool,
     mut outcome: CandidateOutcome,
 ) -> CandidateOutcome {
@@ -259,18 +265,23 @@ pub(super) fn remove(
     if !remove {
         return outcome;
     }
-    let bytes = metadata.len();
-    match std::fs::remove_file(held.path.join(file_name)) {
-        Ok(()) => {
-            outcome.state = CandidateState::Deleted;
-            outcome.reclaimed_bytes = bytes;
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return gone(outcome),
-        Err(error) => {
-            outcome.state = CandidateState::Failed;
-            outcome.detail = Some(format!("removing {}: {error}", candidate.path.display()));
-        }
-    }
+    refuse_unconfirmed(candidate, outcome)
+}
+
+/// Report a candidate this platform cannot confirm before removal: nothing is
+/// removed and nothing is credited.
+///
+/// The state is `Failed`, not a skip, because the removal did not happen and a
+/// report must not present a refusal as a legitimate skip. The detail names the
+/// archive and says why, so a confirmed run that removes nothing is visible as a
+/// failure and not as an empty success.
+#[cfg(any(not(unix), test))]
+fn refuse_unconfirmed(candidate: &ArchiveRef, mut outcome: CandidateOutcome) -> CandidateOutcome {
+    outcome.state = CandidateState::Failed;
+    outcome.detail = Some(format!(
+        "cannot confirm {} before removing it on this platform, so it was not removed",
+        candidate.path.display()
+    ));
     outcome
 }
 

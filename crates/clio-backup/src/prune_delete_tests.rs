@@ -23,9 +23,12 @@
 //! Test-only. Never compiled into production builds.
 
 use super::*;
+#[cfg(unix)]
 use crate::archive_name::snapshot_id_of;
 use crate::create::create_archive;
-use crate::fixtures::{Scratch, dir_entries, request, staged_payload};
+#[cfg(unix)]
+use crate::fixtures::dir_entries;
+use crate::fixtures::{Scratch, request, staged_payload};
 use crate::inventory::list_snapshot_rows;
 use crate::prune::select;
 use std::path::Path;
@@ -82,6 +85,7 @@ pub(super) fn file_len(path: &Path) -> u64 {
 
 /// The snapshot files in `dir`, so an assertion names archives and not the
 /// other files a fixture leaves beside them.
+#[cfg(unix)]
 fn archives_in(dir: &Path) -> Vec<String> {
     dir_entries(dir)
         .into_iter()
@@ -133,6 +137,7 @@ fn a_report_only_run_removes_nothing_and_claims_no_bytes() {
     assert!(!report.has_failures());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_confirmed_run_removes_the_candidates_and_leaves_the_directory() {
     let scratch = Scratch::new("prune-delete");
@@ -168,6 +173,7 @@ fn a_confirmed_run_removes_the_candidates_and_leaves_the_directory() {
     assert_eq!(report.unreadable[0].id, "broken");
 }
 
+#[cfg(unix)]
 #[test]
 fn the_reclaimed_total_is_only_what_the_run_really_removed() {
     let scratch = Scratch::new("prune-bytes");
@@ -378,24 +384,30 @@ fn a_failed_removal_is_reported_and_the_rest_of_the_run_continues() {
         "{:?}",
         report.candidates[0].detail
     );
+    // The run reaches the second candidate on either platform: removed where the
+    // entry can be confirmed first, refused where it cannot, never stranded.
+    #[cfg(unix)]
+    let (second, freed, kept) = (CandidateState::Deleted, oldest_bytes, false);
+    #[cfg(not(unix))]
+    let (second, freed, kept) = (CandidateState::Failed, 0, true);
+    assert_eq!(states[1], ("oldest", second), "the run continued");
+    assert_eq!(oldest.exists(), kept, "a refusal keeps the archive");
     assert_eq!(
-        states[1],
-        ("oldest", CandidateState::Deleted),
-        "the run continued"
-    );
-    assert!(!oldest.exists(), "the removable archive went anyway");
-    assert!(blocked.is_dir(), "and the directory is still there");
-    assert!(report.has_failures());
-    let failed: Vec<&str> = report.failed().map(|o| o.id.as_str()).collect();
-    assert_eq!(failed, vec!["blocked"], "the failed list names it");
-    assert_eq!(
-        report.reclaimed_bytes, oldest_bytes,
+        report.reclaimed_bytes, freed,
         "only the real removal counts"
     );
     assert_eq!(
-        report.remaining_bytes, 4_096,
+        report.remaining_bytes,
+        4_096 + oldest_bytes - freed,
         "the kept archive's bytes remain"
     );
+    assert!(blocked.is_dir(), "and the directory is still there");
+    assert!(report.has_failures());
+    let failed: Vec<&str> = report.failed().map(|o| o.id.as_str()).collect();
+    #[cfg(unix)]
+    assert_eq!(failed, ["blocked"], "the failed list names it");
+    #[cfg(not(unix))]
+    assert_eq!(failed, ["blocked", "oldest"], "the failed list names both");
 }
 
 /// Rebuild the archive with a different manifest `created_at`, member by member.

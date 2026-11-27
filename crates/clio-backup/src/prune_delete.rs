@@ -50,8 +50,11 @@
 //! that describes something else.
 //!
 //! Other platforms have no descriptor to hold and no inode identity to compare,
-//! so they keep the resolved-parent containment plus the path-based
-//! `symlink_metadata`/`remove_file` sequence, unchanged in effect.
+//! so a removal there cannot be confirmed. A confirmed run fails such a candidate
+//! and removes nothing, and each refusal is reported as a failure so the run
+//! exits as a degraded outcome rather than a success. A report-only run still
+//! inspects every candidate by path on those platforms, so a symlink, a directory,
+//! and an unreadable name keep the report they have on unix.
 //!
 //! Keep this module focused on removing a selected archive.
 
@@ -188,11 +191,16 @@ pub fn assess(backup_dir: &Path, plan: &PrunePlan) -> PruneReport {
     report(backup_dir, plan, false)
 }
 
-/// Remove every candidate in `plan` and report each outcome.
+/// Remove every candidate in `plan` that this platform can confirm, and report
+/// each outcome.
 ///
-/// The directory itself is never removed, even when it ends up empty, and only
-/// the archive file is unlinked: no other file in the directory is touched. One
-/// failing candidate does not stop the run, so a single locked file cannot
+/// A candidate is removed only after the entry this run inspected is confirmed as
+/// the same entry it is about to unlink. On a platform with no descriptor and no
+/// inode identity that confirmation is impossible, so every candidate is refused
+/// there: the run removes nothing, reports the refusal for each candidate, and
+/// fails. The directory itself is never removed, even when it ends up empty, and
+/// only the archive file is unlinked: no other file in the directory is touched.
+/// One failing candidate does not stop the run, so a single locked file cannot
 /// strand the rest; the caller sees the failure in the report.
 #[must_use]
 pub fn delete(backup_dir: &Path, plan: &PrunePlan) -> PruneReport {
@@ -339,6 +347,12 @@ fn inside<'path>(backup_dir: &Path, root: &Path, path: &'path Path) -> Option<&'
 #[cfg(test)]
 #[path = "prune_delete_tests.rs"]
 mod tests;
+
+/// The confirmed run on a platform with no directory descriptor: every candidate
+/// is inspected, refused, and left on disk.
+#[cfg(all(test, not(unix)))]
+#[path = "prune_delete_non_unix_tests.rs"]
+mod non_unix_tests;
 
 /// The descriptor-relative mechanics a removal uses: the directory held open for
 /// the run, the one inspection of a bare name, the identity confirm, the unlink.
