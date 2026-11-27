@@ -121,9 +121,11 @@ fn marker_absent(path: &Path, action: &str) -> Result<bool, String> {
 }
 
 /// Open the marker on the entry the name holds: `NOFOLLOW` refuses a symlink,
-/// `NONBLOCK` makes a fifo an error rather than a wait, and the descriptor is
-/// confirmed to be a regular file with no other name sharing it before any byte
-/// moves through it. The held form in `compose_assets_fs` cannot stand in here,
+/// and the descriptor is confirmed to be a regular file with no other name
+/// sharing it before any byte moves through it. `NONBLOCK` covers the write
+/// path, where `O_WRONLY` on a writerless fifo would otherwise block; the read
+/// path opens a fifo fine and the descriptor type check is what refuses it.
+/// The held form in `compose_assets_fs` cannot stand in here,
 /// because it creates the leaf it opens and so cannot report absence as absence.
 fn open_marker(path: &Path, access: OFlags, action: &str) -> Result<std::fs::File, String> {
     let flags = access | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;

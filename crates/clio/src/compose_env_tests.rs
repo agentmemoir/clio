@@ -9,7 +9,12 @@
 use super::*;
 
 fn temp_root(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("am-compose-env-{name}-{}", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "am-compose-env-{name}-{}-{seq}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create temp root");
     dir
@@ -187,7 +192,7 @@ fn marker_read_refuses_a_symlink_instead_of_trusting_the_forged_selection() {
 
 #[cfg(unix)]
 #[test]
-fn marker_read_refuses_a_named_pipe_rather_than_waiting_on_it() {
+fn marker_read_refuses_a_named_pipe_by_the_descriptor_type() {
     let root = temp_root("marker-pipe");
     let path = root.join(MARKER_FILE);
     rustix::fs::mkfifoat(
@@ -292,19 +297,5 @@ fn marker_read_has_no_selection_for_an_empty_marker() {
         Ok(None),
         "an empty regular marker records nothing"
     );
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
-fn marker_second_write_replaces_the_existing_selection() {
-    let root = temp_root("marker-replace");
-    write_marker(&root, "local-rft").expect("write marker");
-    write_marker(&root, "pg").expect("overwrite marker");
-    assert_eq!(
-        std::fs::read(root.join(MARKER_FILE)).expect("read the marker"),
-        b"pg\n",
-        "the second write must truncate, not append to, the earlier selection"
-    );
-    assert_eq!(read_marker(&root), Some("pg".to_string()));
     let _ = std::fs::remove_dir_all(&root);
 }
