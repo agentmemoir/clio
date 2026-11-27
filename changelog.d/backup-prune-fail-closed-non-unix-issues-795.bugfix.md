@@ -1,0 +1,1 @@
+On platforms other than unix, `clio backup prune --delete` now refuses every archive it cannot confirm before removal instead of deleting a file that another process could have swapped in after inspection; each refusal is reported and the run exits 3.
