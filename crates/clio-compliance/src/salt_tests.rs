@@ -36,8 +36,13 @@ use std::path::Path;
 fn a_configured_value_wins_and_creates_no_file() {
     let scratch = Scratch::new();
     let journal = scratch.journal();
-    let salt = resolve_salt(Some("custom"), &journal).expect("a configured value resolves");
-    assert_eq!(salt, b"custom", "the configured value is the salt");
+    let salt = resolve_salt(Some("custom-configured-salt-32-bytes!"), &journal)
+        .expect("a configured value resolves");
+    assert_eq!(
+        salt, b"custom-configured-salt-32-bytes!",
+        "the configured value is the salt"
+    );
+    assert_eq!(salt.len(), 32, "the configured value is 32 bytes");
     assert!(
         !sidecar(&journal).exists(),
         "a configured value creates no sidecar"
@@ -118,7 +123,8 @@ fn the_fingerprint_follows_the_recorded_salt() {
         "the fingerprint describes the recorded salt"
     );
     let other = tombstone_salt_fingerprint_of(
-        &resolve_salt(Some("another-deployment"), &journal).expect("a configured salt resolves"),
+        &resolve_salt(Some("another-deployment-salt-32-bytes"), &journal)
+            .expect("a configured salt resolves"),
     );
     assert_ne!(
         fingerprint, other,
@@ -365,13 +371,79 @@ fn a_blank_configured_value_is_refused() {
     let journal = scratch.journal();
     let err = resolve_salt(Some("   "), &journal).expect_err("a blank override is refused");
     assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    let message = err.message.as_str();
     assert!(
-        err.message.contains("CLIO_COMPLIANCE_SALT"),
-        "the refusal names the override: {}",
-        err.message
+        message.contains("CLIO_COMPLIANCE_SALT"),
+        "the refusal names the override: {message}"
     );
+    assert!(
+        message.contains("holds no salt"),
+        "the blank rule: {message}"
+    );
+    assert!(!message.contains("bytes"), "not the length rule: {message}");
     assert!(
         !sidecar(&journal).exists(),
         "a refused override creates no sidecar and falls back to nothing"
+    );
+}
+
+/// Whitespace is what the blank rule refuses, and that check runs first, so an
+/// all-space override of the required thirty-two bytes is still refused as blank.
+#[test]
+fn a_whitespace_only_override_of_the_required_length_is_refused() {
+    let scratch = Scratch::new();
+    let journal = scratch.journal();
+    let err = resolve_salt(Some(&" ".repeat(32)), &journal).expect_err("a blank override refused");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    let message = err.message.as_str();
+    assert!(
+        message.contains("holds no salt"),
+        "the blank rule: {message}"
+    );
+    assert!(!message.contains("bytes"), "not the length rule: {message}");
+    assert!(
+        !sidecar(&journal).exists(),
+        "a refused override leaves no sidecar"
+    );
+}
+
+/// A short override is refused rather than used: a salt of a few bytes is
+/// guessable, so every subject hash the journal records under it is guessable
+/// too. The refusal names the override and the length required, and it never
+/// carries the value itself.
+#[test]
+fn a_short_configured_value_is_refused() {
+    let scratch = Scratch::new();
+    let journal = scratch.journal();
+    let literal = "~~~~~~~~";
+    let err = resolve_salt(Some(literal), &journal).expect_err("an eight-byte override is refused");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    let message = err.message.as_str();
+    assert!(
+        message.contains("CLIO_COMPLIANCE_SALT"),
+        "the refusal names the override: {message}"
+    );
+    assert!(message.contains("32"), "the minimum: {message}");
+    assert!(message.contains("8 bytes"), "the bytes seen: {message}");
+    assert!(!message.contains(literal), "the value: {message}");
+    assert!(
+        !sidecar(&journal).exists(),
+        "a refused override creates no sidecar and falls back to nothing"
+    );
+}
+
+/// A salt longer than thirty-two bytes is accepted unchanged: a deployment that
+/// already set one recorded its journal hashes under exactly those bytes, so
+/// refusing it would strand every identifier it hashed.
+#[test]
+fn a_configured_value_longer_than_the_minimum_is_accepted() {
+    let scratch = Scratch::new();
+    let journal = scratch.journal();
+    let configured = "a-configured-salt-of-exactly-forty-bytes";
+    let salt = resolve_salt(Some(configured), &journal).expect("a forty-byte override resolves");
+    assert_eq!(
+        salt,
+        configured.as_bytes(),
+        "the configured value is taken as written"
     );
 }

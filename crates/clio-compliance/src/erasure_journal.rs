@@ -189,8 +189,10 @@ fn divergent_salt(path: &Path, recorded: bool) -> AmError {
             "the erasure journal at {} was recorded under a different deployment salt: {recorded} \
              does not match the fingerprint of the salt this deployment resolves, so a subject \
              hashed here would not be comparable with the denials already recorded. Nothing was \
-             written. Set CLIO_COMPLIANCE_SALT to the salt this journal was recorded under, or \
-             accept that the denials it already holds cannot be verified",
+             written. Set CLIO_COMPLIANCE_SALT to the salt this journal was recorded under when \
+             that salt holds at least 32 bytes, or accept that the denials it already holds \
+             cannot be verified. A journal recorded under a shorter salt cannot be re-signed with \
+             it, so that journal stays unverifiable",
             path.display()
         ),
     )
