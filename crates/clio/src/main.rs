@@ -65,6 +65,7 @@ pub(crate) mod backup_cli_fixtures;
 #[path = "backup_cli_fixtures_handmade_tests.rs"]
 pub(crate) mod backup_cli_fixtures_handmade;
 mod cli_args;
+mod cli_args_delimiter;
 mod cli_args_suggest;
 mod cli_command_bindings;
 mod cli_command_registry;

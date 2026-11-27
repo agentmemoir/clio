@@ -438,12 +438,6 @@ fn a_flag_name_without_a_dash_is_rendered_with_the_double_dash() {
     assert_eq!(error.hint(), Some("did you mean `--confidence`?"));
 }
 
-/// The catalog is requested only by arguments before the `--` delimiter.
-#[test]
-fn the_json_catalog_is_requested_only_before_the_delimiter() {
-    let tokens = |values: &[&str]| values.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>();
-    assert!(super::wants_json_catalog(&tokens(&["health", "--json"])));
-    assert!(super::wants_json_catalog(&tokens(&["--json"])));
-    assert!(!super::wants_json_catalog(&tokens(&["help", "--", "--json"])));
-    assert!(!super::wants_json_catalog(&tokens(&["--", "--json"])));
-}
+#[cfg(test)]
+#[path = "cli_top_level_catalog_tests.rs"]
+mod catalog_tests;

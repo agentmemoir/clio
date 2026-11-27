@@ -105,7 +105,10 @@ fn before_delimiter_stops_at_the_first_delimiter() {
         before_delimiter(&tokens(&["help", "--", "--json"])),
         ["help".to_owned()]
     );
-    assert_eq!(before_delimiter(&tokens(&["help", "--"])), ["help".to_owned()]);
+    assert_eq!(
+        before_delimiter(&tokens(&["help", "--"])),
+        ["help".to_owned()]
+    );
 }
 
 #[test]

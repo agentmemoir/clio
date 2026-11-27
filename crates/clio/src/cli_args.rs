@@ -369,11 +369,6 @@ pub(crate) fn merge_leading_globals(
     command_args
 }
 
-/// The arguments before the first `--` delimiter, or all of them.
-pub(crate) fn before_delimiter(args: &[String]) -> &[String] {
-    &args[..args.iter().position(|arg| arg == "--").unwrap_or(args.len())]
-}
-
 /// Whether `arg` is a global flag that takes a value: one of the declared long
 /// names, or `-o`, the short spelling of `--output`. The token after it is that
 /// flag's value, which no caller may read as a word.
@@ -448,3 +443,6 @@ mod value_tests;
 /// The matcher lives in its own module and its own file; re-exported here so the
 /// grammar and its callers keep one import path for it.
 pub(crate) use crate::cli_args_suggest::suggest;
+
+/// The arguments before the first `--` delimiter, or all of them.
+pub(crate) use crate::cli_args_delimiter::before_delimiter;
