@@ -202,6 +202,31 @@ pub(crate) fn commit_task_upsert_tx(
     Ok(version)
 }
 
+/// A failure record's attempt as the Postgres `integer` the column holds.
+///
+/// The record's own `validate` has already rejected an attempt above `i32::MAX`,
+/// so the narrowing is unreachable through the validated paths; it stays a
+/// `Result` so a caller outside them cannot write a wrapped value.
+pub(crate) fn attempt_n_to_i32(attempt_n: i64) -> Result<i32, AmError> {
+    i32::try_from(attempt_n).map_err(|_| {
+        AmError::new(
+            ErrorCode::InvalidArgument,
+            "failure record attempt_n exceeds the Postgres integer range",
+        )
+    })
+}
+
+/// A failure record's lesson token count as the Postgres `integer` the column
+/// holds, for the same reason as [`attempt_n_to_i32`].
+pub(crate) fn lesson_tokens_to_i32(lesson_tokens: i64) -> Result<i32, AmError> {
+    i32::try_from(lesson_tokens).map_err(|_| {
+        AmError::new(
+            ErrorCode::InvalidArgument,
+            "failure record lesson_tokens exceeds the Postgres integer range",
+        )
+    })
+}
+
 /// Transaction-scoped failure record insert: carrier + row + audit + enqueue.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn commit_failure_record_tx(
@@ -224,8 +249,8 @@ pub(crate) fn commit_failure_record_tx(
     let (category, _) = kind_columns(item);
     let cat = category.map(str::to_owned);
     let epistemic = item.epistemic_kind.as_str();
-    let attempt_i32 = i32::try_from(draft.attempt_n).expect("attempt_n fits i32");
-    let tokens_i32 = i32::try_from(draft.lesson_tokens).expect("lesson tokens fit i32");
+    let attempt_i32 = attempt_n_to_i32(draft.attempt_n)?;
+    let tokens_i32 = lesson_tokens_to_i32(draft.lesson_tokens)?;
     map_history_insert(tx.execute(
         "INSERT INTO failure_records (
                 id, bank_id, item_id, task_id, subject_id, attempt_n, what_failed_cipher,
