@@ -406,5 +406,7 @@ fn admit_rejects_a_file_path_past_the_byte_cap() {
         err.contains(&format!("--file `{}` is larger than the", path.display())),
         "{err}"
     );
+    assert!(err.contains("reads at most 4 MiB"), "{err}");
+    assert!(!err.contains("a batch commits as one transaction"), "{err}");
     let _ = std::fs::remove_file(&path);
 }

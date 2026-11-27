@@ -40,7 +40,8 @@ const TOO_LARGE: &str = "send fewer operations in this batch: a batch commits as
 /// What a caller can do about an admission file that is too large for this
 /// command. The file only feeds a preview, so a smaller file is the honest
 /// alternative and nothing depends on the items arriving together.
-const ADMIT_TOO_LARGE: &str = "send fewer items in this file: `admit --file` only previews the items, so a smaller file covers the same ground";
+const ADMIT_TOO_LARGE: &str =
+    "send a smaller file: `admit --file` reads at most 4 MiB, so remove or shorten items";
 
 /// The atomic batch write command.
 pub(crate) struct BatchWriteGroup;
