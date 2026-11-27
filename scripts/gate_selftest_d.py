@@ -95,7 +95,9 @@ class RunLogTests(unittest.TestCase):
     def test_a_folder_that_is_not_a_repository_logs_nulls_not_a_failure(self) -> None:
         nowhere = self.tmp / "plain"
         nowhere.mkdir()
-        self.assertEqual(run_in(nowhere, self.cache, ["/bin/sh", "-c", "exit 0"]), 0)
+        # Stop git's upward search at the fixture root, so a TMPDIR inside a checkout cannot answer for it.
+        with mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.tmp)}):
+            self.assertEqual(run_in(nowhere, self.cache, ["/bin/sh", "-c", "exit 0"]), 0)
         (line,) = lines(self.cache)
         self.assertIsNone(line["common_dir"])
         self.assertIsNone(line["branch"])
