@@ -365,11 +365,11 @@ fn an_entry_removed_between_the_inspection_and_the_unlink_reports_already_gone()
 ///
 /// The non-unix `remove` body is compiled out on this host, so the test calls
 /// `refuse_unconfirmed` directly: that is the call the non-unix confirmed path
-/// makes once the entry is a plain file and removal was asked for. Only a
-/// cross-target check of the non-unix dispatch proves that this call compiles and
-/// is reached there; no run on this host can execute that body, so this test
-/// proves the refusal itself and not the dispatch. The outcome is decided from the
-/// candidate alone, so no file is written and no clock is read.
+/// makes once the entry is a plain file and removal was asked for. A
+/// cross-target check proves only that the refusal code compiles for that target;
+/// no run on this host can execute that body, so this test proves the refusal
+/// itself and not the dispatch. The outcome is decided from the candidate alone,
+/// so no file is written and no clock is read.
 #[test]
 fn a_removal_this_platform_cannot_confirm_is_refused() {
     let path = PathBuf::from(format!("unconfirmed{SNAPSHOT_EXTENSION}"));

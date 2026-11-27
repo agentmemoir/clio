@@ -40,7 +40,8 @@
 //! run inspected is confirmed by device and inode before it is unlinked. A
 //! platform with no descriptor to hold and no inode identity to compare cannot
 //! confirm that, so a confirmed removal there is refused and nothing is removed
-//! (see `remove`). A report-only run still inspects by path on every platform.
+//! (see `remove`). A report-only run on a non-unix platform still inspects by
+//! path.
 //!
 //! Keep this module focused on the file-system mechanics of one candidate.
 
@@ -221,16 +222,17 @@ pub(super) fn remove(
     outcome
 }
 
-/// Remove one candidate by path, on a platform with no directory descriptor and
-/// no inode identity to compare.
+/// Inspect one candidate by path and refuse the removal it would make.
 ///
-/// This platform has no `openat`/`statat`/`unlinkat` and no device-and-inode
-/// comparison, so it cannot confirm that the entry a run removes is the entry it
-/// inspected. The path is inspected once with `symlink_metadata`, which does not
-/// follow a link, so a symbolic link and a directory are still refused with the
-/// same report as on unix. A name that is still a plain file after that is then
-/// refused rather than removed: the check-then-use gap between the inspection and
-/// the `remove_file` cannot be closed here, so the removal is not taken.
+/// This crate cannot hold a directory descriptor here, and the stable Rust API
+/// has no `openat`/`statat`/`unlinkat` to bind the stat and the removal to one
+/// opened handle; the crate also forbids unsafe code. The entry a run removes
+/// therefore cannot be confirmed as the entry it inspected. The path is
+/// inspected once with `symlink_metadata`, which does not follow a link, so a
+/// symbolic link and a directory are still refused with the same report as on
+/// unix. A name that is still a plain file after that is then refused rather
+/// than removed: the check-then-use gap between the inspection and the
+/// `remove_file` cannot be closed here, so the removal is not taken.
 #[cfg(not(unix))]
 pub(super) fn remove(
     _held: &BackupDir,
