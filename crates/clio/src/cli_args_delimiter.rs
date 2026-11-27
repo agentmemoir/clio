@@ -29,3 +29,7 @@ pub(crate) fn before_delimiter(args: &[String]) -> &[String] {
         .position(|arg| arg == "--")
         .unwrap_or(args.len())]
 }
+
+#[cfg(test)]
+#[path = "cli_args_delimiter_tests.rs"]
+mod tests;

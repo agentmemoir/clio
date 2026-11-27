@@ -94,23 +94,6 @@ fn double_dash_makes_every_following_token_positional() {
     );
 }
 
-/// The helper stops at the first `--`, whatever follows it.
-#[test]
-fn before_delimiter_stops_at_the_first_delimiter() {
-    let plain = tokens(&["health", "--json"]);
-    assert_eq!(before_delimiter(&plain), plain.as_slice());
-    let first = tokens(&["--", "help"]);
-    assert_eq!(before_delimiter(&first), tokens(&[]).as_slice());
-    assert_eq!(
-        before_delimiter(&tokens(&["help", "--", "--json"])),
-        ["help".to_owned()]
-    );
-    assert_eq!(
-        before_delimiter(&tokens(&["help", "--"])),
-        ["help".to_owned()]
-    );
-}
-
 #[test]
 fn unknown_flag_suggests_the_closest_known_flag() {
     let error = parse(&spec(), tokens(&["--limt", "2"])).expect_err("unknown");
