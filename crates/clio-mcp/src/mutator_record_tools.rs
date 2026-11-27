@@ -29,6 +29,29 @@ use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+/// The `attempt_n` argument the failure-record tools require.
+///
+/// Presence and range are separate answers, because they are separate mistakes:
+/// a missing value is a fault in the argument contract, while a present value
+/// that is not a whole number in `1..=i32::MAX` is out of range. The store's
+/// column is a signed 32-bit integer, so that type's maximum is the ceiling.
+/// Shared with the batch pre-flight so the two decoders cannot disagree.
+pub(crate) fn attempt_n_arg(args: &Value) -> Result<i64, AmError> {
+    let value = args
+        .get("attempt_n")
+        .ok_or_else(|| AmError::new(ErrorCode::InvalidArgument, "attempt_n is required"))?;
+    match value.as_i64() {
+        Some(n) if (1..=i64::from(i32::MAX)).contains(&n) => Ok(n),
+        _ => Err(AmError::new(
+            ErrorCode::OutOfRange,
+            format!(
+                "failure_record attempt_n must be in 1..={}, got {value}",
+                i32::MAX
+            ),
+        )),
+    }
+}
+
 /// `persona_put_stable`: discrete/categorical stable entry upsert.
 #[inline(never)]
 pub(crate) fn persona_put_stable(state: &McpState, args: &Value) -> Result<Value, AmError> {
@@ -197,10 +220,7 @@ pub(crate) fn failure_record(state: &McpState, args: &Value) -> Result<Value, Am
         ctx: &ctx,
         subject_id: task_id,
         task_id,
-        attempt_n: args
-            .get("attempt_n")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| AmError::new(ErrorCode::InvalidArgument, "attempt_n is required"))?,
+        attempt_n: attempt_n_arg(args)?,
         what_failed: req_str(args, "what_failed")?,
         lesson: req_str(args, "lesson")?,
         context: context.as_deref(),

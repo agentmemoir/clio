@@ -4,12 +4,14 @@
 //! # Responsibility
 //!
 //! This module tests the registry-fed argument checks over parsed arguments:
-//! that a proved flag reads back as its value, and that the read group's
-//! registry-fed parser spec still refuses a missing required value, an unknown
-//! flag, and a repeated flag while accepting every declared global.
+//! that a proved flag reads back as its value, that a ranged unsigned flag is
+//! bounded where the caller typed it, and that the read group's registry-fed
+//! parser spec still refuses a missing required value, an unknown flag, and a
+//! repeated flag while accepting every declared global.
 //!
 //! ## Owns
 //! - `flag`'s read-back behavior over a parsed command line
+//! - `parse_u64_in_range`'s acceptance of the bounds and refusal outside them
 //! - The registry-fed read spec's refusals and accepted-globals behavior
 //!
 //! ## Does not own
@@ -22,7 +24,7 @@
 //!
 //! Keep this module focused on the argument checks over parsed arguments.
 
-use super::flag;
+use super::{flag, parse_u64_in_range};
 use crate::cli_read_group::ReadGroup;
 use crate::cli_read_test_support::tokens;
 
@@ -38,6 +40,34 @@ fn a_proved_flag_reads_back_as_its_value() {
     .expect("parse");
     assert_eq!(flag(&parsed, "rule"), "keep");
     assert_eq!(flag(&parsed, "absent"), "");
+}
+
+// ---------- the ranged unsigned parser ----------
+
+/// A ranged unsigned flag accepts both bounds and refuses a value below the
+/// floor, one above the ceiling, and one past the type's own maximum, each as a
+/// usage error naming the flag and the raw value the caller typed.
+#[test]
+fn a_ranged_unsigned_flag_is_accepted_at_both_bounds_and_refused_outside_them() {
+    let max = i32::MAX as u64;
+    assert_eq!(parse_u64_in_range("attempt-n", "1", 1, max).unwrap(), 1);
+    assert_eq!(
+        parse_u64_in_range("attempt-n", "2147483647", 1, max).unwrap(),
+        max
+    );
+
+    for raw in ["0", "2147483648", "18446744073709551615"] {
+        let error = parse_u64_in_range("attempt-n", raw, 1, max).expect_err(raw);
+        assert_eq!(error.code(), "usage", "{raw}");
+        assert!(
+            error
+                .message()
+                .contains("--attempt-n must be between 1 and 2147483647"),
+            "{raw}: {}",
+            error.message()
+        );
+        assert!(error.message().contains(raw), "{raw}: {}", error.message());
+    }
 }
 
 // ---------- the registry-fed parser spec ----------

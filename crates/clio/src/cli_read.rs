@@ -42,8 +42,8 @@ use std::sync::Arc;
 /// `cli_read_args` exists for size, not for a second import path.
 pub(crate) use crate::cli_read_args::{
     MAX_PAGE_LIMIT, base_args, flag, no_positionals, one_positional, page_limit, parse_f64,
-    parse_u64, parse_unit_f64, read_args, require_flags, required_flags, validate_choice,
-    validate_time_axis,
+    parse_u64, parse_u64_in_range, parse_unit_f64, read_args, require_flags, required_flags,
+    validate_choice, validate_time_axis,
 };
 
 /// Injected streams, terminal state, and environment for one read command.
