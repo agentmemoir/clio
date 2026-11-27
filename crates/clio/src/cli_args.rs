@@ -369,6 +369,11 @@ pub(crate) fn merge_leading_globals(
     command_args
 }
 
+/// The arguments before the first `--` delimiter, or all of them.
+pub(crate) fn before_delimiter(args: &[String]) -> &[String] {
+    &args[..args.iter().position(|arg| arg == "--").unwrap_or(args.len())]
+}
+
 /// Whether `arg` is a global flag that takes a value: one of the declared long
 /// names, or `-o`, the short spelling of `--output`. The token after it is that
 /// flag's value, which no caller may read as a word.

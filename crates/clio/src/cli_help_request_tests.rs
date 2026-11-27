@@ -60,3 +60,25 @@ fn a_value_flags_value_is_not_a_help_request() {
         &db_is_a_value_flag
     ));
 }
+
+/// Tokens at or after a `--` delimiter are positional, so a help spelling
+/// behind it is not a request.
+#[test]
+fn a_help_spelling_after_the_delimiter_is_not_a_request() {
+    for argv in [
+        vec!["health", "--", "--help"],
+        vec!["--", "--help"],
+        vec!["--", "--json"],
+        vec!["health", "--", "-h"],
+    ] {
+        let argv = argv.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>();
+        assert!(
+            !help_requested(&argv, &db_is_a_value_flag),
+            "{argv:?} must not ask for help"
+        );
+    }
+    assert!(help_requested(
+        &["health".to_owned(), "--help".to_owned()],
+        &db_is_a_value_flag
+    ));
+}

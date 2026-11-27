@@ -62,6 +62,7 @@ pub(crate) fn record_flag_names(name: &str) -> Vec<&'static str> {
 /// boolean's spelling is read from the help record, and only `--json` selects
 /// the catalog, so `--markdown` never does.
 pub(crate) fn wants_json_catalog(args: &[String]) -> bool {
+    let args = crate::cli_args::before_delimiter(args);
     let spec =
         crate::cli_command_registry::find("help").unwrap_or_else(|| panic!("`help` is registered"));
     spec.documented

@@ -27,8 +27,10 @@
 /// read; the token after one is that flag's value when it does not itself start
 /// with `--`, the rule `cli_args::parse` and `parse_flags` already apply. A
 /// value flag's value is not a help request: `--db help` names a database
-/// called `help`.
+/// called `help`. Tokens at or after a `--` delimiter are positional words and
+/// are not read.
 pub(crate) fn help_requested(args: &[String], is_value_flag: &impl Fn(&str) -> bool) -> bool {
+    let args = crate::cli_args::before_delimiter(args);
     let mut index = 0;
     while index < args.len() {
         let arg = args[index].as_str();
