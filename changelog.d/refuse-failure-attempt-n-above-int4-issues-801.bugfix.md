@@ -1,0 +1,1 @@
+Recording a failure with an `attempt_n` above 2147483647 is now refused with an out-of-range error on every path (CLI, MCP `failure_record`, `batch`, and import/sync) instead of panicking the Postgres writer; the number is never clamped, because it identifies the attempt.

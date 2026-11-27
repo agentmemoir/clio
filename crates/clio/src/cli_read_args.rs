@@ -10,7 +10,8 @@
 //! ## Owns
 //! - `base_args` / `read_args`, the common read-tool arguments
 //! - Positional-argument handling and its one-line usage errors
-//! - `parse_u64`, `parse_f64`, and `validate_choice` flag validation
+//! - `parse_u64`, `parse_u64_in_range`, `parse_f64`, and `validate_choice` flag
+//!   validation
 //! - `page_limit`, the shared `--limit` page-size contract, with its named
 //!   default and maximum constants
 //! - `require_flags`, the all-at-once check for a command's required flags
@@ -228,6 +229,27 @@ pub(crate) fn parse_u64(flag: &str, raw: &str) -> Result<u64, CliError> {
             format!("try `--{flag} 10`"),
         )
     })
+}
+
+/// Parse an unsigned flag value that must lie in `min..=max`.
+///
+/// A value that parses but is out of range is a usage error, like every other
+/// caller-supplied flag mistake, rather than an `out_of_range` from the domain
+/// layer: the caller learns at the boundary, where the flag it typed is named.
+pub(crate) fn parse_u64_in_range(
+    flag: &str,
+    raw: &str,
+    min: u64,
+    max: u64,
+) -> Result<u64, CliError> {
+    let value = parse_u64(flag, raw)?;
+    if (min..=max).contains(&value) {
+        return Ok(value);
+    }
+    Err(CliError::usage_hint(
+        format!("--{flag} must be between {min} and {max}, got `{raw}`"),
+        format!("try `--{flag} {min}`"),
+    ))
 }
 
 /// The page size a page-capable read command serves when `--limit` is omitted.

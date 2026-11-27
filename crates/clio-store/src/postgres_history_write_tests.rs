@@ -16,11 +16,37 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use super::{attempt_n_to_i32, lesson_tokens_to_i32};
 use crate::history_store::HistoryStore;
 use crate::postgres_belief::postgres_belief_context_tests::open_pg;
 use crate::sqlite::sqlite_history_tests::{failure_draft, item, task_draft};
 use crate::test_unique::unique;
 use clio_types::{EpisodicType, ErrorCode};
+
+#[test]
+fn attempt_n_above_the_column_range_is_refused_not_panicked() {
+    let over = i64::from(i32::MAX) + 1;
+    let err = attempt_n_to_i32(over).expect_err("attempt_n above i32::MAX");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    assert!(err.message.contains("attempt_n"), "{}", err.message);
+}
+
+#[test]
+fn attempt_n_at_the_column_ceiling_still_converts() {
+    assert_eq!(attempt_n_to_i32(1).expect("attempt 1"), 1);
+    assert_eq!(
+        attempt_n_to_i32(i64::from(i32::MAX)).expect("ceiling"),
+        i32::MAX
+    );
+}
+
+#[test]
+fn lesson_tokens_above_the_column_range_is_refused_not_panicked() {
+    let over = i64::from(i32::MAX) + 1;
+    let err = lesson_tokens_to_i32(over).expect_err("lesson_tokens above i32::MAX");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    assert!(err.message.contains("lesson_tokens"), "{}", err.message);
+}
 
 #[test]
 #[allow(clippy::too_many_lines)]

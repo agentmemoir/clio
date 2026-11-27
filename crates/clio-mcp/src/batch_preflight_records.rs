@@ -180,10 +180,7 @@ fn failure_preflight(
         ctx,
         subject_id: task_id,
         task_id,
-        attempt_n: params
-            .get("attempt_n")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| AmError::new(ErrorCode::InvalidArgument, "attempt_n is required"))?,
+        attempt_n: crate::mutator_record_tools::attempt_n_arg(params)?,
         what_failed: req_str(params, "what_failed")?,
         lesson: req_str(params, "lesson")?,
         context: context.as_deref(),

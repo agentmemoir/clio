@@ -37,6 +37,12 @@ use serde_json::Value;
 /// alternative is fewer operations in this batch, not two batches.
 const TOO_LARGE: &str = "send fewer operations in this batch: a batch commits as one transaction, so splitting it across runs would not apply it atomically";
 
+/// What a caller can do about an admission file that is too large for this
+/// command. The file only feeds a preview, so a smaller file is the honest
+/// alternative and nothing depends on the items arriving together.
+const ADMIT_TOO_LARGE: &str =
+    "send a smaller file: `admit --file` reads at most 4 MiB, so remove or shorten items";
+
 /// The atomic batch write command.
 pub(crate) struct BatchWriteGroup;
 
@@ -161,18 +167,27 @@ pub(crate) fn admit_batch_call(parsed: &ParsedArgs, path: &str) -> Result<WriteC
             "each item object may carry its own bounded `context` string",
         ));
     }
-    let raw = std::fs::read_to_string(path)
-        .map_err(|error| CliError::usage(format!("--file `{path}` is not readable: {error}")))?;
-    let value: Value = serde_json::from_str(&raw)
+    let raw = crate::cli_read_cap::read_document_file(
+        path,
+        &format!("--file `{path}`"),
+        ADMIT_TOO_LARGE,
+    )?;
+    let mut value: Value = serde_json::from_str(&raw)
         .map_err(|error| CliError::usage(format!("--file must contain a JSON object: {error}")))?;
-    let Some(items) = value.get("items").filter(|items| items.is_array()) else {
+    // The map is owned here, so the array is taken out of it instead of copied:
+    // a second copy of every item is exactly the memory the input cap bounds.
+    let Some(items) = value
+        .as_object_mut()
+        .and_then(|fields| fields.remove("items"))
+        .filter(Value::is_array)
+    else {
         return Err(CliError::usage_hint(
             "--file must contain a JSON object with a non-empty `items` array",
             "try {\"items\": [{\"item\": {\"gist\": \"...\"}, \"category\": \"persona\", \"epistemic_kind\": \"fact\"}]}",
         ));
     };
     let mut args = base_args(parsed);
-    args.insert("items".into(), items.clone());
+    args.insert("items".into(), items);
     Ok(WriteCall::Tool {
         tool: "admit_preview_batch",
         args: Value::Object(args),
