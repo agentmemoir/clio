@@ -392,3 +392,19 @@ fn admit_file_refuses_a_command_level_context_instead_of_dropping_it() {
     assert!(err.contains("does not accept --context"), "{err}");
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn admit_rejects_a_file_path_past_the_byte_cap() {
+    let s = state();
+    let mut body = json!({"items": []}).to_string().into_bytes();
+    body.resize(MAX_INPUT_BYTES + 1, b' ');
+    let path = ops_file("admit-oversized", &String::from_utf8(body).expect("ascii"));
+    let arg = path.display().to_string();
+    let (code, out, err) = run_write_state("admit", &["--file", arg.as_str()], &s, false);
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(
+        err.contains(&format!("--file `{}` is larger than the", path.display())),
+        "{err}"
+    );
+    let _ = std::fs::remove_file(&path);
+}
