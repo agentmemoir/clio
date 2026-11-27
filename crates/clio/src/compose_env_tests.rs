@@ -8,6 +8,11 @@
 
 use super::*;
 
+#[cfg(target_os = "macos")]
+use std::ffi::CString;
+#[cfg(target_os = "macos")]
+use std::os::unix::ffi::OsStrExt;
+
 fn temp_root(name: &str) -> std::path::PathBuf {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -195,12 +200,29 @@ fn marker_read_refuses_a_symlink_instead_of_trusting_the_forged_selection() {
 fn marker_read_refuses_a_named_pipe_by_the_descriptor_type() {
     let root = temp_root("marker-pipe");
     let path = root.join(MARKER_FILE);
+    #[cfg(not(target_os = "macos"))]
     rustix::fs::mkfifoat(
         rustix::fs::CWD,
         path.as_path(),
         rustix::fs::Mode::from(0o600),
     )
     .expect("plant a named pipe at the marker name");
+
+    #[cfg(target_os = "macos")]
+    {
+        let c_path =
+            CString::new(path.as_os_str().as_bytes()).expect("the marker path has no NUL byte");
+        // SAFETY: `c_path` is bound to a local that outlives the call, and
+        // `CString::new` appended the trailing NUL byte the pointer needs.
+        #[allow(unsafe_code)]
+        let made = unsafe { libc::mkfifo(c_path.as_ptr(), 0o600 as libc::mode_t) };
+        assert_eq!(
+            made,
+            0,
+            "plant a named pipe: {}",
+            std::io::Error::last_os_error()
+        );
+    }
 
     let err = read_marker_entry(&root).expect_err("a named pipe is not a recordable marker");
     assert!(
@@ -215,12 +237,29 @@ fn marker_read_refuses_a_named_pipe_by_the_descriptor_type() {
 fn open_marker_refuses_a_named_pipe_itself() {
     let root = temp_root("marker-pipe-gate");
     let path = root.join(MARKER_FILE);
+    #[cfg(not(target_os = "macos"))]
     rustix::fs::mkfifoat(
         rustix::fs::CWD,
         path.as_path(),
         rustix::fs::Mode::from(0o600),
     )
     .expect("plant a named pipe at the marker name");
+
+    #[cfg(target_os = "macos")]
+    {
+        let c_path =
+            CString::new(path.as_os_str().as_bytes()).expect("the marker path has no NUL byte");
+        // SAFETY: `c_path` is bound to a local that outlives the call, and
+        // `CString::new` appended the trailing NUL byte the pointer needs.
+        #[allow(unsafe_code)]
+        let made = unsafe { libc::mkfifo(c_path.as_ptr(), 0o600 as libc::mode_t) };
+        assert_eq!(
+            made,
+            0,
+            "plant a named pipe: {}",
+            std::io::Error::last_os_error()
+        );
+    }
 
     // Called directly, so the absence pre-check never runs: only the descriptor
     // check can refuse this. `NONBLOCK` is what keeps the open from waiting for
