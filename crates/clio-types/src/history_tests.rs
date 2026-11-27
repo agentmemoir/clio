@@ -164,6 +164,26 @@ fn failure_record_validates_and_requires_belief() {
 }
 
 #[test]
+fn failure_record_attempt_n_is_bounded_by_the_store_column() {
+    // `attempt_n` is an identity value stored in a signed 32-bit column, so the
+    // ceiling is accepted and anything above it is refused rather than clamped.
+    let mut f = failure();
+    f.attempt_n = i64::from(i32::MAX);
+    f.validate().unwrap();
+    f.attempt_n = 1;
+    f.validate().unwrap();
+    for attempt in [i64::from(i32::MAX) + 1, i64::MAX] {
+        let mut f = failure();
+        f.attempt_n = attempt;
+        let err = f.validate().unwrap_err();
+        assert_eq!(err.code, ErrorCode::OutOfRange, "attempt {attempt}");
+        assert!(err.message.contains("attempt_n"), "{}", err.message);
+        assert!(err.message.contains(&attempt.to_string()), "{}", err.message);
+        assert!(!err.message.contains("required"), "{}", err.message);
+    }
+}
+
+#[test]
 fn task_record_context_validation() {
     // `context` obeys present values must be non-empty and at
     // most CONTEXT_MAX_BYTES UTF-8 bytes; `None` stays valid.

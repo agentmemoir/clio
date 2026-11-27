@@ -197,6 +197,53 @@ fn attempt_n_is_validated_before_the_gate() {
 }
 
 #[test]
+fn attempt_n_above_the_store_range_is_refused_before_the_gate() {
+    // `attempt_n` is an identity value stored in a signed 32-bit column: a value
+    // that does not fit is refused, never clamped to a different attempt.
+    let setup = setup();
+    let env = passing_env();
+    let policy = HistoryPolicy::default();
+    for attempt in [i64::from(i32::MAX) + 1, i64::MAX] {
+        let err = failure_record(&failure_args(&setup, &env, &policy, "t", attempt, "x", "y"))
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::OutOfRange, "attempt {attempt}");
+        assert!(err.message.contains("attempt_n"), "{}", err.message);
+        assert!(err.message.contains(&attempt.to_string()), "{}", err.message);
+        assert!(!err.message.contains("required"), "{}", err.message);
+    }
+    assert!(
+        setup.admission.events().is_empty(),
+        "no admission decision for a pre-gate validation failure"
+    );
+    let stored = setup
+        .store
+        .failures_for_task_exact(setup.ctx.bank.as_str(), "t", 10)
+        .unwrap();
+    assert!(stored.is_empty(), "{stored:?}");
+}
+
+#[test]
+fn attempt_n_at_the_store_ceiling_is_accepted() {
+    let setup = setup();
+    let env = passing_env();
+    let policy = HistoryPolicy::default();
+    let out = failure_record(&failure_args(
+        &setup,
+        &env,
+        &policy,
+        "task-max",
+        i64::from(i32::MAX),
+        "boom",
+        "short lesson",
+    ))
+    .unwrap();
+    let FailureRecordOutcome::Stored { record, .. } = out else {
+        panic!("expected stored");
+    };
+    assert_eq!(record.attempt_n, i64::from(i32::MAX));
+}
+
+#[test]
 fn what_failed_is_uncapped_while_lesson_is_capped() {
     // Only `lesson` is length-capped; `what_failed` is the faithful
     // factual record and round-trips unchanged.
