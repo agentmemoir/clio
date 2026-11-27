@@ -189,6 +189,24 @@ fn memtree_query_get_and_truncation() {
 }
 
 #[test]
+fn memtree_query_refuses_a_depth_above_u32_with_the_real_cap() {
+    let s = history_state();
+    let (code, out, err) = run_state(
+        "memtree query",
+        &["--bank", "bank-a", "--depth", "4294967296"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(out.is_empty(), "{out}");
+    assert!(err.contains("\"code\":\"out_of_range\""), "{err}");
+    assert!(
+        err.contains("depth must be <= 32"),
+        "the refusal must name the cap: {err}"
+    );
+}
+
+#[test]
 fn temporal_history_triple_and_error() {
     let s = history_state();
     let (code, out, _) = run_state(

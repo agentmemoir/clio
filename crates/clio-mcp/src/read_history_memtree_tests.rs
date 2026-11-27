@@ -144,6 +144,24 @@ fn memtree_query_refuses_a_depth_above_its_cap() {
 }
 
 #[test]
+fn memtree_query_refuses_a_depth_above_u32_with_the_real_cap() {
+    let (state, _) = stored();
+    // A value above `u32::MAX` must be refused as out of range, and the refusal
+    // must name the tool's own cap so the caller learns the real bound.
+    let out = call(
+        &state,
+        "memtree_query",
+        json!({"bank": BANK, "depth": 4_294_967_296u64}),
+    );
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("out_of_range"), "{out}");
+    assert!(
+        out["message"].as_str().unwrap_or_default().contains("32"),
+        "the refusal must name the cap: {out}"
+    );
+}
+
+#[test]
 fn memtree_get_reads_the_node_a_stored_item_created() {
     let (state, node_id) = stored();
     let out = call(

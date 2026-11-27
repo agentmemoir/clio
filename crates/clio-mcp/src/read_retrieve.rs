@@ -53,7 +53,7 @@
 
 use crate::read_explain::explain_hit;
 use crate::read_read_policy::{read_fidelity, read_provenance_floor};
-use crate::read_tools::{opt_u32, opt_usize, str_list, time_axis};
+use crate::read_tools::{opt_usize, str_list, time_axis};
 use crate::runtime::McpState;
 use crate::write_tools::{opt_bool, opt_num, opt_str, req_str};
 use clio_config::retention::{DuplicateTolerance, RecallScope, RetentionProfile};
@@ -356,15 +356,18 @@ fn associations(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn graph_query(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let hops = opt_u32(args, "max_hops").map(|h| h as usize);
-    if let Some(h) = hops
-        && h > MAX_GRAPH_HOPS
+    let requested_hops = args.get("max_hops").and_then(Value::as_u64);
+    if let Some(hops) = requested_hops
+        && hops > MAX_GRAPH_HOPS as u64
     {
         return Err(AmError::new(
             ErrorCode::OutOfRange,
             format!("graph_query max_hops must be <= {MAX_GRAPH_HOPS}"),
         ));
     }
+    // The check above holds every value at or below the cap, so the narrowing
+    // cannot lose anything and the fallback is unreachable.
+    let hops = requested_hops.map(|hops| usize::try_from(hops).unwrap_or(MAX_GRAPH_HOPS));
     let edge_type = match opt_str(args, "edge_type") {
         None => None,
         Some(raw) => Some(AssocKind::parse(raw)?),

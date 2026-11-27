@@ -21,7 +21,7 @@
 //! Changes to history read binding or result shaping should normally require
 //! changes here. Changes to storage/façade semantics should not.
 
-use crate::read_tools::{opt_u32, opt_usize, time_axis};
+use crate::read_tools::{opt_usize, time_axis};
 use crate::runtime::{McpState, StderrSinks};
 use crate::write_tools::{opt_str, req_str};
 use clio_types::{AmError, ErrorCode, TimeAxis, TripleQuery};
@@ -137,15 +137,18 @@ pub const MAX_MEMTREE_DEPTH: u32 = 32;
 #[inline(never)]
 fn memtree_query(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let depth = opt_u32(args, "depth");
-    if let Some(d) = depth
-        && d > MAX_MEMTREE_DEPTH
+    let requested_depth = args.get("depth").and_then(Value::as_u64);
+    if let Some(depth) = requested_depth
+        && depth > u64::from(MAX_MEMTREE_DEPTH)
     {
         return Err(AmError::new(
             ErrorCode::OutOfRange,
             format!("memtree_query depth must be <= {MAX_MEMTREE_DEPTH}"),
         ));
     }
+    // The check above holds every value at or below the cap, so the narrowing
+    // cannot lose anything and the fallback is unreachable.
+    let depth = requested_depth.map(|depth| u32::try_from(depth).unwrap_or(MAX_MEMTREE_DEPTH));
     let range = args.get("time_range");
     let filter = clio_write::MemTreeQueryFilter {
         time_start: range_bound(range, "start"),

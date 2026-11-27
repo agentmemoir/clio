@@ -76,6 +76,24 @@ fn graph_query_success_cap_and_text() {
 }
 
 #[test]
+fn graph_query_refuses_a_max_hops_above_u32_with_the_real_cap() {
+    let s = graph_state();
+    let (code, out, err) = run_state(
+        "graph query",
+        &["itm-1", "--bank", "bank-a", "--max-hops", "4294967296"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(out.is_empty(), "{out}");
+    assert!(err.contains("\"code\":\"out_of_range\""), "{err}");
+    assert!(
+        err.contains("max_hops must be <= 3"),
+        "the refusal must name the cap: {err}"
+    );
+}
+
+#[test]
 fn associations_list_and_text() {
     let s = graph_state();
     let (code, out, _) = run_state("associations", &["itm-1", "--bank", "bank-a"], &s, false);

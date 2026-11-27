@@ -88,13 +88,6 @@ pub(crate) fn opt_usize(args: &Value, key: &str) -> Option<usize> {
         .and_then(|n| usize::try_from(n).ok())
 }
 
-/// Optional `u32` argument (`depth`).
-pub(crate) fn opt_u32(args: &Value, key: &str) -> Option<u32> {
-    args.get(key)
-        .and_then(Value::as_u64)
-        .and_then(|n| u32::try_from(n).ok())
-}
-
 /// String-array argument; non-string entries are skipped (never fails).
 pub(crate) fn str_list(args: &Value, key: &str) -> Vec<String> {
     args.get(key)
