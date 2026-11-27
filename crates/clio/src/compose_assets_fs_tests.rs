@@ -7,6 +7,11 @@
 
 use super::*;
 
+#[cfg(target_os = "macos")]
+use std::ffi::CString;
+#[cfg(target_os = "macos")]
+use std::os::unix::ffi::OsStrExt;
+
 fn temp_root(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("am-compose-assets-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -202,6 +207,7 @@ fn a_named_pipe_at_the_asset_name_is_refused_as_not_a_regular_file() {
     let parent = opened
         .parent(Path::new(""))
         .expect("hold the root directory");
+    #[cfg(not(target_os = "macos"))]
     rustix::fs::mknodat(
         &parent,
         "note.txt",
@@ -210,6 +216,26 @@ fn a_named_pipe_at_the_asset_name_is_refused_as_not_a_regular_file() {
         rustix::fs::Dev::from(0_u64),
     )
     .expect("plant a named pipe at the asset name");
+
+    #[cfg(target_os = "macos")]
+    {
+        let fifo_path = std::fs::canonicalize(&root)
+            .expect("canonicalize the temp root")
+            .join("note.txt");
+        let c_fifo =
+            CString::new(fifo_path.as_os_str().as_bytes()).expect("the fifo path has no NUL byte");
+        // SAFETY: `c_fifo` is bound to a local that outlives the call, and
+        // `CString::new` appended the trailing NUL byte the pointer needs.
+        #[allow(unsafe_code)]
+        let made = unsafe { libc::mkfifo(c_fifo.as_ptr(), 0o600 as libc::mode_t) };
+        assert_eq!(
+            made,
+            0,
+            "plant a named pipe: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
     let err = Root::hold(parent, OsStr::new("note.txt"), &shown)
         .map(|_| ())
         .expect_err("a named pipe is not a regular file");
