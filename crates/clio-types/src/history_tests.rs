@@ -178,7 +178,11 @@ fn failure_record_attempt_n_is_bounded_by_the_store_column() {
         let err = f.validate().unwrap_err();
         assert_eq!(err.code, ErrorCode::OutOfRange, "attempt {attempt}");
         assert!(err.message.contains("attempt_n"), "{}", err.message);
-        assert!(err.message.contains(&attempt.to_string()), "{}", err.message);
+        assert!(
+            err.message.contains(&attempt.to_string()),
+            "{}",
+            err.message
+        );
         assert!(!err.message.contains("required"), "{}", err.message);
     }
 }

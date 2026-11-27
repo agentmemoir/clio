@@ -17,8 +17,8 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use crate::test_support::{failure_args, passing_env, query_args, setup};
-use crate::{FailureRecordOutcome, failure_record, failures_for_task};
+use crate::test_support::{failure_args, passing_env, query_args, setup, task_args};
+use crate::{FailureRecordOutcome, failure_record, failures_for_task, task_upsert};
 use clio_store::{HistoryStore, Store};
 use clio_types::{ErrorCode, HistoryPolicy};
 
@@ -208,7 +208,11 @@ fn attempt_n_above_the_store_range_is_refused_before_the_gate() {
             .unwrap_err();
         assert_eq!(err.code, ErrorCode::OutOfRange, "attempt {attempt}");
         assert!(err.message.contains("attempt_n"), "{}", err.message);
-        assert!(err.message.contains(&attempt.to_string()), "{}", err.message);
+        assert!(
+            err.message.contains(&attempt.to_string()),
+            "{}",
+            err.message
+        );
         assert!(!err.message.contains("required"), "{}", err.message);
     }
     assert!(
@@ -372,5 +376,70 @@ fn invalid_context_fails_closed_before_the_gate() {
     assert!(
         setup.admission.events().is_empty(),
         "no admission decision for a pre-gate validation failure"
+    );
+}
+
+/// An exact-id miss falls through to the task's own definition, so a free-text
+/// query still reaches the failure recorded for a similar task.
+#[test]
+fn failures_for_task_free_text_reaches_a_similar_tasks_failure() {
+    let setup = setup();
+    let env = passing_env();
+    let policy = HistoryPolicy::default();
+    let steps = vec!["step".to_owned()];
+    let task_id = "optimize-search-query";
+    task_upsert(&task_args(
+        &setup,
+        &env,
+        task_id,
+        "optimize the slow search query to avoid a full table scan",
+        &steps,
+        "done",
+    ))
+    .unwrap();
+    failure_record(&failure_args(
+        &setup,
+        &env,
+        &policy,
+        task_id,
+        1,
+        "scan too slow",
+        "add an index on the search column",
+    ))
+    .unwrap();
+
+    let query = "slow search query full table scan";
+    let out = failures_for_task(&query_args(&setup, &policy, query, Some(10))).unwrap();
+    assert_eq!(out.mode, "similar");
+    assert_eq!(out.limit, 10);
+    assert_eq!(out.failures.len(), 1);
+    assert_eq!(out.matched_task_ids, vec![task_id.to_owned()]);
+    let event = setup.sink.events().last().cloned().unwrap();
+    assert_eq!(event.operation, "failures_for_task");
+    assert_eq!(event.record_count, 1);
+    assert!(event.rejection_reason.is_none(), "{event:?}");
+}
+
+/// No exact and no similar match is a `none` result, and the read's telemetry
+/// says so rather than reporting an empty success.
+#[test]
+fn failures_for_task_no_match_reports_the_reason() {
+    let setup = setup();
+    let policy = HistoryPolicy::default();
+    let out =
+        failures_for_task(&query_args(&setup, &policy, "completely unrelated", None)).unwrap();
+    assert_eq!(out.mode, "none");
+    assert!(out.failures.is_empty(), "{:?}", out.failures);
+    assert!(
+        out.matched_task_ids.is_empty(),
+        "{:?}",
+        out.matched_task_ids
+    );
+    let event = setup.sink.events().last().cloned().unwrap();
+    assert_eq!(event.operation, "failures_for_task");
+    assert_eq!(event.record_count, 0);
+    assert_eq!(
+        event.rejection_reason.as_deref(),
+        Some("no matching failures")
     );
 }
