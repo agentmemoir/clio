@@ -59,7 +59,7 @@ const COVERED_BANK: &str = "bank-covered";
 
 /// A receiving node and the relay journal it pulls from. The journal handle is
 /// what lets a test plant a row the push route would never accept.
-fn node(banks: &[&str], cipher: Vec<SyncCipherKey>) -> (Receiver, Arc<SqliteStore>) {
+pub(crate) fn node(banks: &[&str], cipher: Vec<SyncCipherKey>) -> (Receiver, Arc<SqliteStore>) {
     let (server, relay, _kms) = serve(banks);
     let addr = server.addr().to_owned();
     let store = sqlite();

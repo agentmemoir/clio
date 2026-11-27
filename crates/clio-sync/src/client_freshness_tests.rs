@@ -33,13 +33,14 @@ use crate::apply::ApplyEngine;
 use crate::apply::apply_freshness::{is_stale, pinned, writer_stamp_epoch};
 use crate::apply::{last_stale_refusal, stale_refused};
 use crate::client::client_envelope_tests::{BANK, Receiver, hand_push, held_key, receiver};
+use crate::client::client_plain_policy_tests::node;
 use crate::client::client_tests::item;
 use crate::client::pull;
 use crate::clock::{parse_utc_epoch, test_pin};
 use crate::crypto::SyncCipherKey;
 use crate::envelope_fixtures::seal_content_for;
 use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, SyncContent, SyncMutation, decode_cursor};
-use clio_store::{DeadLetterStatus, Store, SyncStore};
+use clio_store::{DeadLetterStatus, Store, SyncJournalRow, SyncStore};
 
 /// The instant the pinned clock reads. A fixed stamp, so the verdict of a case
 /// never depends on the day it runs.
@@ -230,7 +231,8 @@ fn a_pull_refuses_a_stale_envelope_and_advances_the_cursor_past_it() {
 fn a_pull_quarantines_an_unplaceable_stamp_as_malformed() {
     let _clock = pinned_clock();
     let key = held_key("client-freshness-malformed-key");
-    let r = windowed_receiver(&key);
+    let (mut r, relay) = node(&[BANK], vec![key.clone()]);
+    r.cfg.max_envelope_skew_secs = WINDOW;
     let row = sealed_at(BANK, MALFORMED_ID, MALFORMED_STAMP, &key);
     let refused_id = row.sync_mutation_id.clone();
     assert_eq!(
@@ -238,7 +240,25 @@ fn a_pull_quarantines_an_unplaceable_stamp_as_malformed() {
         None,
         "the fixture stamp must not name an instant"
     );
-    hand_push(&r.addr, BANK, row);
+    // Seed the relay journal directly: a push now refuses this stamp before
+    // it reaches the journal, so the pull route needs a stored row to find.
+    relay
+        .journal_append(&SyncJournalRow {
+            seq: 0,
+            sync_mutation_id: row.sync_mutation_id.clone(),
+            bank_id: row.bank.clone(),
+            entity_kind: row.entity_kind.clone(),
+            entity_id: row.entity_id.clone(),
+            op: row.op.clone(),
+            transaction_time: row.transaction_time.clone(),
+            device_id: row.device_id.clone(),
+            content_hash: row.content_hash.clone(),
+            content_sealed: Some(serde_json::to_string(&row).expect("serialize the sealed row")),
+            client_encrypted: true,
+            admission_receipt: None,
+            created_at: PINNED_CLOCK.into(),
+        })
+        .expect("append the sealed row to the relay journal");
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
     let open = r
         .store
