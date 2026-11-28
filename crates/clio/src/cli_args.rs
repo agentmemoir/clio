@@ -29,6 +29,7 @@
 //! `clio -- remember` is intentionally unsupported. Keep this module focused
 //! on the CLI argument grammar.
 
+use crate::cli_arg_token::is_flag_token;
 use crate::cli_error::CliError;
 use std::collections::{HashMap, HashSet};
 
@@ -155,12 +156,6 @@ impl ParsedArgs {
             .get(index)
             .and_then(|flag| flag.as_deref())
     }
-}
-
-/// Whether `token` is a flag the grammar must not read as a value: dash-led,
-/// but not the lone `-`, which is a real value such as stdin for `--file`.
-pub(crate) fn is_flag_token(token: &str) -> bool {
-    token.starts_with('-') && token != "-"
 }
 
 /// Parse `args` (everything after the verb) against `spec`.

@@ -39,7 +39,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use crate::cli_args::is_flag_token;
+use crate::cli_arg_token::{is_flag_token, out_value, unexpected_argument};
 use crate::cli_error::CliError;
 use crate::cli_help;
 use crate::cli_output;
@@ -139,22 +139,6 @@ pub(crate) fn markdown_request(args: &[String]) -> Result<Option<PathBuf>, CliEr
         ));
     };
     Ok(Some(PathBuf::from(dir)))
-}
-
-/// The value token after a bare `--out`: refused when it is absent or starts
-/// with `-`, so `--out -h` is a missing value, never a directory named `-h`;
-/// `--out=DIR` keeps its token as typed. Blank values are refused too.
-fn out_value(args: &[String], index: usize) -> Result<String, CliError> {
-    match args.get(index + 1) {
-        Some(value) if !value.starts_with('-') => {
-            crate::cli_error::reject_blank_value("--out", value)?;
-            Ok(value.clone())
-        }
-        _ => Err(CliError::usage_hint(
-            "--out requires a directory value",
-            "pass the directory after --out, or spell it `--out=DIR`",
-        )),
-    }
 }
 
 /// The unknown-command failure, with a suggestion when one is close.
@@ -381,13 +365,6 @@ fn unknown_surface_flag(flag: &str, known: &[&str]) -> CliError {
             .with_hint(format!("did you mean `--{closest}`?")),
         None => CliError::usage(format!("unknown flag `{rendered}`")),
     }
-}
-
-/// A token with no leading dash, which these surfaces have no operand slot for.
-/// It is refused so a mistyped flag cannot arrive as a silent no-op.
-fn unexpected_argument(token: &str) -> CliError {
-    CliError::usage(format!("unexpected argument `{token}`"))
-        .with_hint("these commands take flags only; run `clio help` for the list")
 }
 
 /// Report a usage failure from one of the reserved surfaces and return its exit

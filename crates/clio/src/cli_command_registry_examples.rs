@@ -163,7 +163,7 @@ fn without_bare_optional_values(target: &CommandSpec, args: Vec<String>) -> Vec<
                 .is_some_and(|name| optional.contains(&name))
             && args
                 .get(index + 1)
-                .is_none_or(|next| crate::cli_args::is_flag_token(next))
+                .is_none_or(|next| crate::cli_arg_token::is_flag_token(next))
             && args[..flags_end]
                 .iter()
                 .filter(|given| given.as_str() == token.as_str())
