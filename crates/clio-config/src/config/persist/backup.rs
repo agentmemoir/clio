@@ -64,6 +64,15 @@ pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
     backup_config_file_with_stamp(path, stamp)
 }
 
+/// The `backups/` sibling of `path`. A source that carries no parent name still
+/// gets a relative `./backups`, never a directory joined onto an empty path.
+fn backup_dir_for(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join(BACKUP_DIR_NAME)
+}
+
 /// The backup body with the nanosecond stamp supplied, so a test can predict the
 /// target name the write must refuse.
 #[allow(clippy::too_many_lines)] // one linear open, inspect, prepare, read, and write
@@ -116,11 +125,7 @@ fn backup_config_file_with_stamp(path: &Path, stamp: u128) -> Result<Option<Path
             ),
         ));
     }
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-        .join(BACKUP_DIR_NAME);
+    let dir = backup_dir_for(path);
     // Inspect the entry before creating it, so a planted link or file is
     // refused with a failure the operator can act on instead of one raised
     // inside the directory create. Only a missing entry is created.
@@ -152,24 +157,15 @@ fn backup_config_file_with_stamp(path: &Path, stamp: u128) -> Result<Option<Path
                     format!("failed to create backup dir {}: {e}", dir.display()),
                 )
             })?;
-            // A link swapped in during the create is still caught, and the
-            // entry that now exists must be a real directory.
+            // A link swapped in during the create is still caught: the entry
+            // that now exists must be a real directory.
             let made = fs::symlink_metadata(&dir).map_err(|e| {
                 AmError::new(
                     ErrorCode::Internal,
                     format!("failed to inspect backup dir {}: {e}", dir.display()),
                 )
             })?;
-            if made.file_type().is_symlink()
-                || !fs::metadata(&dir)
-                    .map_err(|e| {
-                        AmError::new(
-                            ErrorCode::Internal,
-                            format!("failed to inspect backup dir {}: {e}", dir.display()),
-                        )
-                    })?
-                    .is_dir()
-            {
+            if !made.is_dir() {
                 return Err(AmError::new(
                     ErrorCode::Forbidden,
                     format!(
@@ -222,3 +218,7 @@ fn backup_config_file_with_stamp(path: &Path, stamp: u128) -> Result<Option<Path
 #[cfg(test)]
 #[path = "backup_tests.rs"]
 mod backup_tests;
+
+#[cfg(test)]
+#[path = "backup_refusal_tests.rs"]
+mod backup_refusal_tests;
