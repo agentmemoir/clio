@@ -115,7 +115,7 @@ fn write_read_and_delete(test_key: &KeyringStore) -> Result<(), String> {
         .get()
         .map_err(|err| format!("cannot read the test credential back: {}", err.message))?;
     match read {
-        Some(bytes) if bytes == SECRET => {}
+        Some(bytes) if bytes.as_slice() == SECRET => {}
         Some(bytes) => {
             return Err(format!(
                 "read back {} bytes, not the {} that were written",

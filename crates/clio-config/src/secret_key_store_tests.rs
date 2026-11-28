@@ -97,7 +97,24 @@ fn a_stored_key_reads_back_byte_for_byte() {
 
     let found = store.get().expect("read").expect("an entry");
 
-    assert_eq!(found, wanted, "the store holds raw bytes, not an encoding");
+    assert_eq!(
+        found.as_slice(),
+        &wanted[..],
+        "the store holds raw bytes, not an encoding"
+    );
+}
+
+#[test]
+fn a_read_key_is_wrapped_so_it_is_scrubbed_when_it_drops() {
+    // The type is the contract: `get` hands back a `Zeroizing`, so a caller
+    // cannot hold the key in a bare `Vec` that drops unread. A change back to
+    // `Vec<u8>` stops this test compiling rather than passing quietly.
+    let wanted = rand::random::<[u8; KEY_LEN]>();
+    let store = store_over(&FakeCredential::holding(&wanted));
+
+    let found: Zeroizing<Vec<u8>> = store.get().expect("read").expect("an entry");
+
+    assert_eq!(found.as_slice(), &wanted[..], "the bytes are unchanged");
 }
 
 #[test]
@@ -127,8 +144,8 @@ fn a_written_key_lands_in_the_store_unchanged() {
 
     assert_eq!(credential.secret().expect("stored"), wanted.to_vec());
     assert_eq!(
-        store.get().expect("read").expect("an entry"),
-        wanted.to_vec()
+        store.get().expect("read").expect("an entry").as_slice(),
+        &wanted[..]
     );
 }
 
@@ -144,8 +161,8 @@ fn writing_replaces_the_previous_key_rather_than_adding_one() {
 
     assert_eq!(credential.secret().expect("stored"), second.to_vec());
     assert_eq!(
-        store.get().expect("read").expect("an entry"),
-        second,
+        store.get().expect("read").expect("an entry").as_slice(),
+        &second[..],
         "one entry holds one key"
     );
 }

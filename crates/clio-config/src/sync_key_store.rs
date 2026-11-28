@@ -31,7 +31,6 @@
 use std::path::{Path, PathBuf};
 
 use clio_types::{AmError, ErrorCode};
-use zeroize::Zeroizing;
 
 use crate::auth_tokens::now_utc;
 use crate::secret_key_source::KeySource;
@@ -68,7 +67,7 @@ pub fn load_with(
             None => Ok(None),
             Some(raw) => {
                 let location = SyncKeyLocation::Keystore;
-                let key = key_from_bytes(&Zeroizing::new(raw), &location)?;
+                let key = key_from_bytes(&raw, &location)?;
                 Ok(Some(LoadedSyncKey::new(key, location)))
             }
         },
@@ -207,7 +206,7 @@ pub fn report_with(
             None => with_archived(empty_report(source), file.as_deref()),
             Some(raw) => {
                 let location = SyncKeyLocation::Keystore;
-                let key = key_from_bytes(&Zeroizing::new(raw), &location)?;
+                let key = key_from_bytes(&raw, &location)?;
                 // Read back rather than trust the write: a store that ignores
                 // the attribute returns success and stores nothing, and that is
                 // an unavailable creation time. A store that cannot answer at

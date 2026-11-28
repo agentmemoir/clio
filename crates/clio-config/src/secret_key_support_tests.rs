@@ -103,13 +103,13 @@ impl FakeStore {
 }
 
 impl SecretStore for FakeStore {
-    fn get(&self) -> Result<Option<Vec<u8>>, AmError> {
+    fn get(&self) -> Result<Option<Zeroizing<Vec<u8>>>, AmError> {
         let mut state = self.lock();
         state.gets += 1;
         if let Some(message) = &state.get_error {
             return Err(unreachable_store(message));
         }
-        Ok(state.entry.clone())
+        Ok(state.entry.clone().map(Zeroizing::new))
     }
 
     fn set(&self, bytes: &[u8]) -> Result<(), AmError> {
