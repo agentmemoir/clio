@@ -296,6 +296,27 @@ fn split_leading_globals_does_not_consume_a_flag_as_a_value() {
     assert_eq!(error.message(), "flag `--output` requires a value");
 }
 
+/// A single-dash token after a leading global value flag is a flag, not that
+/// flag's value: the split refuses it with the missing-value error instead of
+/// carrying `-x` along as the backend name.
+#[test]
+fn split_leading_globals_does_not_consume_a_single_dash_flag_as_a_value() {
+    let error = split_leading_globals(&tokens(&["--db", "-x", "status"]))
+        .expect_err("`-x` is a flag, so `--db` has no value");
+    assert_eq!(error.code(), "usage");
+    assert_eq!(error.message(), "flag `--db` requires a value");
+    assert_eq!(error.hint(), Some("try `--db VALUE`"));
+    // The short spelling of `--output` in the same position is refused too.
+    let error = split_leading_globals(&tokens(&["-o", "-x", "status"]))
+        .expect_err("`-x` is a flag, so `-o` has no value");
+    assert_eq!(error.message(), "flag `-o` requires a value");
+    // A lone `-` is a value, so the split still succeeds through it.
+    let (rest, globals) =
+        split_leading_globals(&tokens(&["--db", "-", "status"])).expect("a lone dash is a value");
+    assert_eq!(rest, tokens(&["status"]));
+    assert_eq!(globals, tokens(&["--db", "-"]));
+}
+
 #[test]
 fn split_leading_globals_moves_the_short_output_alias() {
     let (rest, globals) =

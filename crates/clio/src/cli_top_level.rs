@@ -244,10 +244,9 @@ pub(crate) fn parse_flags(
     let mut pending: Option<String> = None;
     let mut it = args.into_iter();
     // `--flag=value` carries its own value. A bare `--flag` takes the next
-    // token as its value only when that token is not itself a `--flag`;
-    // otherwise `--flag` is value-less and the token is reprocessed. Without
-    // this, `--bind --db X` would bind the value `--db` and `--bind=ADDR`
-    // would be ignored, silently falling back to auto-bind.
+    // token as its value only when that token is not a flag; otherwise the flag
+    // is valueless and the token is reprocessed, which is how `--bind --db X`
+    // leaves `--bind` bare instead of binding the value `--db`.
     while let Some(flag) = pending.take().or_else(|| it.next()) {
         // A bare `--` is the top level's documented delimiter before positional
         // text. The delimiter itself is accepted; anything after it is refused,
@@ -301,8 +300,9 @@ pub(crate) fn parse_flags(
                 insert_known(&mut flags, name, value, known)?;
             }
             rest => {
-                // A global always takes a value, so a following flag — or none
-                // at all — is a missing value, not a valueless flag.
+                // A global is never value-optional, so a following flag — or
+                // none at all — is a missing value. Every other flag keeps its
+                // bare form and the token after it is reprocessed.
                 crate::cli_error::reject_missing_global_value(name, &flag)?;
                 insert_known(&mut flags, name, "true".into(), known)?;
                 pending = rest;
@@ -422,6 +422,10 @@ pub(crate) fn print_help() {
 #[cfg(test)]
 #[path = "cli_top_level_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_top_level_help_tests.rs"]
+mod help_tests;
 
 #[cfg(test)]
 #[path = "cli_top_level_markdown_tests.rs"]

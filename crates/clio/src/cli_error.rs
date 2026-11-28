@@ -302,10 +302,9 @@ pub(crate) fn missing_value(label: &str) -> CliError {
 /// Refuse a global value flag that was given no value: the token after it is
 /// another flag, or there is none.
 ///
-/// A global is never value-optional, so its valueless form is not one the
-/// grammar accepts. A surface flag is left alone here: `--bind` on `mcp http`
-/// carries a documented valueless form, and that surface decides it. `typed` is
-/// the token as the caller wrote it, so `-o` names `-o` rather than `--output`.
+/// A global is never value-optional, `--output` included, so its valueless form
+/// is not one the grammar accepts. `typed` is the token as the caller wrote it,
+/// so `-o` names `-o` rather than `--output`.
 pub(crate) fn reject_missing_global_value(name: &str, typed: &str) -> Result<(), CliError> {
     if crate::cli_command_registry::requires_a_value(name) {
         return Err(missing_value(typed));

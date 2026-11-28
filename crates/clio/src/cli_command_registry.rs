@@ -147,12 +147,11 @@ pub(crate) fn global_flag(name: &str) -> Option<&'static Flag> {
 /// Whether `name` is a declared global that a surface must refuse when no value
 /// follows it.
 ///
-/// `--output` is excluded: the reserved surfaces give a bare `-o`/`--output` a
-/// documented meaning (the default mode), so it is value-optional there.
+/// Every declared global value flag qualifies, `--output` included: no surface
+/// implements a valueless `-o`/`--output`, and a bare one reaches the output
+/// resolution as the string `true`, which is refused as an unknown mode.
 pub(crate) fn requires_a_value(name: &str) -> bool {
-    GLOBAL_VALUE_FLAGS
-        .iter()
-        .any(|flag| flag.long == name && flag.long != "output")
+    GLOBAL_VALUE_FLAGS.iter().any(|flag| flag.long == name)
 }
 
 /// Every command record, tranche order preserved.

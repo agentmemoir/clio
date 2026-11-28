@@ -41,7 +41,8 @@ fn help_is_recognised_in_every_spelling_and_nothing_else_is() {
 
 /// A value flag's value is not a help request: the flag and the token after it
 /// are skipped, so `--db help` names a database called `help`. A single-dash
-/// token is a flag, never a value, so `--db -h` still asks for help.
+/// token is a flag, never a value, so `--db -h` leaves `--db` with no value at
+/// all: the missing-value refusal the parser reports, not a help request.
 #[test]
 fn a_value_flags_value_is_not_a_help_request() {
     assert!(
@@ -49,12 +50,12 @@ fn a_value_flags_value_is_not_a_help_request() {
         "`--db help` must not ask for help"
     );
     assert!(
-        help_requested(&["--db".to_owned(), "-h".to_owned()], &db_is_a_value_flag),
-        "`-h` is a flag, so it is not `--db`'s value"
+        !help_requested(&["--db".to_owned(), "-h".to_owned()], &db_is_a_value_flag),
+        "`-h` is a flag, so `--db` has no value and no help is asked for"
     );
-    // A token after the flag that starts with `--` is not its value, so an
-    // explicit `--help` after a value flag still asks.
-    assert!(help_requested(
+    // A token after the flag that is itself a flag is not its value either, so
+    // an explicit `--help` there leaves the value flag without one.
+    assert!(!help_requested(
         &["--db".to_owned(), "--help".to_owned()],
         &db_is_a_value_flag
     ));

@@ -79,6 +79,17 @@ fn bare_output_flag_is_a_usage_error() {
     let deps = Idle;
     assert_eq!(status_with(&args(&["--output"]), &deps), ExitCode::from(2));
     assert_eq!(status_with(&args(&["-o"]), &deps), ExitCode::from(2));
+    // The refusal names the missing value rather than recording the bare flag as
+    // the mode, so no run can report an unknown output mode `true`.
+    for argv in [vec!["--output"], vec!["-o"]] {
+        let error = build(&args(&argv), &deps).expect_err("usage");
+        assert_eq!(error.code(), "usage", "{argv:?}");
+        assert!(
+            error.message().contains("requires a value"),
+            "{argv:?}: {}",
+            error.message()
+        );
+    }
 }
 
 #[test]

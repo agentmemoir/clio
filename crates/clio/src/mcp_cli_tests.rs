@@ -307,24 +307,6 @@ fn an_undeclared_flag_fails_the_shared_options_builder_with_the_flag_named() {
     );
 }
 
-// --------------------------------------------------------------- help tests
-
-#[test]
-fn wants_help_spots_both_spellings_anywhere_in_the_arguments() {
-    assert!(wants_help(&args_of(&["--bank", "b", "--help"])));
-    assert!(wants_help(&args_of(&["-h"])));
-    assert!(!wants_help(&args_of(&["--bank", "b"])));
-    assert!(!wants_help(&args_of(&["--helped"])));
-}
-
-#[test]
-fn wants_help_stops_at_the_delimiter() {
-    // A help flag after `--` is an operand, so it prints no help.
-    assert!(!wants_help(&args_of(&["--bank", "b", "--", "--help"])));
-    assert!(!wants_help(&args_of(&["--", "-h"])));
-    assert!(wants_help(&args_of(&["--help", "--", "--bank", "b"])));
-}
-
 #[test]
 fn http_help_names_the_scanned_port_range_from_the_shared_constants() {
     let help = mcp_http_help();

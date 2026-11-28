@@ -301,8 +301,10 @@ fn record_value(
 /// A leading global value flag with no value — the next token is another flag,
 /// or there is none — is refused here, with the same missing-value error the
 /// command grammar gives. Lifting such a flag away from the verb used to hand
-/// its value flag the flag that followed instead: `--db -x status` opened a
-/// database named `-x` and reported on the wrong store.
+/// its value flag the flag that followed instead: `--db -x status` reached the
+/// store with the backend named `-x` and exited 1 on a backend error, and the
+/// dash-named store file on disk came from `recall q --db -o json`, where the
+/// same consumption made `-o` the backend path.
 pub(crate) fn split_leading_globals(
     args: &[String],
 ) -> Result<(Vec<String>, Vec<String>), CliError> {

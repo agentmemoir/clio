@@ -79,10 +79,15 @@ fn parse_flags_recognizes_the_short_output_alias() {
     assert_eq!(flags.get("output").map(String::as_str), Some("text"));
     assert_eq!(flags.get("db").map(String::as_str), Some("x"));
 
-    // A value-less `-o` is recorded as a bare flag, exactly like `--output`.
-    let flags = flags_of(&["-o", "--db", "x"]);
-    assert_eq!(flags.get("output").map(String::as_str), Some("true"));
-    assert_eq!(flags.get("db").map(String::as_str), Some("x"));
+    // A value-less `-o` is the missing-value refusal, exactly like `--output`:
+    // no surface implements a valueless output mode.
+    let error = crate::cli_top_level::parse_flags(
+        ["-o".to_owned(), "--db".to_owned(), "x".to_owned()],
+        crate::cli_flags_test_support::RESERVED_FLAGS,
+    )
+    .expect_err("a bare -o has no value");
+    assert_eq!(error.message(), "flag `-o` requires a value");
+    assert_eq!(error.hint(), Some("try `-o json` or `-o text`"));
 }
 
 /// Every other single-dash token is an unknown flag: it fails closed with a
