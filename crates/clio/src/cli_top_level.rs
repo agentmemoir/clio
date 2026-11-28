@@ -39,6 +39,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use crate::cli_args::is_flag_token;
 use crate::cli_error::CliError;
 use crate::cli_help;
 use crate::cli_output;
@@ -87,7 +88,7 @@ pub(crate) fn markdown_request(args: &[String]) -> Result<Option<PathBuf>, CliEr
         let arg = args[index].as_str();
         // A lifted global's value is not a TOPIC: `main` appends it after the verb.
         if crate::cli_args::is_global_value_flag(arg)
-            && args.get(index + 1).is_some_and(|v| !v.starts_with("--"))
+            && args.get(index + 1).is_some_and(|v| !is_flag_token(v))
         {
             index += 2;
             continue;
@@ -305,7 +306,7 @@ pub(crate) fn parse_flags(
             continue;
         }
         match it.next() {
-            Some(value) if !value.starts_with("--") => {
+            Some(value) if !is_flag_token(&value) => {
                 crate::cli_error::reject_blank_value(&format!("--{name}"), &value)?;
                 crate::cli_error::reject_repeated_flag(
                     &format!("--{name}"),
@@ -313,12 +314,12 @@ pub(crate) fn parse_flags(
                 )?;
                 insert_known(&mut flags, name, value, known)?;
             }
-            Some(value) => {
+            rest => {
+                // A global always takes a value, so a following flag — or none
+                // at all — is a missing value, not a valueless flag.
+                crate::cli_error::reject_missing_global_value(name, &flag)?;
                 insert_known(&mut flags, name, "true".into(), known)?;
-                pending = Some(value);
-            }
-            None => {
-                insert_known(&mut flags, name, "true".into(), known)?;
+                pending = rest;
             }
         }
     }

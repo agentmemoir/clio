@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - Assertions over `parse` for repeated, blank, and timestamp values
+//! - Assertions that a value flag never reads a flag token as its value
 //!
 //! ## Does not own
 //! - The parser implementation under test (`cli_args`)
@@ -119,4 +120,38 @@ fn a_timestamp_flag_refuses_a_value_that_is_not_a_timestamp() {
 fn a_flag_that_is_not_a_timestamp_takes_any_value() {
     let parsed = parse(&spec(), tokens(&["--limit", "bogus"])).expect("parse");
     assert_eq!(parsed.value("limit"), Some("bogus"));
+}
+
+#[test]
+fn value_flag_does_not_take_single_dash_flag_as_value() {
+    let error = parse(&spec(), tokens(&["--db", "-x"])).expect_err("missing value");
+    assert_eq!(error.code(), "usage");
+    assert_eq!(error.exit_code(), std::process::ExitCode::from(2));
+    assert_eq!(error.message(), "flag `--db` requires a value");
+    assert_eq!(error.hint(), Some("try `--db VALUE`"));
+}
+
+#[test]
+fn value_flag_does_not_take_the_short_output_flag_as_value() {
+    let error = parse(&spec(), tokens(&["--db", "-o", "json"])).expect_err("missing value");
+    assert_eq!(error.message(), "flag `--db` requires a value");
+}
+
+#[test]
+fn a_lone_dash_is_still_a_value() {
+    let files = FlagSpec::new(&["file"], &[]);
+    let parsed = parse(&files, tokens(&["--file", "-"])).expect("stdin");
+    assert_eq!(parsed.value("file"), Some("-"));
+}
+
+#[test]
+fn an_inline_value_keeps_a_dash_led_value() {
+    let parsed = parse(&spec(), tokens(&["--db=-x"])).expect("parse");
+    assert_eq!(parsed.value("db"), Some("-x"));
+}
+
+#[test]
+fn a_command_local_value_flag_does_not_take_a_dash_led_flag_as_value() {
+    let error = parse(&spec(), tokens(&["abc", "--db", "-x"])).expect_err("missing value");
+    assert_eq!(error.message(), "flag `--db` requires a value");
 }

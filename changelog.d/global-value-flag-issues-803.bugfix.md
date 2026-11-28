@@ -1,0 +1,1 @@
+A value flag no longer reads the next single-dash flag as its value: `clio --db -x status` now reports that `--db` requires a value and exits 2 instead of opening a database named `-x`, while a lone `-` is still accepted as a value (stdin for `--file`).

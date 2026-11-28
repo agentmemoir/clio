@@ -177,14 +177,16 @@ fn globals_are_part_of_every_spec() {
 
 #[test]
 fn split_leading_globals_moves_flags_after_the_verb() {
-    let (rest, globals) = split_leading_globals(&tokens(&["--db", "x.db", "recall", "q"]));
+    let (rest, globals) =
+        split_leading_globals(&tokens(&["--db", "x.db", "recall", "q"])).expect("split");
     assert_eq!(rest, tokens(&["recall", "q"]));
     assert_eq!(globals, tokens(&["--db", "x.db"]));
 }
 
 #[test]
 fn split_leading_globals_handles_inline_and_bool_flags() {
-    let (rest, globals) = split_leading_globals(&tokens(&["--db=x.db", "--no-input", "stats"]));
+    let (rest, globals) =
+        split_leading_globals(&tokens(&["--db=x.db", "--no-input", "stats"])).expect("split");
     assert_eq!(rest, tokens(&["stats"]));
     assert_eq!(globals, tokens(&["--db=x.db", "--no-input"]));
 }
@@ -193,7 +195,8 @@ fn split_leading_globals_handles_inline_and_bool_flags() {
 fn split_leading_globals_stops_at_the_end_of_options_delimiter() {
     let (rest, globals) = split_leading_globals(&tokens(&[
         "--db", "x.db", "--", "remember", "--output", "json",
-    ]));
+    ]))
+    .expect("split");
     assert_eq!(
         (rest, globals),
         (
@@ -278,28 +281,30 @@ fn merge_leading_globals_preserves_the_delimiter_as_the_option_boundary() {
 
 #[test]
 fn split_leading_globals_leaves_trailing_flags_alone() {
-    let (rest, globals) = split_leading_globals(&tokens(&["recall", "q", "--db", "x.db"]));
+    let (rest, globals) =
+        split_leading_globals(&tokens(&["recall", "q", "--db", "x.db"])).expect("split");
     assert_eq!(rest, tokens(&["recall", "q", "--db", "x.db"]));
     assert!(globals.is_empty(), "{globals:?}");
 }
 
 #[test]
 fn split_leading_globals_does_not_consume_a_flag_as_a_value() {
-    // A value-less `--output` must not swallow the following `--db`; the rest
-    // still starts at the verb so the parser reports the missing value.
-    let (rest, globals) =
-        split_leading_globals(&tokens(&["--output", "--db", "x.db", "recall", "q"]));
-    assert_eq!(rest, tokens(&["recall", "q"]));
-    assert_eq!(globals, tokens(&["--output", "--db", "x.db"]));
+    // A value-less `--output` must not swallow the following `--db`; it is the
+    // `--output` that is reported as missing its value.
+    let error = split_leading_globals(&tokens(&["--output", "--db", "x.db", "recall", "q"]))
+        .expect_err("a value-less --output is refused");
+    assert_eq!(error.message(), "flag `--output` requires a value");
 }
 
 #[test]
 fn split_leading_globals_moves_the_short_output_alias() {
-    let (rest, globals) = split_leading_globals(&tokens(&["-o", "json", "recall", "q"]));
+    let (rest, globals) =
+        split_leading_globals(&tokens(&["-o", "json", "recall", "q"])).expect("split");
     assert_eq!(rest, tokens(&["recall", "q"]));
     assert_eq!(globals, tokens(&["-o", "json"]));
 
-    let (rest, globals) = split_leading_globals(&tokens(&["-o=json", "recall", "q"]));
+    let (rest, globals) =
+        split_leading_globals(&tokens(&["-o=json", "recall", "q"])).expect("split");
     assert_eq!(rest, tokens(&["recall", "q"]));
     assert_eq!(globals, tokens(&["-o=json"]));
 }
@@ -307,9 +312,9 @@ fn split_leading_globals_moves_the_short_output_alias() {
 #[test]
 fn split_leading_globals_does_not_consume_a_flag_as_a_short_output_value() {
     // Mirror of the long form: a value-less `-o` must not swallow `--db`.
-    let (rest, globals) = split_leading_globals(&tokens(&["-o", "--db", "x.db", "recall", "q"]));
-    assert_eq!(rest, tokens(&["recall", "q"]));
-    assert_eq!(globals, tokens(&["-o", "--db", "x.db"]));
+    let error = split_leading_globals(&tokens(&["-o", "--db", "x.db", "recall", "q"]))
+        .expect_err("a value-less -o is refused");
+    assert_eq!(error.message(), "flag `-o` requires a value");
 }
 
 #[test]

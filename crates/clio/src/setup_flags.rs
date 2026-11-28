@@ -268,7 +268,7 @@ pub(crate) fn parse_setup_args(raw: &[String]) -> Result<HashMap<String, String>
         let value = it
             .next()
             .ok_or_else(|| format!("--{name} requires a value"))?;
-        if value.starts_with("--") {
+        if crate::cli_args::is_flag_token(value) {
             return Err(format!("--{name} requires a value"));
         }
         if value.trim().is_empty() {

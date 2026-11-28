@@ -85,7 +85,8 @@ pub(crate) fn check_example(spec: &CommandSpec, example: &Example) -> Result<(),
         return Err(format!("{context} does not start with `clio `"));
     }
     let tokens = split_line(example.command).map_err(|reason| format!("{context} {reason}"))?;
-    let (rest, globals) = crate::cli_args::split_leading_globals(&tokens[1..]);
+    let (rest, globals) = crate::cli_args::split_leading_globals(&tokens[1..])
+        .map_err(|error| format!("{context}: {}", error.message()))?;
     let Some((target, args)) = resolve(&rest) else {
         return Err(format!("{context} names no known command"));
     };
@@ -162,7 +163,7 @@ fn without_bare_optional_values(target: &CommandSpec, args: Vec<String>) -> Vec<
                 .is_some_and(|name| optional.contains(&name))
             && args
                 .get(index + 1)
-                .is_none_or(|next| next.starts_with("--"))
+                .is_none_or(|next| crate::cli_args::is_flag_token(next))
             && args[..flags_end]
                 .iter()
                 .filter(|given| given.as_str() == token.as_str())

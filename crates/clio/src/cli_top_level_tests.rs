@@ -46,7 +46,8 @@ fn help_is_recognised_in_every_spelling_and_nothing_else_is() {
 }
 
 /// A global value flag's value is not a help request: `--db help` names a
-/// database called `help`, so the command runs instead of printing help.
+/// database called `help`, so the command runs instead of printing help. A
+/// single-dash token is a flag, never a value, so `--db -h` still asks.
 #[test]
 fn a_global_value_flags_value_is_not_a_help_request() {
     // Every declared global value flag, and the short `-o`, drops its value.
@@ -60,8 +61,8 @@ fn a_global_value_flags_value_is_not_a_help_request() {
             "`{flag} help` must not ask for help"
         );
         assert!(
-            !super::wants_help(&[flag.clone(), "-h".to_owned()]),
-            "`{flag} -h` must not ask for help"
+            super::wants_help(&[flag.clone(), "-h".to_owned()]),
+            "`{flag} -h` asks, because `-h` is a flag and not a value"
         );
         assert!(
             super::wants_help(&[flag, "--help".to_owned()]),

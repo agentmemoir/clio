@@ -35,7 +35,7 @@ pub(crate) fn help_requested(args: &[String], is_value_flag: &impl Fn(&str) -> b
         if is_value_flag(arg)
             && args
                 .get(index + 1)
-                .is_some_and(|value| !value.starts_with("--"))
+                .is_some_and(|value| !crate::cli_args::is_flag_token(value))
         {
             index += 2;
             continue;

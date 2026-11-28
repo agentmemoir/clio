@@ -190,7 +190,7 @@ fn a_leading_global_flag_survives_the_verb_and_is_accepted() {
         .iter()
         .map(|token| (*token).to_owned())
         .collect();
-    let (rest, globals) = crate::cli_args::split_leading_globals(&argv);
+    let (rest, globals) = crate::cli_args::split_leading_globals(&argv).expect("split");
     let mut it = rest.into_iter();
     assert_eq!(it.next().as_deref(), Some("status"));
     let trailing = crate::cli_args::merge_leading_globals(it, globals);

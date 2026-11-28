@@ -144,6 +144,17 @@ pub(crate) fn global_flag(name: &str) -> Option<&'static Flag> {
         .find(|flag| flag.long == name)
 }
 
+/// Whether `name` is a declared global that a surface must refuse when no value
+/// follows it.
+///
+/// `--output` is excluded: the reserved surfaces give a bare `-o`/`--output` a
+/// documented meaning (the default mode), so it is value-optional there.
+pub(crate) fn requires_a_value(name: &str) -> bool {
+    GLOBAL_VALUE_FLAGS
+        .iter()
+        .any(|flag| flag.long == name && flag.long != "output")
+}
+
 /// Every command record, tranche order preserved.
 pub(crate) fn all() -> impl Iterator<Item = &'static CommandSpec> {
     TRANCHES.iter().flat_map(|tranche| tranche.iter())

@@ -157,6 +157,12 @@ impl ParsedArgs {
     }
 }
 
+/// Whether `token` is a flag the grammar must not read as a value: dash-led,
+/// but not the lone `-`, which is a real value such as stdin for `--file`.
+pub(crate) fn is_flag_token(token: &str) -> bool {
+    token.starts_with('-') && token != "-"
+}
+
 /// Parse `args` (everything after the verb) against `spec`.
 ///
 /// # Errors
@@ -213,16 +219,11 @@ pub(crate) fn parse(
             let value = match token.strip_prefix("-o=") {
                 Some(inline) => inline.to_owned(),
                 None => match tokens.get(index) {
-                    Some(next) if !next.starts_with("--") => {
+                    Some(next) if !is_flag_token(next) => {
                         index += 1;
                         next.clone()
                     }
-                    _ => {
-                        return Err(CliError::usage_hint(
-                            "flag `-o` requires a value",
-                            "try `-o json` or `-o text`",
-                        ));
-                    }
+                    _ => return Err(crate::cli_error::missing_value("-o")),
                 },
             };
             record_value(&mut parsed, spec, "output", "-o", value)?;
@@ -230,7 +231,7 @@ pub(crate) fn parse(
             continue;
         }
         let Some(body) = token.strip_prefix("--") else {
-            if token.starts_with('-') && token != "-" {
+            if is_flag_token(&token) {
                 return Err(unknown_flag(&token, spec));
             }
             parsed.positionals.push(token);
@@ -254,16 +255,11 @@ pub(crate) fn parse(
                 value
             } else {
                 match tokens.get(index) {
-                    Some(next) if !next.starts_with("--") => {
+                    Some(next) if !is_flag_token(next) => {
                         index += 1;
                         next.clone()
                     }
-                    _ => {
-                        return Err(CliError::usage_hint(
-                            format!("flag `--{name}` requires a value"),
-                            format!("try `--{name} VALUE`"),
-                        ));
-                    }
+                    _ => return Err(crate::cli_error::missing_value(&format!("--{name}"))),
                 }
             };
             record_value(&mut parsed, spec, name, &format!("--{name}"), value)?;
@@ -306,7 +302,15 @@ fn record_value(
 /// Returns `(rest, globals)`: `rest` starts at the first non-global token (the
 /// verb and its arguments); `globals` carries the leading global flags in order
 /// so the caller can append them after the verb's own arguments.
-pub(crate) fn split_leading_globals(args: &[String]) -> (Vec<String>, Vec<String>) {
+///
+/// A leading global value flag with no value — the next token is another flag,
+/// or there is none — is refused here, with the same missing-value error the
+/// command grammar gives. Lifting such a flag away from the verb used to hand
+/// its value flag the flag that followed instead: `--db -x status` opened a
+/// database named `-x` and reported on the wrong store.
+pub(crate) fn split_leading_globals(
+    args: &[String],
+) -> Result<(Vec<String>, Vec<String>), CliError> {
     let mut globals = Vec::new();
     let mut index = 0;
     while index < args.len() {
@@ -334,21 +338,20 @@ pub(crate) fn split_leading_globals(args: &[String]) -> (Vec<String>, Vec<String
         if crate::cli_command_registry::global_value_names().any(|flag| flag == name) {
             globals.push(token.clone());
             index += 1;
-            // A following flag token is not a value: leave it for the next
-            // iteration so `--output --db X` reports `--output` as missing its
-            // value instead of swallowing `--db`.
-            if !inline
-                && let Some(value) = args.get(index)
-                && !value.starts_with("--")
-            {
-                globals.push(value.clone());
-                index += 1;
+            let value = args.get(index).filter(|value| !is_flag_token(value));
+            match (inline, value) {
+                (true, _) => {}
+                (false, Some(value)) => {
+                    globals.push(value.clone());
+                    index += 1;
+                }
+                (false, None) => return Err(crate::cli_error::missing_value(token)),
             }
             continue;
         }
         break;
     }
-    (args[index..].to_vec(), globals)
+    Ok((args[index..].to_vec(), globals))
 }
 
 /// Put leading globals before the command's first `--` when one exists.
@@ -392,7 +395,7 @@ pub(crate) fn word_positions(args: &[String]) -> Vec<usize> {
         if is_global_value_flag(arg)
             && args
                 .get(index + 1)
-                .is_some_and(|value| !value.starts_with("--"))
+                .is_some_and(|value| !is_flag_token(value))
         {
             index += 2;
             continue;
