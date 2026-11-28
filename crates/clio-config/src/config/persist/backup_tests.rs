@@ -250,7 +250,7 @@ fn backup_target_is_a_timestamped_namesake_in_the_backups_dir() {
     );
     assert_ne!(
         first, second,
-        "two backups must never share one name, or the second replaces the first"
+        "a second backup at the same stamp is refused, so two backups never share one name"
     );
     assert!(first.exists() && second.exists());
     assert_eq!(
@@ -338,6 +338,77 @@ fn backup_refuses_a_planted_entry_at_the_target_name() {
             .is_symlink(),
         "the planted entry must still be the symlink, not a replaced file"
     );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// A directory planted at the stamped name is refused as an existing entry, so
+// the backup neither writes into it nor replaces it.
+#[cfg(unix)]
+#[test]
+fn backup_refuses_a_directory_at_the_target_name() {
+    let dir = scratch("target-dir");
+    fs::create_dir_all(dir.join(BACKUP_DIR_NAME)).expect("backups");
+    let cfg = dir.join("deployment.json");
+    fs::write(&cfg, "{}").expect("write");
+    let target = dir.join(BACKUP_DIR_NAME).join("deployment.json.7");
+    fs::create_dir(&target).expect("planted dir");
+
+    let err = backup_config_file_with_stamp(&cfg, 7).expect_err("refused");
+
+    assert_eq!(err.code, ErrorCode::Forbidden, "{}", err.message);
+    assert!(fs::symlink_metadata(&target).expect("meta").is_dir());
+    assert_eq!(fs::read_dir(&target).expect("read_dir").count(), 0);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// A dangling symlink planted at the stamped name is not followed: the exclusive
+// create refuses it, and the path it names is still absent.
+#[cfg(unix)]
+#[test]
+fn backup_refuses_a_dangling_link_at_the_target_name() {
+    use std::os::unix::fs::symlink;
+    let dir = scratch("target-dangling");
+    fs::create_dir_all(dir.join(BACKUP_DIR_NAME)).expect("backups");
+    let cfg = dir.join("deployment.json");
+    fs::write(&cfg, "{}").expect("write");
+    let missing = dir.join("not-there.json");
+    let target = dir.join(BACKUP_DIR_NAME).join("deployment.json.7");
+    symlink(&missing, &target).expect("symlink");
+
+    let err = backup_config_file_with_stamp(&cfg, 7).expect_err("refused");
+
+    assert_eq!(err.code, ErrorCode::Forbidden, "{}", err.message);
+    let entry = fs::symlink_metadata(&target).expect("meta");
+    assert!(entry.file_type().is_symlink(), "still the planted link");
+    assert_eq!(fs::read_link(&target).expect("read_link"), missing);
+    assert!(!missing.exists(), "the link target must stay absent");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// A hard link at the stamped name shares its bytes with another name, so an
+// overwriting open would rewrite that file. The exclusive create refuses it and
+// the shared bytes are unchanged.
+#[cfg(unix)]
+#[test]
+fn backup_refuses_a_hard_link_at_the_target_name() {
+    use std::os::unix::fs::MetadataExt;
+    let dir = scratch("target-hard-link");
+    fs::create_dir_all(dir.join(BACKUP_DIR_NAME)).expect("backups");
+    let cfg = dir.join("deployment.json");
+    fs::write(&cfg, "{}").expect("write");
+    let secret = "bytes the other name must keep";
+    let victim = dir.join("victim.json");
+    fs::write(&victim, secret).expect("victim");
+    let target = dir.join(BACKUP_DIR_NAME).join("deployment.json.7");
+    fs::hard_link(&victim, &target).expect("hard link");
+
+    let err = backup_config_file_with_stamp(&cfg, 7).expect_err("refused");
+
+    assert_eq!(err.code, ErrorCode::Forbidden, "{}", err.message);
+    assert_eq!(fs::read_to_string(&victim).expect("victim"), secret);
+    let entry = fs::symlink_metadata(&target).expect("meta");
+    assert!(entry.is_file(), "still the planted file");
+    assert_eq!(entry.nlink(), 2, "the two names must still share an inode");
     let _ = fs::remove_dir_all(&dir);
 }
 

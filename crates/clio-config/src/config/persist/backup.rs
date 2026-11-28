@@ -16,6 +16,19 @@
 //! - The owner-only write primitive itself (see `write`)
 //! - The default file name used as a fallback (see `path`)
 //!
+//! ## Policy
+//!
+//! The `backups/` directory must be a real directory beside the config file. A
+//! symbolic link, or any other non-directory entry, at that name is refused. To
+//! keep backups on another filesystem, move the config directory there; the
+//! backup does not follow a link out of it.
+//!
+//! ## Guarantee
+//!
+//! The directory refusal is a check before the create. The target create is
+//! exclusive and owner-only, so an entry already at the target name is never
+//! followed or truncated.
+//!
 //! ## Boundary
 //!
 //! Changes to backup naming, location, or permissions belong here.
@@ -43,7 +56,7 @@ pub(crate) const BACKUP_DIR_NAME: &str = "backups";
 /// [`ErrorCode::Forbidden`] when the source is a symbolic link or is not a
 /// regular file, when the backups directory is a symbolic link, or when an
 /// entry already exists at the backup target name; I/O failures reading the
-/// source or writing the backup.
+/// source, inspecting the backups directory, or writing the backup.
 pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -53,6 +66,7 @@ pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
 
 /// The backup body with the nanosecond stamp supplied, so a test can predict the
 /// target name the write must refuse.
+#[allow(clippy::too_many_lines)] // one linear open, inspect, prepare, read, and write
 fn backup_config_file_with_stamp(path: &Path, stamp: u128) -> Result<Option<PathBuf>, AmError> {
     // One open: the bytes the backup holds are read from the same descriptor
     // the type check accepted, never from a second lookup by path.
@@ -107,26 +121,71 @@ fn backup_config_file_with_stamp(path: &Path, stamp: u128) -> Result<Option<Path
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .join(BACKUP_DIR_NAME);
-    create_private_dir(&dir).map_err(|e| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!("failed to create backup dir {}: {e}", dir.display()),
-        )
-    })?;
-    let dir_meta = fs::symlink_metadata(&dir).map_err(|e| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!("failed to inspect backup dir {}: {e}", dir.display()),
-        )
-    })?;
-    if dir_meta.file_type().is_symlink() {
-        return Err(AmError::new(
-            ErrorCode::Forbidden,
-            format!(
-                "backup dir {}: refused because it is a symbolic link; remove it and run again",
-                dir.display()
-            ),
-        ));
+    // Inspect the entry before creating it, so a planted link or file is
+    // refused with a failure the operator can act on instead of one raised
+    // inside the directory create. Only a missing entry is created.
+    match fs::symlink_metadata(&dir) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(AmError::new(
+                ErrorCode::Forbidden,
+                format!(
+                    "backup dir {}: refused because it is a symbolic link; replace it with a \
+                     real directory and run again",
+                    dir.display()
+                ),
+            ));
+        }
+        Ok(meta) if !meta.is_dir() => {
+            return Err(AmError::new(
+                ErrorCode::Internal,
+                format!(
+                    "failed to create backup dir {}: not a directory",
+                    dir.display()
+                ),
+            ));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            create_private_dir(&dir).map_err(|e| {
+                AmError::new(
+                    ErrorCode::Internal,
+                    format!("failed to create backup dir {}: {e}", dir.display()),
+                )
+            })?;
+            // A link swapped in during the create is still caught, and the
+            // entry that now exists must be a real directory.
+            let made = fs::symlink_metadata(&dir).map_err(|e| {
+                AmError::new(
+                    ErrorCode::Internal,
+                    format!("failed to inspect backup dir {}: {e}", dir.display()),
+                )
+            })?;
+            if made.file_type().is_symlink()
+                || !fs::metadata(&dir)
+                    .map_err(|e| {
+                        AmError::new(
+                            ErrorCode::Internal,
+                            format!("failed to inspect backup dir {}: {e}", dir.display()),
+                        )
+                    })?
+                    .is_dir()
+            {
+                return Err(AmError::new(
+                    ErrorCode::Forbidden,
+                    format!(
+                        "backup dir {}: refused because it is a symbolic link or not a \
+                         directory; replace it with a real directory and run again",
+                        dir.display()
+                    ),
+                ));
+            }
+        }
+        Err(e) => {
+            return Err(AmError::new(
+                ErrorCode::Internal,
+                format!("failed to inspect backup dir {}: {e}", dir.display()),
+            ));
+        }
     }
     let name = path
         .file_name()
