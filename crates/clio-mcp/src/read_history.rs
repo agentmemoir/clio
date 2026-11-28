@@ -21,9 +21,9 @@
 //! Changes to history read binding or result shaping should normally require
 //! changes here. Changes to storage/façade semantics should not.
 
-use crate::read_tools::{opt_u32, opt_usize, time_axis};
+use crate::read_tools::{opt_usize, time_axis};
 use crate::runtime::{McpState, StderrSinks};
-use crate::write_tools::{opt_str, req_str};
+use crate::write_tools::{opt_str, opt_u64, req_str};
 use clio_types::{AmError, ErrorCode, TimeAxis, TripleQuery};
 use serde_json::{Value, json};
 
@@ -137,15 +137,21 @@ pub const MAX_MEMTREE_DEPTH: u32 = 32;
 #[inline(never)]
 fn memtree_query(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let depth = opt_u32(args, "depth");
-    if let Some(d) = depth
-        && d > MAX_MEMTREE_DEPTH
-    {
-        return Err(AmError::new(
-            ErrorCode::OutOfRange,
-            format!("memtree_query depth must be <= {MAX_MEMTREE_DEPTH}"),
-        ));
-    }
+    // One refusal for every value that is present but unusable: `opt_u64` has
+    // already turned a float, a negative, and an integer above `u64::MAX` into
+    // an error, and the checked narrowing below covers anything over the cap.
+    let depth = match opt_u64(args, "depth")? {
+        None => None,
+        Some(requested) => match u32::try_from(requested) {
+            Ok(depth) if depth <= MAX_MEMTREE_DEPTH => Some(depth),
+            _ => {
+                return Err(AmError::new(
+                    ErrorCode::OutOfRange,
+                    format!("memtree_query depth must be <= {MAX_MEMTREE_DEPTH}"),
+                ));
+            }
+        },
+    };
     let range = args.get("time_range");
     let filter = clio_write::MemTreeQueryFilter {
         time_start: range_bound(range, "start"),

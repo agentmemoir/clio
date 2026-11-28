@@ -118,6 +118,12 @@ fn a_help_topic_resolves_to_that_commands_own_help() {
             .is_some()
     );
 
+    // The delimiter is an operand marker, so the topic still resolves past it.
+    let (verb, _) = super::help_topic(&["--".into(), "recall".into()])
+        .expect("delimited topic")
+        .expect("a topic was named");
+    assert_eq!(verb, "recall");
+
     let unknown = super::help_topic(&["frobnicate".into()]).expect_err("unknown");
     assert_eq!(unknown.code(), "usage");
     assert!(
@@ -438,3 +444,7 @@ fn a_flag_name_without_a_dash_is_rendered_with_the_double_dash() {
     assert_eq!(error.message(), "unknown flag `--confidance`");
     assert_eq!(error.hint(), Some("did you mean `--confidence`?"));
 }
+
+#[cfg(test)]
+#[path = "cli_top_level_catalog_tests.rs"]
+mod catalog_tests;

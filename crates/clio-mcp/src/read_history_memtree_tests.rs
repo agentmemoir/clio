@@ -144,6 +144,76 @@ fn memtree_query_refuses_a_depth_above_its_cap() {
 }
 
 #[test]
+fn memtree_query_refuses_a_depth_above_u32_with_the_real_cap() {
+    let (state, _) = stored();
+    // A value above `u32::MAX` must be refused as out of range, and the refusal
+    // must name the tool's own cap so the caller learns the real bound.
+    let out = call(
+        &state,
+        "memtree_query",
+        json!({"bank": BANK, "depth": 4_294_967_296u64}),
+    );
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("out_of_range"), "{out}");
+    assert!(
+        out["message"].as_str().unwrap_or_default().contains("32"),
+        "the refusal must name the cap: {out}"
+    );
+}
+
+#[test]
+fn memtree_query_allows_the_cap_depth() {
+    let (state, _) = stored();
+    // The cap value itself is inside the cap, so it must reach the tree rather
+    // than be refused. The forest reads depth as a predicate, so a depth deeper
+    // than the tree holds matches nothing; only the refusal matters here.
+    let out = call(&state, "memtree_query", json!({"bank": BANK, "depth": 32}));
+    assert_ne!(
+        out["code"],
+        json!("out_of_range"),
+        "the cap value itself must not be refused: {out}"
+    );
+}
+
+#[test]
+fn memtree_query_refuses_the_u32_max_depth_with_the_real_cap() {
+    let (state, _) = stored();
+    // `u32::MAX` fits `u64` and so reaches the cap check; it is still too deep.
+    let out = call(
+        &state,
+        "memtree_query",
+        json!({"bank": BANK, "depth": 4_294_967_295u64}),
+    );
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("out_of_range"), "{out}");
+    assert_eq!(
+        out["message"],
+        json!("memtree_query depth must be <= 32"),
+        "the refusal must name the cap: {out}"
+    );
+}
+
+#[test]
+fn memtree_query_refuses_a_fractional_depth() {
+    let (state, _) = stored();
+    // A float passes the schema's `number` check, so the handler must refuse it
+    // instead of reading it as an omitted argument.
+    let out = call(&state, "memtree_query", json!({"bank": BANK, "depth": 2.5}));
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("out_of_range"), "{out}");
+}
+
+#[test]
+fn memtree_query_refuses_a_negative_depth() {
+    let (state, _) = stored();
+    // A negative number passes the schema's `number` check, so the handler must
+    // refuse it instead of reading it as an omitted argument.
+    let out = call(&state, "memtree_query", json!({"bank": BANK, "depth": -1}));
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("out_of_range"), "{out}");
+}
+
+#[test]
 fn memtree_get_reads_the_node_a_stored_item_created() {
     let (state, node_id) = stored();
     let out = call(

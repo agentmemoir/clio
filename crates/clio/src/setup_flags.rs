@@ -238,8 +238,9 @@ pub(crate) const ROTATE_REMOVED: &str = "--rotate-database-password was removed;
 /// retired `--type` flag with its replacement message.
 pub(crate) fn parse_setup_args(raw: &[String]) -> Result<HashMap<String, String>, String> {
     let accepted = accepted_flags();
+    let options = crate::cli_args::before_delimiter(raw);
     let mut flags = HashMap::new();
-    let mut it = raw.iter();
+    let mut it = options.iter();
     while let Some(token) = it.next() {
         let Some(name) = token.strip_prefix("--") else {
             return Err(format!(
@@ -292,6 +293,13 @@ pub(crate) fn parse_setup_args(raw: &[String]) -> Result<HashMap<String, String>
         crate::cli_error::reject_repeated_flag(&format!("--{name}"), flags.contains_key(name))
             .map_err(|error| error.message().to_owned())?;
         flags.insert(name.to_owned(), value.clone());
+    }
+    // A bare `--` is the delimiter; `setup` takes no operands, so a token after
+    // it is a stray positional argument, refused the same way any other is.
+    if let Some(operand) = raw.get(options.len() + 1) {
+        return Err(format!(
+            "unexpected argument `{operand}`; try `clio setup --help`"
+        ));
     }
     Ok(flags)
 }

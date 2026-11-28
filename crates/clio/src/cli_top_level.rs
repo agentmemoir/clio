@@ -63,6 +63,7 @@ pub(crate) fn record_flag_names(name: &str) -> Vec<&'static str> {
 /// boolean's spelling is read from the help record, and only `--json` selects
 /// the catalog, so `--markdown` never does.
 pub(crate) fn wants_json_catalog(args: &[String]) -> bool {
+    let args = crate::cli_args::before_delimiter(args);
     let spec =
         crate::cli_command_registry::find("help").unwrap_or_else(|| panic!("`help` is registered"));
     spec.documented
@@ -71,7 +72,7 @@ pub(crate) fn wants_json_catalog(args: &[String]) -> bool {
         .is_some_and(|json| args.iter().any(|arg| arg == &format!("--{}", json.long)))
 }
 
-/// The manual request the raw arguments make, validated before any write.
+/// The manual request the raw arguments before the `--` delimiter make, validated before any write.
 ///
 /// `Ok(Some(dir))` when `--markdown` names an `--out` directory; `Ok(None)`
 /// when the arguments ask for one of the other help modes. The comparison is
@@ -80,6 +81,7 @@ pub(crate) fn wants_json_catalog(args: &[String]) -> bool {
 /// excludes `--json` and a `TOPIC`, `--out` is required with `--markdown` and
 /// refused without it, and each of the two flags is refused twice.
 pub(crate) fn markdown_request(args: &[String]) -> Result<Option<PathBuf>, CliError> {
+    let options = crate::cli_args::before_delimiter(args);
     let mut markdown = false;
     let mut out: Option<String> = None;
     let mut topic: Option<&str> = None;
@@ -93,14 +95,14 @@ pub(crate) fn markdown_request(args: &[String]) -> Result<Option<PathBuf>, CliEr
             index += 2;
             continue;
         }
-        if arg == "--markdown" {
+        if index < options.len() && arg == "--markdown" {
             crate::cli_error::reject_repeated_flag("--markdown", markdown)?;
             markdown = true;
-        } else if arg == "--out" {
+        } else if index < options.len() && arg == "--out" {
             crate::cli_error::reject_repeated_flag("--out", out.is_some())?;
-            out = Some(out_value(args, index)?);
+            out = Some(out_value(options, index)?);
             index += 1;
-        } else if let Some(value) = arg.strip_prefix("--out=") {
+        } else if let Some(value) = options.get(index).and_then(|o| o.strip_prefix("--out=")) {
             crate::cli_error::reject_repeated_flag("--out", out.is_some())?;
             crate::cli_error::reject_blank_value("--out", value)?;
             out = Some(value.to_owned());

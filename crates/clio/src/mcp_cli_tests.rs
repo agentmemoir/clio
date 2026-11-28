@@ -318,6 +318,14 @@ fn wants_help_spots_both_spellings_anywhere_in_the_arguments() {
 }
 
 #[test]
+fn wants_help_stops_at_the_delimiter() {
+    // A help flag after `--` is an operand, so it prints no help.
+    assert!(!wants_help(&args_of(&["--bank", "b", "--", "--help"])));
+    assert!(!wants_help(&args_of(&["--", "-h"])));
+    assert!(wants_help(&args_of(&["--help", "--", "--bank", "b"])));
+}
+
+#[test]
 fn http_help_names_the_scanned_port_range_from_the_shared_constants() {
     let help = mcp_http_help();
     let (first, last) = (crate::port_scan::FIRST_PORT, crate::port_scan::LAST_PORT);
