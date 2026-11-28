@@ -304,6 +304,22 @@ fn associations_and_graph_query_with_hop_cap() {
 }
 
 #[test]
+fn graph_query_refuses_a_max_hops_above_u32_with_the_real_cap() {
+    let s = state();
+    store_and_index(&s, "bank-a", "itm-1", "task_spec", "alpha");
+    // Above `u32::MAX` is out of range, and the refusal names the tool's cap.
+    let too_far = json!({"bank": "bank-a", "seed_id": "itm-1", "max_hops": 4_294_967_296u64});
+    let graph = call(&s, "graph_query", too_far);
+    assert_eq!(graph["ok"], json!(false), "{graph}");
+    assert_eq!(graph["code"], json!("out_of_range"), "{graph}");
+    let message = graph["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("max_hops must be <= 3"),
+        "the refusal must name the cap: {graph}"
+    );
+}
+
+#[test]
 fn history_triple_and_belief_reads() {
     let s = state();
     let ts = "2024-01-01T00:00:00Z";
