@@ -108,7 +108,7 @@ fn denial_relay(banks: &[&str]) -> (SyncServer, Arc<FakeDenial>) {
     let credentials = Scratch::new("plain-policy-relay");
     credentials.write(&[record_as("scoped-client", TOKEN, Actor::Harness, banks)]);
     let denial = FakeDenial::new("fp-relay-policy");
-    let server = sync_serve_with_denial(
+    let mut server = sync_serve_with_denial(
         SyncServerOptions {
             bind: "127.0.0.1:0".into(),
             store: Arc::clone(&store) as Arc<dyn Store>,
@@ -127,6 +127,7 @@ fn denial_relay(banks: &[&str]) -> (SyncServer, Arc<FakeDenial>) {
         Arc::clone(&denial) as Arc<dyn ErasureDenial>,
     )
     .expect("serve");
+    server.keep_token_store(credentials);
     (server, denial)
 }
 

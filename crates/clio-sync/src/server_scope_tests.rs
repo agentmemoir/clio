@@ -6,8 +6,8 @@
 //! This module tests the sync server's per-credential bank scoping over real
 //! TCP: two clients on one server, the intersection with the allow-list, the
 //! filtered status response, the same-length wrong secret, one
-//! indistinguishable `401` for every bad credential, restart-scoped
-//! revocation, and the fail-closed start on an unusable store.
+//! indistinguishable `401` for every bad credential, revocation without a
+//! restart, and the fail-closed start on an unusable store.
 //!
 //! ## Owns
 //! - Behavior coverage for the scoped bank checks in `server`
@@ -312,7 +312,7 @@ fn a_configured_store_disables_the_dev_anonymous_fallback() {
 }
 
 #[test]
-fn a_removed_credential_is_refused_after_the_next_start() {
+fn a_removed_credential_is_refused_without_a_restart() {
     let scratch = Scratch::new("removed");
     let a = secret("a");
     let b = secret("b");
@@ -321,17 +321,20 @@ fn a_removed_credential_is_refused_after_the_next_start() {
         record("client-b", &b, &["b-a"]),
     ]);
     let (server, _store) = serve_file(&["b-a"], scratch.path(), false);
-    let (status, _) = http(server.addr(), "GET", "/sync/status", Some(a.as_str()), None);
+    let addr = server.addr().to_owned();
+    let (status, _) = http(&addr, "GET", "/sync/status", Some(a.as_str()), None);
     assert_eq!(status, 200);
-    server.stop();
 
-    // The operator removes record a and starts again.
+    // The operator removes record a while the same server keeps running.
     scratch.write(&[record("client-b", &b, &["b-a"])]);
-    let (server, _store) = serve_file(&["b-a"], scratch.path(), false);
-    let (status, _) = http(server.addr(), "GET", "/sync/status", Some(a.as_str()), None);
-    assert_eq!(status, 401, "revocation takes effect at the next start");
-    let (status, _) = http(server.addr(), "GET", "/sync/status", Some(b.as_str()), None);
-    assert_eq!(status, 200);
+
+    let (status, _) = http(&addr, "GET", "/sync/status", Some(a.as_str()), None);
+    assert_eq!(
+        status, 401,
+        "a removed credential must be refused by the next request"
+    );
+    let (status, _) = http(&addr, "GET", "/sync/status", Some(b.as_str()), None);
+    assert_eq!(status, 200, "the kept credential still authorizes");
     server.stop();
 }
 

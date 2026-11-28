@@ -116,8 +116,9 @@ pub(crate) struct ServeOptions {
     pub(crate) sync: Arc<dyn SyncStore>,
     pub(crate) kms: Arc<dyn DekProvider>,
     pub(crate) banks: Vec<String>,
-    /// Loaded credential store; `None` when no token file was configured.
-    pub(crate) credentials: Option<CredentialStore>,
+    /// Credential store file, read again for every request; `None` when no
+    /// token file was configured.
+    pub(crate) token_file: Option<PathBuf>,
     pub(crate) dev_mode: bool,
     pub(crate) deadline_secs: u64,
     /// Age bound for an applied push, in seconds; `0` disables it.
@@ -163,6 +164,10 @@ pub struct SyncServer {
     /// Bound address (resolved port for ephemeral binds).
     addr: String,
     stop: Arc<AtomicBool>,
+    /// Test-only guard for a scratch credential store. The server reads the
+    /// store file on every request, so the fixture must outlive the server.
+    #[cfg(test)]
+    token_store: Option<crate::credential_fixtures::Scratch>,
 }
 
 impl SyncServer {
@@ -175,6 +180,12 @@ impl SyncServer {
     /// Stop the accept loop; subsequent calls are no-ops.
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
+    }
+
+    /// Keep a scratch credential store alive for this server's lifetime.
+    #[cfg(test)]
+    pub(crate) fn keep_token_store(&mut self, scratch: crate::credential_fixtures::Scratch) {
+        self.token_store = Some(scratch);
     }
 }
 
@@ -213,9 +224,11 @@ fn serve(
     options: SyncServerOptions,
     denial: Option<Arc<dyn ErasureDenial>>,
 ) -> Result<SyncServer, AmError> {
-    let token_file = options.token_file.as_deref();
-    let credentials = token_file.map(CredentialStore::load).transpose()?;
-    if credentials.is_none() && !options.dev_mode {
+    let token_file = options.token_file;
+    if let Some(path) = token_file.as_deref() {
+        CredentialStore::load(path)?;
+    }
+    if token_file.is_none() && !options.dev_mode {
         return Err(AmError::new(
             ErrorCode::Forbidden,
             "sync_serve requires auth material outside dev mode (refusing anonymous bind)",
@@ -230,7 +243,7 @@ fn serve(
     if bind_admission(bind_is_loopback(local), options.allow_public_bind).is_some() {
         return Err(AmError::new(ErrorCode::Forbidden, refusal_message(local)));
     }
-    if credentials.is_none() && !bind_is_loopback(local) {
+    if token_file.is_none() && !bind_is_loopback(local) {
         return Err(AmError::new(
             ErrorCode::Forbidden,
             format!(
@@ -251,7 +264,7 @@ fn serve(
             sync: options.sync,
             kms: options.kms,
             banks: options.banks,
-            credentials,
+            token_file,
             dev_mode: options.dev_mode,
             deadline_secs: options
                 .deadline_secs
@@ -272,7 +285,12 @@ fn serve(
         .name("clio-sync-serve".into())
         .spawn(move || serve_loop(&ctx))
         .expect("serve spawn");
-    Ok(SyncServer { addr, stop })
+    Ok(SyncServer {
+        addr,
+        stop,
+        #[cfg(test)]
+        token_store: None,
+    })
 }
 
 pub(crate) fn bank_authorized(options: &ServeOptions, auth: &AuthOutcome, bank: &str) -> bool {

@@ -235,7 +235,7 @@ fn revoke_removes_a_record_and_states_immediate_effect() {
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     assert!(
         out.contains("without a restart")
-            && out.contains("the sync server applies it at its next start"),
+            && out.contains("the sync server applies it at its next request"),
         "{out}"
     );
     let payload: Value = serde_json::from_str(out.trim()).expect("json");
@@ -244,7 +244,7 @@ fn revoke_removes_a_record_and_states_immediate_effect() {
     assert_eq!(
         payload["note"],
         json!(
-            "the running MCP HTTP server applies the change without a restart, while the sync server applies it at its next start"
+            "the running MCP HTTP server applies the change without a restart, while the sync server applies it at its next request"
         )
     );
     let records = records_on_disk(&store);

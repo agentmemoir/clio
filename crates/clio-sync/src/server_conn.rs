@@ -72,7 +72,7 @@
 //! out of 20, and a write-side shutdown delivered it 20 times out of 20.
 
 use crate::conn_pool::{ConnectionPool, MAX_CONNECTIONS};
-use crate::credential::authorize_request;
+use crate::credential::authorize_current_request;
 use crate::http::{
     BODY_CAP_BYTES, HEAD_CAP_BYTES, READ_SLICE, ReadRequestError, Route, io_read, read_request,
 };
@@ -258,11 +258,11 @@ fn handle_connection(options: &ServeOptions, mut stream: TcpStream) -> Result<()
             &serde_json::json!({ "ok": false, "code": "not_found", "message": "unknown route" }),
         );
     };
-    // Credentials are resolved once, here, after route resolution and before
-    // dispatch: the handlers read the scope this request was bound to, and no
-    // other path reaches a handler.
-    let auth = match authorize_request(
-        options.credentials.as_ref(),
+    // Credentials are resolved here, after route resolution and before
+    // dispatch: the store is read as it is now, and the handlers read the
+    // scope this request was bound to. No other path reaches a handler.
+    let auth = match authorize_current_request(
+        options.token_file.as_deref(),
         options.dev_mode,
         request.authorization.as_deref(),
     ) {

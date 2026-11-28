@@ -53,9 +53,9 @@ pub(crate) fn serve(
     let (store, kms) = sqlite();
     // A supplied token is a scoped record in a scratch store, never a
     // single-token server input: `sync_serve` takes only a store file. The
-    // guard is kept alive until the store has been loaded at start.
+    // store is read on every request, so the guard lives on the server handle.
     let scratch = token.map(|secret| scoped_store("serve", secret, banks));
-    let server = sync_serve(SyncServerOptions {
+    let mut server = sync_serve(SyncServerOptions {
         bind: "127.0.0.1:0".into(),
         store: store.clone(),
         sync: store.clone(),
@@ -71,7 +71,9 @@ pub(crate) fn serve(
         sync_key: None,
     })
     .expect("serve");
-    drop(scratch);
+    if let Some(scratch) = scratch {
+        server.keep_token_store(scratch);
+    }
     (server, store)
 }
 

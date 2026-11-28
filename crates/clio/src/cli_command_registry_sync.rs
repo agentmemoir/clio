@@ -65,9 +65,9 @@ const STATUS_ROTATION_NOTE: &str = "after a key rotation, a peer that has not be
 /// from. The cipher key is never a CLI argument.
 const TRANSFER_NOTE: &str = "the key is read from CLIO_SYNC_KEY_FILE when set, otherwise from the store `clio sync keygen` recorded; --token falls back to CLIO_SYNC_TOKEN";
 
-/// The `serve` credential note: the shared credential store, its start-time
+/// The `serve` credential note: the shared credential store, its per-request
 /// load, and the secret-on-every-request rule.
-const SERVE_CREDENTIAL_NOTE: &str = "runs in the foreground for the resolved TTL (default 1800s); --token-file loads the shared credential store (each secret reaches only its record's banks) once at start, so revocation takes effect at the next start; a configured credential source (--token-file) requires a secret on every request, dev mode included";
+const SERVE_CREDENTIAL_NOTE: &str = "runs in the foreground for the resolved TTL (default 1800s); --token-file loads the shared credential store (each secret reaches only its record's banks) on every request, so revocation takes effect at the next request; a configured credential source (--token-file) requires a secret on every request, dev mode included";
 
 /// The `serve` cleartext note: the bind admission rule, everything a
 /// non-loopback relay can see, what it cannot, and the reverse-proxy rule for a
@@ -250,7 +250,7 @@ pub(crate) const SYNC_SERVE: CommandSpec = CommandSpec {
         Flag::text(
             "token-file",
             "PATH",
-            "Points at the shared credential store `sync serve` loads once at start; each secret reaches only its record's banks.",
+            "Points at the shared credential store `sync serve` reads on every request; each secret reaches only its record's banks.",
         ),
         Flag {
             default: Some("1800"),

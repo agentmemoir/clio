@@ -46,7 +46,7 @@ const OLD_STAMP: &str = "2026-01-01T00:00:00Z";
 fn serve_with_window(bank: &str) -> (SyncServer, Arc<SqliteStore>) {
     let scratch = scoped_store("push-stale", TOKEN, &[bank]);
     let (store, kms) = sqlite();
-    let server = sync_serve(SyncServerOptions {
+    let mut server = sync_serve(SyncServerOptions {
         bind: "127.0.0.1:0".into(),
         store: Arc::clone(&store) as Arc<dyn Store>,
         sync: Arc::clone(&store) as Arc<dyn SyncStore>,
@@ -62,6 +62,7 @@ fn serve_with_window(bank: &str) -> (SyncServer, Arc<SqliteStore>) {
         sync_key: None,
     })
     .expect("serve");
+    server.keep_token_store(scratch);
     (server, store)
 }
 

@@ -62,7 +62,7 @@ fn serve_with_kms(
 ) {
     let (store, kms) = sqlite();
     let credentials = scoped_store("error-kms", token, &[bank]);
-    let server = sync_serve(SyncServerOptions {
+    let mut server = sync_serve(SyncServerOptions {
         bind: "127.0.0.1:0".into(),
         store: store.clone(),
         sync: store.clone(),
@@ -78,6 +78,7 @@ fn serve_with_kms(
         sync_key: None,
     })
     .expect("serve");
+    server.keep_token_store(credentials);
     (server, store, kms)
 }
 
