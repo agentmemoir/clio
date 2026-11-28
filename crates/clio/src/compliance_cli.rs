@@ -108,7 +108,7 @@ pub(crate) fn run(
     // The scan runs before the parser so a help request is not turned into a
     // usage error by a stray token or an unknown flag; `retention_cli` answers
     // its subcommands' help the same way.
-    if collected
+    if crate::cli_args::before_delimiter(&collected)
         .iter()
         .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
     {

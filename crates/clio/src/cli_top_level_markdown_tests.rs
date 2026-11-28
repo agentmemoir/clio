@@ -170,3 +170,30 @@ fn only_the_json_flag_selects_the_catalog() {
     assert!(!wants_json_catalog(&args(&["--markdown"])));
     assert!(!wants_json_catalog(&args(&[])));
 }
+
+/// Tokens after `--` are operands: they never request the manual, never supply
+/// its directory, and never select the JSON catalog it excludes.
+#[test]
+fn options_after_the_delimiter_are_not_read() {
+    assert_eq!(
+        markdown_request(&args(&["--", "--markdown", "--out=manual"]))
+            .expect("no manual requested"),
+        None
+    );
+    let error = markdown_request(&args(&["--markdown", "--", "--out=manual"]))
+        .expect_err("--out after -- is an operand");
+    assert_usage_refusal(&error, "the delimiter hides --out");
+    assert_eq!(
+        markdown_request(&args(&["--markdown", "--out", "manual", "--", "--json"]))
+            .expect("the delimiter hides --json"),
+        Some(PathBuf::from("manual"))
+    );
+}
+
+/// A word after `--` stays the TOPIC that `--markdown` refuses.
+#[test]
+fn a_word_after_the_delimiter_is_still_a_topic() {
+    let error = markdown_request(&args(&["--markdown", "--out", "manual", "--", "backup"]))
+        .expect_err("a topic after the delimiter");
+    assert_usage_refusal(&error, "the operand is the topic");
+}

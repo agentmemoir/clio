@@ -443,3 +443,6 @@ mod value_tests;
 /// The matcher lives in its own module and its own file; re-exported here so the
 /// grammar and its callers keep one import path for it.
 pub(crate) use crate::cli_args_suggest::suggest;
+
+/// The arguments before the first `--` delimiter, or all of them.
+pub(crate) use crate::cli_args_delimiter::before_delimiter;

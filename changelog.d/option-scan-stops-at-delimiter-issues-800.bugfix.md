@@ -1,0 +1,1 @@
+Tokens after a `--` delimiter are operands, so they are never read as options. The affected surfaces are help and catalog detection, `status`, `compliance`, `retention`, `mcp`, `setup`, `--output`/`-o`, and `--markdown`/`--out`. A command that takes no operands now refuses such a token with a usage error instead of printing a screen.
