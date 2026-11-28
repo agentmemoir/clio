@@ -35,6 +35,7 @@ use crate::manifest::{
     PayloadInfo, SnapshotInfo, StoreInfo,
 };
 use crate::staging::{self, StagedFile};
+use crate::tar_header;
 use clio_types::{AmError, ErrorCode};
 use std::path::PathBuf;
 
@@ -258,11 +259,32 @@ fn stage_key_member(key: &KeySource, backup_dir: &std::path::Path) -> Result<Sta
     }
 }
 
+/// Refuse a payload the ustar size field cannot encode.
+///
+/// This runs before the manifest is validated, so the write path reports its
+/// own limit rather than the reader's archive-defect code for the same number,
+/// and before any space is reserved or any member written.
+fn check_writable_payload(request: &CreateRequest) -> Result<(), AmError> {
+    let bytes = request.payload.bytes();
+    let limit = tar_header::MAX_HEADER_SIZE_VALUE;
+    if bytes > limit {
+        return Err(AmError::new(
+            ErrorCode::OutOfRange,
+            format!(
+                "payload member {:?} is {bytes} bytes, over the ustar size-field limit of {limit} bytes; this archive format cannot represent a member this large, and no amount of free space would let it",
+                request.payload_member
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Build the manifest from the measured facts.
 fn build_manifest(
     request: &CreateRequest,
     keys: Option<&(StagedFile, u64)>,
 ) -> Result<BackupManifest, AmError> {
+    check_writable_payload(request)?;
     let keys_info = match keys {
         Some((staged, subjects)) => KeysInfo {
             included: true,

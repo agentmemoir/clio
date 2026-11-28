@@ -323,6 +323,31 @@ fn a_measure_mismatch_is_refused_instead_of_writing_a_broken_member() {
     );
 }
 
+/// A staged payload measured as larger than the ustar size field can encode is
+/// the writer's own format limit, so the create reports `OutOfRange` rather
+/// than the archive-defect code the reader uses for the same number.
+#[test]
+fn a_payload_over_the_ustar_limit_is_out_of_range_on_the_write_path() {
+    let scratch = Scratch::new("create-over-ustar-limit");
+    let limit = crate::tar_header::MAX_HEADER_SIZE_VALUE;
+    let path = scratch.join("payload-source.bin");
+    std::fs::write(&path, crate::fixtures::payload_bytes(17)).expect("seed the payload source");
+    let claimed = staging::StagedFile::adopt(path, limit + 1, "0".repeat(64));
+    let req = request(scratch.path(), claimed);
+
+    let error = create_archive(&req).expect_err("a payload the format cannot encode is refused");
+
+    assert_eq!(error.code, clio_types::ErrorCode::OutOfRange);
+    assert_ne!(error.code, clio_types::ErrorCode::ArchiveCorrupt);
+    assert!(
+        error.message.contains(&limit.to_string()),
+        "the message names the limit: {}",
+        error.message
+    );
+    let archives = names_with_extension(scratch.path(), "gz");
+    assert!(archives.is_empty(), "no archive appeared: {archives:?}");
+}
+
 /// A failure after the key store was staged must not leave that staged key
 /// store behind: it is key material, and it sits beside the archive the run
 /// never published.

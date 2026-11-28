@@ -90,10 +90,11 @@ impl Default for ReaderBounds {
 pub const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 
 /// The largest payload a writer can emit: 8 GiB minus 1 byte, the limit the
-/// ustar header's size field can encode. The declared size is the only meter a
-/// reader can bound a member's inflation with, so a cap above this one would
+/// ustar header's size field can encode, taken from that field's own limit so a
+/// header and this cap can never disagree. The declared size is the only meter
+/// a reader can bound a member's inflation with, so a cap above this one would
 /// accept a member no writer of this build can produce and bound nothing.
-pub const MAX_PAYLOAD_BYTES: u64 = 8 * 1024 * 1024 * 1024 - 1;
+pub const MAX_PAYLOAD_BYTES: u64 = tar_header::MAX_HEADER_SIZE_VALUE;
 
 /// True when a header's declared size is larger than the size the manifest
 /// recorded for that member (T-07c): the archive grew behind the manifest's
