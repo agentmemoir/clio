@@ -200,7 +200,27 @@ fn set_rejects_an_unreadable_profile_file() {
     )
     .expect_err("unreadable profile file");
     assert_eq!(err.code, ErrorCode::InvalidArgument);
-    assert!(err.message.contains("failed to read profile file"));
+    assert!(err.message.contains("is not readable"), "{}", err.message);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn set_rejects_a_profile_file_over_the_input_cap() {
+    let path = tmp_store("oversized");
+    let mut body = vec![b' '; crate::cli_read_cap::MAX_INPUT_BYTES + 1];
+    body[0] = b'{';
+    body[1] = b'}';
+    std::fs::write(&path, &body).expect("write oversized profile");
+    let path_str = path.to_string_lossy().into_owned();
+    let store = tmp_store("oversized-store");
+    let store_str = store.to_string_lossy().into_owned();
+    let err = run(
+        "set",
+        &flags(&[("profiles", &store_str), ("profile-file", &path_str)]),
+    )
+    .expect_err("oversized profile file");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    assert!(err.message.contains("4 MiB input cap"), "{}", err.message);
     let _ = std::fs::remove_file(path);
 }
 
@@ -343,7 +363,7 @@ fn a_profile_comes_from_the_file_it_names_and_the_inline_value_wins() {
     )]))
     .expect_err("no such file");
     let reason = format!("{missing}");
-    assert!(reason.contains("profile file"), "{reason}");
+    assert!(reason.contains("--profile-file"), "{reason}");
     assert!(
         reason.contains("/nonexistent/clio/profile.json"),
         "{reason}"

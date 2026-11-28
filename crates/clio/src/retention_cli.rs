@@ -36,6 +36,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+/// The alternative offered when `--profile-file` passes the input cap.
+const PROFILE_TOO_LARGE_HINT: &str = "pass a smaller profile file";
+
 /// Dispatch `clio retention <subcommand>`.
 pub fn retention(args: impl IntoIterator<Item = String>) -> ExitCode {
     let mut it = args.into_iter();
@@ -200,12 +203,12 @@ fn profile_from_flags(flags: &HashMap<String, String>) -> Result<RetentionProfil
     let raw = if let Some(inline) = flags.get("profile") {
         inline.clone()
     } else if let Some(path) = flags.get("profile-file") {
-        std::fs::read_to_string(path).map_err(|e| {
-            AmError::new(
-                ErrorCode::InvalidArgument,
-                format!("failed to read profile file {path}: {e}"),
-            )
-        })?
+        crate::cli_read_cap::read_document_file(
+            path,
+            &format!("--profile-file `{path}`"),
+            PROFILE_TOO_LARGE_HINT,
+        )
+        .map_err(|e| AmError::new(ErrorCode::InvalidArgument, e.message().to_string()))?
     } else {
         return Err(AmError::new(
             ErrorCode::InvalidArgument,
