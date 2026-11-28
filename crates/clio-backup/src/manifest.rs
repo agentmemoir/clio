@@ -251,19 +251,7 @@ impl BackupManifest {
                 ),
             ));
         }
-        // The payload size is what a verify pass or a restore reserves room
-        // against before it stages anything, so a manifest claiming more than
-        // the container can carry is refused here rather than after the
-        // reservation is attempted.
-        if self.payload.bytes > MAX_PAYLOAD_BYTES {
-            return Err(AmError::new(
-                ErrorCode::ArchiveCorrupt,
-                format!(
-                    "manifest field payload.bytes is {}, over the cap of {MAX_PAYLOAD_BYTES} bytes",
-                    self.payload.bytes
-                ),
-            ));
-        }
+        check_payload_size(self.payload.bytes)?;
         // The declaration flag and the member name must agree: one saying the
         // archive carries the key member while the other says it does not is
         // a manifest no later check could read one way.
@@ -298,6 +286,23 @@ impl BackupManifest {
         }
         Ok(())
     }
+}
+
+/// Refuse a payload size the container could never hold.
+///
+/// The payload size is what a verify pass or a restore reserves room against
+/// before it stages anything, so a manifest claiming more than the container
+/// can carry is refused here rather than after the reservation is attempted.
+fn check_payload_size(bytes: u64) -> Result<(), AmError> {
+    if bytes > MAX_PAYLOAD_BYTES {
+        return Err(AmError::new(
+            ErrorCode::ArchiveCorrupt,
+            format!(
+                "manifest field payload.bytes is {bytes}, over the cap of {MAX_PAYLOAD_BYTES} bytes"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -325,3 +325,7 @@ fn decode_error(err: &std::io::Error) -> AmError {
         io_internal("reading the archive stream", err)
     }
 }
+
+#[cfg(test)]
+#[path = "container_reader_tests.rs"]
+mod reader_tests;
