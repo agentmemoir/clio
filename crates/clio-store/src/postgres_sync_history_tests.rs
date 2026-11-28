@@ -26,7 +26,9 @@ use crate::db_url::postgres_url_from_env;
 use crate::pg_lock::lock_pg_test;
 use crate::sync_store::SyncStore;
 use crate::{DekProvider, LocalDevKms, PostgresStore};
-use clio_types::{EpisodicType, EpistemicKind, FailureRecord, ItemKind, MemoryItem, TaskRecord};
+use clio_types::{
+    EpisodicType, EpistemicKind, ErrorCode, FailureRecord, ItemKind, MemoryItem, TaskRecord,
+};
 use std::sync::Arc;
 
 /// Empty-watermark sentinel the client push cursor uses before any push.
@@ -169,7 +171,8 @@ fn pg_sync_history_apply_primitives_roundtrip() {
     assert_eq!(f_stored.attempt_n, 3);
 
     // Failure apply read (`failure_by_attempt`), carrier context joined. The
-    // INT4 `attempt_n` column is bound at its own width, so this must succeed.
+    // attempt is narrowed to the INT4 `attempt_n` column's width, so a stored
+    // attempt must come back.
     let row = SyncStore::failure_by_attempt(&s, &bank, "task-sync", 3)
         .expect("failure by attempt")
         .expect("row");
@@ -273,4 +276,22 @@ fn pg_sync_history_feeds_map_committed_rows() {
     let future_failures =
         SyncStore::feed_failures(&s2, &bank2, "9999-01-01T00:00:00Z", 200).expect("feed");
     assert!(future_failures.is_empty(), "{future_failures:?}");
+}
+
+/// An attempt the INT4 `attempt_n` column cannot hold must be refused as an
+/// invalid argument instead of being narrowed into a value no row can carry,
+/// while a representable attempt that matches nothing still reads as absent.
+#[test]
+fn pg_sync_history_failure_by_attempt_refuses_out_of_range() {
+    let _guard = lock_pg_test();
+    let bank = unique("bank");
+    let s = open_pg();
+
+    let err = SyncStore::failure_by_attempt(&s, &bank, "task-sync", i64::from(i32::MAX) + 1)
+        .expect_err("out-of-range attempt must be refused");
+    assert_eq!(err.code, ErrorCode::InvalidArgument, "{err}");
+
+    let absent = SyncStore::failure_by_attempt(&s, &bank, "task-sync", i64::from(i32::MAX))
+        .expect("representable attempt");
+    assert!(absent.is_none(), "{absent:?}");
 }
