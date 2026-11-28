@@ -77,8 +77,8 @@ mod postgres_archive_fixtures;
 pub use archive_name::{archive_file_name, snapshot_id, snapshot_id_of};
 pub use atomic_publish::AtomicFile;
 pub use container::{
-    ArchiveReader, ArchiveWriter, MAX_MANIFEST_BYTES, MemberDigest, MemberHeader, ReaderBounds,
-    declared_size_suspect,
+    ArchiveReader, ArchiveWriter, MAX_MANIFEST_BYTES, MAX_PAYLOAD_BYTES, MemberDigest,
+    MemberHeader, ReaderBounds, declared_size_suspect,
 };
 pub use create::{CreateReport, CreateRequest, KeySource, StagedMember, create_archive};
 pub use dump_meta::{

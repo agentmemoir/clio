@@ -73,13 +73,14 @@ pub struct ReaderBounds {
 
 impl Default for ReaderBounds {
     /// 1024 members is generous: one per table plus the manifest and the
-    /// key store. `max_member_bytes` is 512 GiB, sized for local-store
-    /// payloads. `max_total_bytes` is 1 TiB, sized for every member of one
-    /// archive combined.
+    /// key store. `max_member_bytes` is [`MAX_PAYLOAD_BYTES`], the largest
+    /// member the writer can emit, so the reader accepts exactly what a writer
+    /// of this build can produce. `max_total_bytes` is 1 TiB, sized for every
+    /// member of one archive combined.
     fn default() -> Self {
         Self {
             max_members: 1024,
-            max_member_bytes: 512 * 1024 * 1024 * 1024,
+            max_member_bytes: MAX_PAYLOAD_BYTES,
             max_total_bytes: 1024 * 1024 * 1024 * 1024,
         }
     }
@@ -87,6 +88,13 @@ impl Default for ReaderBounds {
 
 /// The manifest stays a few kilobytes; a larger first member is refused.
 pub const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
+
+/// The largest payload a writer can emit: 8 GiB minus 1 byte, the limit the
+/// ustar header's size field can encode, taken from that field's own limit so a
+/// header and this cap can never disagree. The declared size is the only meter
+/// a reader can bound a member's inflation with, so a cap above this one would
+/// accept a member no writer of this build can produce and bound nothing.
+pub const MAX_PAYLOAD_BYTES: u64 = tar_header::MAX_HEADER_SIZE_VALUE;
 
 /// True when a header's declared size is larger than the size the manifest
 /// recorded for that member (T-07c): the archive grew behind the manifest's

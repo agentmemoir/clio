@@ -22,6 +22,7 @@
 //!
 //! Keep this module focused on the manifest type.
 
+use crate::container::MAX_PAYLOAD_BYTES;
 use clio_types::{AmError, ErrorCode};
 
 /// The manifest `kind` value this build reads and writes.
@@ -180,9 +181,9 @@ impl BackupManifest {
 
     /// Refuse manifests this build cannot trust: wrong kind, unsupported
     /// format version, wrong compression, empty required strings, an
-    /// unknown store backend, a malformed payload digest, a key declaration
-    /// whose flag and member name disagree, or a key member recorded without
-    /// a real size.
+    /// unknown store backend, a malformed payload digest, a payload size the
+    /// container could never hold, a key declaration whose flag and member
+    /// name disagree, or a key member recorded without a real size.
     pub fn validate(&self) -> Result<(), AmError> {
         if self.kind != KIND {
             return Err(AmError::new(
@@ -250,6 +251,7 @@ impl BackupManifest {
                 ),
             ));
         }
+        check_payload_size(self.payload.bytes)?;
         // The declaration flag and the member name must agree: one saying the
         // archive carries the key member while the other says it does not is
         // a manifest no later check could read one way.
@@ -284,6 +286,23 @@ impl BackupManifest {
         }
         Ok(())
     }
+}
+
+/// Refuse a payload size the container could never hold.
+///
+/// The payload size is what a verify pass or a restore reserves room against
+/// before it stages anything, so a manifest claiming more than the container
+/// can carry is refused here rather than after the reservation is attempted.
+fn check_payload_size(bytes: u64) -> Result<(), AmError> {
+    if bytes > MAX_PAYLOAD_BYTES {
+        return Err(AmError::new(
+            ErrorCode::ArchiveCorrupt,
+            format!(
+                "manifest field payload.bytes is {bytes}, over the cap of {MAX_PAYLOAD_BYTES} bytes"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

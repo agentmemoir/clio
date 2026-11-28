@@ -426,6 +426,21 @@ fn keys_declaration_shapes_parse_only_when_they_agree() {
     }
 }
 
+/// A recorded payload size over the container's per-member cap is refused: a
+/// verify pass reserves room from that number before it stages a byte, so a
+/// forged number must not reach the reservation.
+#[test]
+fn a_payload_size_over_the_container_cap_is_refused() {
+    let mut m = sample();
+    m.payload.bytes = crate::MAX_PAYLOAD_BYTES + 1;
+    let err = BackupManifest::from_json_bytes(&m.to_json_bytes()).expect_err("over the cap");
+    let msg = corrupt(err);
+    assert!(msg.contains("payload.bytes"), "{msg}");
+    assert!(msg.contains(&format!("cap of {} bytes", crate::MAX_PAYLOAD_BYTES)));
+    m.payload.bytes = crate::MAX_PAYLOAD_BYTES;
+    BackupManifest::from_json_bytes(&m.to_json_bytes()).expect("the cap itself is allowed");
+}
+
 /// The manifest document as a JSON value, for assertions about its shape.
 pub(super) fn parsed_value(bytes: &[u8]) -> serde_json::Value {
     serde_json::from_slice(bytes).expect("the manifest is valid JSON")

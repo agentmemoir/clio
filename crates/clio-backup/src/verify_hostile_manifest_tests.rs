@@ -191,6 +191,59 @@ fn member_order_abuse_is_refused_by_name_through_every_entry_point() {
     assert!(entries[1].manifest.is_none(), "it lists with no manifest");
 }
 
+/// A payload member whose declared size is the 12-digit octal maximum — 64 GiB
+/// minus 1, which the size field accepts with no terminator — is over the
+/// per-member cap and is refused from the header alone, so the verify pass
+/// stages nothing. The stream holds a few bytes, so a reader that inflated
+/// before checking the cap would fail on a short member instead.
+#[test]
+fn a_payload_member_declared_at_the_ustar_maximum_is_refused_before_staging() {
+    let scratch = Scratch::new("hostile-bigpayload");
+    let manifest = manifest_bytes(PAYLOAD, false, None);
+    let mut header = build_header("store.db", 0).expect("header").to_vec();
+    // The size field is 12 octal digits with no terminator: all sevens, the
+    // largest value it can hold.
+    header[124..136].copy_from_slice(b"777777777777");
+    fix_checksum(&mut header);
+    let mut raw = raw_member(MANIFEST_MEMBER, &manifest);
+    raw.extend(header);
+    raw.extend_from_slice(PAYLOAD);
+    raw.extend(vec![0u8; 2 * HEADER_SIZE]);
+    let path = hostile_archive(scratch.path(), "big-payload", &raw);
+
+    // The manifest itself is well-formed and well under its own cap, so the
+    // refusal is the payload member's declared size and nothing earlier.
+    read_manifest(&path).expect("the manifest member reads; the payload is what is refused");
+    let message = verify_refuses(&path, ArchiveCorrupt);
+    assert!(
+        message.contains("declares 68719476735 bytes"),
+        "the declared size: {message}"
+    );
+    assert!(message.contains("per-member cap"), "the rule: {message}");
+    assert!(message.contains("store.db"), "the member: {message}");
+    nothing_written_beside(&scratch, "big-payload");
+}
+
+/// Recompute the ustar checksum of a patched header block, as the writer
+/// would, so the size field is the only field under test.
+fn fix_checksum(block: &mut [u8]) {
+    let sum: u64 = block
+        .iter()
+        .enumerate()
+        .map(|(i, &b)| {
+            if (148..156).contains(&i) {
+                u64::from(b' ')
+            } else {
+                u64::from(b)
+            }
+        })
+        .sum();
+    let digits = format!("{sum:06o}");
+    block[148..154].copy_from_slice(digits.as_bytes());
+    block[154] = 0;
+    block[155] = b' ';
+}
+
 /// A manifest member over the cap is refused on its declared size, before a
 /// single byte of it is inflated, and the refusal names the member, the size it
 /// claimed, and the cap.
