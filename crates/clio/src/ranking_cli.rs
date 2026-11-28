@@ -127,7 +127,10 @@ fn set_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
         (inline.to_owned(), "--patch")
     } else if let Some(path) = parsed.value("patch-file") {
         let what = format!("--patch-file `{path}`");
-        (crate::cli_read_cap::read_document_file(path, &what, TOO_LARGE)?, "--patch-file")
+        (
+            crate::cli_read_cap::read_document_file(path, &what, TOO_LARGE)?,
+            "--patch-file",
+        )
     } else {
         return Err(CliError::usage_hint(
             "`ranking set` requires --patch (a JSON object) or --patch-file FILE",

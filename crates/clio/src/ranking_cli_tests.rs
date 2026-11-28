@@ -244,7 +244,10 @@ fn a_patch_file_past_the_byte_cap_is_refused_and_a_small_one_still_applies() {
     let (code, out, err) = run(&["set", &flag, "--dry-run"], &mut rt, false);
     assert_eq!(code, ExitCode::from(2), "{out}{err}");
     assert!(
-        err.contains(&format!("--patch-file `{}` is larger than the", path.display())),
+        err.contains(&format!(
+            "--patch-file `{}` is larger than the",
+            path.display()
+        )),
         "{err}"
     );
     assert!(err.contains("4 MiB input cap"), "{err}");
