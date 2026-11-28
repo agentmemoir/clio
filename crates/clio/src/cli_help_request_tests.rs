@@ -6,7 +6,7 @@
 //! This module tests the shared help-request scan and its value-flag skip.
 //!
 //! ## Owns
-//! - Assertions over `help_requested`
+//! - Assertions over `help_requested`, `is_value_flag`, and `wants_help`
 //!
 //! ## Does not own
 //! - The help screens a surface prints (see `cli_top_level_tests`)
@@ -88,4 +88,57 @@ fn a_help_spelling_after_the_delimiter_is_not_a_request() {
         &["health".to_owned(), "--help".to_owned()],
         &db_is_a_value_flag
     ));
+}
+
+/// `is_value_flag` reads a flag's arity, so a toggle and a value-optional flag
+/// both leave the token after them alone while a value flag claims it.
+///
+/// This is the predicate the scan shares with the parsers, so `--db` claiming the
+/// next token and `--insecure-no-auth` not claiming it cannot drift apart.
+#[test]
+fn the_value_flag_predicate_reads_arity() {
+    for flag in ["--db", "--bank", "--backend", "--actor", "--output", "-o"] {
+        assert!(is_value_flag(flag), "`{flag}` takes a value");
+    }
+    for flag in [
+        "--help",
+        "-h",
+        "help",
+        "--insecure-no-auth",
+        "--shared-bank",
+        "--bind",
+        "--insecure-bind-any",
+        "--force",
+        "--skill-only",
+        "--yes",
+        "--no-input",
+    ] {
+        assert!(!is_value_flag(flag), "`{flag}` claims no value");
+    }
+    // A surface-local value flag is a value flag too, and a name no record
+    // declares is not one.
+    assert!(is_value_flag("--dir"));
+    assert!(is_value_flag("--harness"));
+    assert!(is_value_flag("--profiles"));
+    assert!(!is_value_flag("--not-a-declared-flag"));
+}
+
+/// A help spelling after a valueless flag still asks, which is the rule that
+/// keeps a boolean surface flag from swallowing the request: `--yes -h` prints
+/// help while `--db -h` reports the missing value.
+#[test]
+fn a_help_spelling_after_a_valueless_flag_is_a_request() {
+    for argv in [
+        vec!["--yes", "-h"],
+        vec!["--insecure-no-auth", "--help"],
+        vec!["--shared-bank", "-h"],
+        vec!["--bind", "-h"],
+    ] {
+        let argv = argv
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect::<Vec<_>>();
+        assert!(wants_help(&argv), "{argv:?} must ask for help");
+    }
+    assert!(!wants_help(&["--db".to_owned(), "-h".to_owned()]));
 }

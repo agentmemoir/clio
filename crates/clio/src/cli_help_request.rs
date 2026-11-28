@@ -8,8 +8,10 @@
 //! read without taking a value flag's value; `--db help` names a database `help`.
 //!
 //! ## Owns
-//! - `help_requested`, the scan shared by the top level and the reserved
-//!   surfaces
+//! - `help_requested`, the one scan every surface reads its raw arguments with
+//! - `is_value_flag` and `wants_help`, the arity-aware reading of a flag's
+//!   value, which is the rule the flag parsers themselves refuse a missing
+//!   value by
 //!
 //! ## Does not own
 //! - The help screen a surface prints (`cli_top_level`, `cli_help`)
@@ -56,17 +58,26 @@ pub(crate) fn help_requested(args: &[String], is_value_flag: &impl Fn(&str) -> b
     false
 }
 
-/// Whether `args` ask for help on a surface that accepts `known` flags.
+/// Whether `arg` is a flag whose following token is its value, read by arity
+/// rather than by name alone: a declared global value flag, or any name the
+/// catalog needs a value for wherever a parser accepts it.
 ///
-/// The surface's own value flags are read the same way the globals are, so a
-/// surface flag's value is no more a help request than a global one's: `status
-/// --dir DIR -h` still asks, while `status --dir -h` is the missing value the
-/// parser reports. One rule for every surface, so a spaced value never shifts
-/// where help is read from.
-pub(crate) fn surface_help_requested(args: &[String], known: &[&str]) -> bool {
-    help_requested(args, &|arg| {
-        crate::cli_args::is_global_value_flag(arg) || known.contains(&arg.trim_start_matches('-'))
-    })
+/// It is the predicate `parse_flags` refuses a missing value with, so the help
+/// scan and the parser cannot disagree about which token a flag claimed. A
+/// valueless flag — a toggle such as `--insecure-no-auth`, or a value-optional
+/// one such as `--bind` — never claims the token after it, so a help spelling
+/// there stays a help request.
+pub(crate) fn is_value_flag(arg: &str) -> bool {
+    if crate::cli_args::is_global_value_flag(arg) {
+        return true;
+    }
+    crate::cli_command_registry::requires_a_value(arg.trim_start_matches('-'))
+}
+
+/// Whether `args` ask for help on any surface: the same scan, reading each
+/// flag's arity through [`is_value_flag`].
+pub(crate) fn wants_help(args: &[String]) -> bool {
+    help_requested(args, &is_value_flag)
 }
 
 #[cfg(test)]

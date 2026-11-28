@@ -11,6 +11,8 @@
 //! - Coverage of `wants_help` and `cli_help_request::surface_help_requested`
 //!   over the globals and a surface-local value flag
 //!
+//! - Coverage of the shared arity-aware scan behind them
+//!
 //! ## Does not own
 //! - The rest of the top level's argument reading (`cli_top_level_tests`)
 //! - The help screens a surface prints (`cli_help_tests`)
@@ -84,10 +86,9 @@ fn a_global_value_flags_value_is_not_a_help_request() {
 /// `--dir -h` is the missing value the parser reports.
 #[test]
 fn a_surface_value_flag_is_read_the_way_a_global_is() {
-    let known = ["dir"];
     let ask = |argv: &[&str]| {
         let argv: Vec<String> = argv.iter().map(|token| (*token).to_owned()).collect();
-        crate::cli_help_request::surface_help_requested(&argv, &known)
+        crate::cli_help_request::wants_help(&argv)
     };
     assert!(
         ask(&["--dir", "/tmp", "--help"]),
@@ -113,12 +114,33 @@ fn a_lone_dash_is_a_value_before_a_help_spelling() {
         "-".to_owned(),
         "-h".to_owned()
     ]));
-    let known = ["file"];
     let argv: Vec<String> = ["--file", "-", "--help"]
         .iter()
         .map(|t| (*t).to_owned())
         .collect();
-    assert!(crate::cli_help_request::surface_help_requested(
-        &argv, &known
-    ));
+    assert!(crate::cli_help_request::wants_help(&argv));
+}
+
+/// A valueless flag claims no token, so a help spelling after one is honoured.
+///
+/// The scan used to read any accepted flag name as a value flag, so
+/// `mcp http --insecure-no-auth --help` swallowed the spelling and started a
+/// server. Arity is what decides now: a toggle such as `--insecure-no-auth`,
+/// `--shared-bank`, or a value-optional `--bind` leaves the next token alone.
+#[test]
+fn a_help_spelling_after_a_valueless_flag_is_honoured() {
+    for argv in [
+        vec!["--insecure-no-auth", "--help"],
+        vec!["--insecure-no-auth", "-h"],
+        vec!["--shared-bank", "-h"],
+        vec!["--bind", "-h"],
+        vec!["--insecure-bind-any", "--insecure-no-auth", "-h"],
+        vec!["--skill-only", "-h"],
+    ] {
+        let argv: Vec<String> = argv.iter().map(|token| (*token).to_owned()).collect();
+        assert!(
+            crate::cli_help_request::wants_help(&argv),
+            "{argv:?} names a help spelling after a valueless flag"
+        );
+    }
 }

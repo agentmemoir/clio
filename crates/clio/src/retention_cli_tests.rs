@@ -393,3 +393,30 @@ fn a_bare_help_token_prints_the_subcommand_help() {
         );
     }
 }
+
+/// `--profiles` needs a value, so a help spelling after it is not a help
+/// request: the scan declines and the parser reports the missing value.
+///
+/// The scan here used to match the token regardless of what came before it, so
+/// `retention get --profiles -h` printed a usage line while `version --check -h`
+/// reported the missing value for the same shape.
+#[test]
+fn a_help_spelling_after_profiles_is_the_missing_value() {
+    for spelling in ["-h", "--help"] {
+        let collected: Vec<String> = vec!["--profiles".to_owned(), spelling.to_owned()];
+        assert!(
+            !crate::cli_help_request::wants_help(&collected),
+            "`--profiles {spelling}` is no help request"
+        );
+        let error = crate::cli_top_level::parse_flags(
+            collected.iter().cloned(),
+            &super::retention_known_flags("get"),
+        )
+        .expect_err("`--profiles` claims the token after it, so there is no value");
+        assert_eq!(error.code(), "usage", "{spelling}");
+        assert_eq!(error.message(), "flag `--profiles` requires a value");
+    }
+    // With `--bank` given its value, the spelling behind the pair asks for help.
+    let bank_only: Vec<String> = vec!["--bank".to_owned(), "b".to_owned(), "-h".to_owned()];
+    assert!(crate::cli_help_request::wants_help(&bank_only));
+}

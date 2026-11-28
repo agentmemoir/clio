@@ -47,8 +47,11 @@ use crate::command_catalog;
 use crate::port_scan;
 
 /// Whether the arguments ask for help rather than for the command's work.
+///
+/// The rule is the one in `cli_help_request::wants_help`, shared with every
+/// surface: a help spelling is honoured unless it would be a value flag's value.
 pub(crate) fn wants_help(args: &[String]) -> bool {
-    crate::cli_help_request::help_requested(args, &crate::cli_args::is_global_value_flag)
+    crate::cli_help_request::wants_help(args)
 }
 
 /// The flag names a surface's registry record documents, in print order: the

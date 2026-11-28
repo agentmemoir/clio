@@ -160,3 +160,41 @@ fn uninstall_refuses_force_because_its_record_does_not_document_it() {
     );
     assert!(error.message().contains("force"), "{error:?}");
 }
+
+/// `--harness` needs a value, so a help spelling after it is not a help request:
+/// both verbs report the missing value the parser refuses the argv with.
+///
+/// Reading help before parsing made `install --harness -h` print a help screen
+/// while `version --check -h` reported the missing value, so one argv shape had
+/// two answers depending on the surface.
+#[test]
+fn a_help_spelling_after_harness_is_the_missing_value() {
+    for (verb, spelling) in [
+        (Verb::Install, "-h"),
+        (Verb::Install, "--help"),
+        (Verb::Uninstall, "-h"),
+        (Verb::Uninstall, "--help"),
+    ] {
+        let error = decide(verb, &args(&["--harness", spelling]))
+            .expect_err("`--harness` claims the token after it, so there is no value");
+        assert_eq!(error.exit_code(), ExitCode::from(2), "{}", verb.label());
+        assert_eq!(
+            error.message(),
+            "flag `--harness` requires a value",
+            "{} {spelling}",
+            verb.label()
+        );
+    }
+    // A valueless flag claims nothing, so the spelling behind it still asks.
+    for argv in [vec!["--force", "-h"], vec!["--skill-only", "--help"]] {
+        assert!(
+            matches!(decide(Verb::Install, &args(&argv)), Ok(Decision::Help)),
+            "{argv:?} asks for help"
+        );
+    }
+    // With a value given, the spelling behind it asks for help again.
+    assert!(matches!(
+        decide(Verb::Install, &args(&["--harness", "claude", "-h"])),
+        Ok(Decision::Help)
+    ));
+}

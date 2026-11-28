@@ -53,12 +53,11 @@ pub fn retention(args: impl IntoIterator<Item = String>) -> ExitCode {
     // reported the retention store missing, and `retention schema --help` printed
     // the whole JSON schema. Both answered a different question than the one asked.
     // The scan runs before the parser so a help request is not turned into a
-    // usage error by a stray token or an unknown flag; `status` and the `mcp`
-    // subcommands answer help the same way.
+    // usage error by a stray token or an unknown flag, and it reads a value flag's
+    // arity, so `retention get --profiles -h` is the missing value the parser
+    // reports rather than a help screen.
     if retention_subcommands().contains(&sub.as_str())
-        && crate::cli_args::before_delimiter(&collected)
-            .iter()
-            .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
+        && crate::cli_help_request::wants_help(&collected)
     {
         println!("{}", retention_help(&sub));
         return ExitCode::SUCCESS;

@@ -8,7 +8,7 @@
 //! missing reports.
 //!
 //! ## Owns
-//! - Coverage of `wants_help` over a transport's own flags and the globals
+//! - Coverage of the shared help scan over a transport's own flags and globals
 //! - Coverage of the missing-value refusal a transport's value flag raises
 //!
 //! ## Does not own
@@ -23,8 +23,8 @@
 //! Keep this module focused on the transports' help and value-flag reading.
 
 use super::tests::{args_of, flags_of};
-use super::wants_help;
 use crate::cli_command_registry_surface::parse_flag_names;
+use crate::cli_help_request::wants_help;
 use crate::cli_top_level::parse_flags;
 
 /// The accepted names of one transport, read the way its dispatcher reads them.
@@ -34,26 +34,18 @@ fn http_flags() -> Vec<&'static str> {
 
 #[test]
 fn wants_help_spots_both_spellings_anywhere_in_the_arguments() {
-    let known = http_flags();
-    assert!(wants_help(&args_of(&["--bank", "b", "--help"]), &known));
-    assert!(wants_help(&args_of(&["-h"]), &known));
-    assert!(!wants_help(&args_of(&["--bank", "b"]), &known));
-    assert!(!wants_help(&args_of(&["--helped"]), &known));
+    assert!(wants_help(&args_of(&["--bank", "b", "--help"])));
+    assert!(wants_help(&args_of(&["-h"])));
+    assert!(!wants_help(&args_of(&["--bank", "b"])));
+    assert!(!wants_help(&args_of(&["--helped"])));
 }
 
 #[test]
 fn wants_help_stops_at_the_delimiter() {
     // A help flag after `--` is an operand, so it prints no help.
-    let known = http_flags();
-    assert!(!wants_help(
-        &args_of(&["--bank", "b", "--", "--help"]),
-        &known
-    ));
-    assert!(!wants_help(&args_of(&["--", "-h"]), &known));
-    assert!(wants_help(
-        &args_of(&["--help", "--", "--bank", "b"]),
-        &known
-    ));
+    assert!(!wants_help(&args_of(&["--bank", "b", "--", "--help"])));
+    assert!(!wants_help(&args_of(&["--", "-h"])));
+    assert!(wants_help(&args_of(&["--help", "--", "--bank", "b"])));
 }
 
 /// A transport's own value flag is read the way a global is: its value is not a
@@ -61,19 +53,40 @@ fn wants_help_stops_at_the_delimiter() {
 /// refusal, never a help screen.
 #[test]
 fn a_transport_value_flag_left_without_a_value_is_not_a_help_request() {
-    let known = http_flags();
-    assert!(wants_help(
-        &args_of(&["--token-file", "store", "-h"]),
-        &known
-    ));
-    assert!(!wants_help(&args_of(&["--token-file", "-h"]), &known));
-    assert!(!wants_help(&args_of(&["--token-file", "help"]), &known));
+    assert!(wants_help(&args_of(&["--token-file", "store", "-h"])));
+    assert!(!wants_help(&args_of(&["--token-file", "-h"])));
+    assert!(!wants_help(&args_of(&["--token-file", "help"])));
     // `--bind` is value-optional, so a token after it is its value and the help
     // spelling behind that one still asks.
-    assert!(wants_help(
-        &args_of(&["--bind", "127.0.0.1:4000", "-h"]),
-        &known
-    ));
+    assert!(wants_help(&args_of(&["--bind", "127.0.0.1:4000", "-h"])));
+}
+
+/// A valueless transport flag claims no token, so a help spelling after one is
+/// honoured: the scan reads each flag's arity rather than assuming every accepted
+/// name takes the token after it.
+///
+/// Reading a name as a value flag regardless of arity swallowed the spelling, so
+/// `mcp http --insecure-no-auth --help` opened an unauthenticated listener
+/// instead of printing help.
+#[test]
+fn a_help_spelling_after_a_valueless_transport_flag_asks_for_help() {
+    let names = http_flags();
+    for argv in [
+        vec!["--insecure-no-auth", "--help"],
+        vec!["--insecure-no-auth", "-h"],
+        vec!["--shared-bank", "-h"],
+        vec!["--bind", "-h"],
+        vec!["--insecure-bind-any", "--insecure-no-auth", "-h"],
+    ] {
+        assert!(wants_help(&args_of(&argv)), "{argv:?} asks for help");
+        // The same flag is valueless on this transport, which is what lets the
+        // scan agree with the parser about the token it claimed.
+        let flag = argv[0];
+        assert!(
+            !crate::cli_help_request::is_value_flag(flag),
+            "`{flag}` claims no value: {names:?}"
+        );
+    }
 }
 
 /// A transport's own value flag left without one is refused before any

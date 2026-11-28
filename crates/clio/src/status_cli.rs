@@ -94,9 +94,9 @@ pub(crate) fn status(args: impl IntoIterator<Item = String>) -> ExitCode {
 fn status_with(raw: &[String], deps: &dyn StatusDeps) -> ExitCode {
     // The help request is read with the same rule the flag parser applies, so a
     // value flag with no value behind it is the missing value here too:
-    // `--db -h` reports it instead of printing help, the way the top level does.
-    let names = crate::cli_command_registry_surface::parse_flag_names("status");
-    if crate::cli_help_request::surface_help_requested(raw, &names) {
+    // `--db -h` reports it instead of printing help, the way the top level does,
+    // while a valueless flag such as `--yes` never swallows the spelling.
+    if crate::cli_help_request::wants_help(raw) {
         print_help();
         return ExitCode::SUCCESS;
     }

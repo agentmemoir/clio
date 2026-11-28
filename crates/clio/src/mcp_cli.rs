@@ -79,7 +79,7 @@ pub(crate) fn mcp_schema_export(args: impl IntoIterator<Item = String>) -> ExitC
     // `--help` used to fall through and print the whole schema pack, so asking
     // for help produced 70 KB of JSON and never said what the command takes.
     // The help screen is the record's: its usage line and its notes.
-    if wants_help(&collected, &names) {
+    if crate::cli_help_request::wants_help(&collected) {
         println!("{}", schema_export_help_text());
         return ExitCode::SUCCESS;
     }
@@ -173,17 +173,6 @@ where
     })
 }
 
-/// True when `--help` / `-h` appears in a subcommand's arguments before the `--`
-/// delimiter, read with the same value-flag skip the flag parser applies.
-///
-/// `known` is the subcommand's own accepted flag names, so a surface-local value
-/// flag's value is not read as a help spelling, and a value flag left without one
-/// is the missing-value refusal rather than a help screen — the rule every other
-/// surface follows.
-pub(crate) fn wants_help(args: &[String], known: &[&str]) -> bool {
-    crate::cli_help_request::surface_help_requested(args, known)
-}
-
 fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     let collected: Vec<String> = args.into_iter().collect();
     // A flag this transport does not take is a usage error (exit 2), checked
@@ -193,7 +182,7 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     // transport sets; the shared builder below parses the http record's wider
     // one and reports only open failures.
     let names = crate::cli_command_registry_surface::parse_flag_names("mcp stdio");
-    if wants_help(&collected, &names) {
+    if crate::cli_help_request::wants_help(&collected) {
         println!("{}", mcp_stdio_help());
         return ExitCode::SUCCESS;
     }
@@ -275,7 +264,7 @@ pub(crate) fn mcp_stdio_serve<R: std::io::BufRead, W: std::io::Write>(
 fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
     let collected: Vec<String> = args.into_iter().collect();
     let names = crate::cli_command_registry_surface::parse_flag_names("mcp http");
-    if wants_help(&collected, &names) {
+    if crate::cli_help_request::wants_help(&collected) {
         println!("{}", mcp_http_help());
         return ExitCode::SUCCESS;
     }

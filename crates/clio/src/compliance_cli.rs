@@ -106,12 +106,10 @@ pub(crate) fn run(
     }
     let collected: Vec<String> = tokens.collect();
     // The scan runs before the parser so a help request is not turned into a
-    // usage error by a stray token or an unknown flag; `retention_cli` answers
-    // its subcommands' help the same way.
-    if crate::cli_args::before_delimiter(&collected)
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
-    {
+    // usage error by a stray token or an unknown flag, and it reads each flag's
+    // arity, so `--request-id -h` is the missing value the parser reports rather
+    // than a help screen. `retention_cli` answers its subcommands the same way.
+    if crate::cli_help_request::wants_help(&collected) {
         let _ = cli_output::write_text(&mut io.out, &compliance_help(&sub));
         return ExitCode::from(EXIT_OK);
     }
