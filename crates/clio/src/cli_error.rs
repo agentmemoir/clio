@@ -186,7 +186,9 @@ impl CliError {
     }
 
     /// Optional actionable hint.
-    #[cfg(test)]
+    ///
+    /// Not test-only: a surface that reports a shared failure as a plain string
+    /// needs the hint beside the message, or the reader never sees the fix.
     pub(crate) fn hint(&self) -> Option<&str> {
         self.hint.as_deref()
     }

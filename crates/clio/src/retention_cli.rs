@@ -36,6 +36,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+/// The alternative offered when `--profile-file` passes the input cap. It is
+/// appended to the refusal, because a capped read reports the fix as a hint and
+/// this surface prints the message alone.
+const PROFILE_TOO_LARGE_HINT: &str = "Pass a smaller profile file";
+
 /// Dispatch `clio retention <subcommand>`.
 pub fn retention(args: impl IntoIterator<Item = String>) -> ExitCode {
     let mut it = args.into_iter();
@@ -200,11 +205,19 @@ fn profile_from_flags(flags: &HashMap<String, String>) -> Result<RetentionProfil
     let raw = if let Some(inline) = flags.get("profile") {
         inline.clone()
     } else if let Some(path) = flags.get("profile-file") {
-        std::fs::read_to_string(path).map_err(|e| {
-            AmError::new(
-                ErrorCode::InvalidArgument,
-                format!("failed to read profile file {path}: {e}"),
-            )
+        crate::cli_read_cap::read_document_file(
+            path,
+            &format!("--profile-file `{path}`"),
+            PROFILE_TOO_LARGE_HINT,
+        )
+        .map_err(|e| {
+            // The capped read keeps the fix in its hint, so a message-only
+            // mapping drops it and leaves the reader with the cap alone.
+            let message = match e.hint() {
+                Some(hint) => format!("{}. {hint}", e.message()),
+                None => e.message().to_owned(),
+            };
+            AmError::new(ErrorCode::InvalidArgument, message)
         })?
     } else {
         return Err(AmError::new(
@@ -276,3 +289,7 @@ fn require_existing_profiles_file(flags: &HashMap<String, String>) -> Result<(),
 #[cfg(test)]
 #[path = "retention_cli_tests.rs"]
 mod retention_cli_tests;
+
+#[cfg(test)]
+#[path = "retention_cli_help_tests.rs"]
+mod retention_cli_help_tests;
