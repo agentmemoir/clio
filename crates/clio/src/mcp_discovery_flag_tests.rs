@@ -78,15 +78,14 @@ fn an_unrecognised_value_is_refused_not_defaulted() {
         );
         assert!(error.message().contains(value), "{}", error.message());
     }
-    let bare = crate::cli_top_level::parse_flags(
-        ["--discovery".to_owned()],
-        crate::cli_flags_test_support::RESERVED_FLAGS,
-    )
-    .expect_err("a bare `--discovery` carries no value at all");
+    let names = crate::cli_command_registry_surface::parse_flag_names("mcp stdio");
+    let bare = crate::cli_top_level::parse_flags(["--discovery".to_owned()], &names)
+        .expect_err("a bare `--discovery` carries no value at all");
     assert_eq!(
         bare.exit_code(),
         ExitCode::from(2),
         "a bare flag must be a usage error"
     );
-    assert!(bare.message().contains("--discovery"), "{}", bare.message());
+    assert_eq!(bare.code(), "usage", "a bare flag is the usage refusal");
+    assert_eq!(bare.message(), "flag `--discovery` requires a value");
 }

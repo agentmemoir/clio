@@ -378,8 +378,8 @@ fn client_meta_never_changes_the_listing() {
 }
 
 /// A `--discovery` value this build cannot honour stops both transports with
-/// exit 2 before either opens a store, including the `true` a bare flag
-/// produces.
+/// exit 2 before either opens a store, and a bare `--discovery` does the same:
+/// the parser refuses it as a flag whose value is missing.
 #[test]
 fn a_bad_discovery_value_stops_both_transports_with_exit_2() {
     for value in ["true", "yes", "ON", "1"] {
