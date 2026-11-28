@@ -299,13 +299,16 @@ pub(crate) fn missing_value(label: &str) -> CliError {
     CliError::usage_hint(format!("flag `{label}` requires a value"), hint)
 }
 
-/// Refuse a global value flag that was given no value: the token after it is
-/// another flag, or there is none.
+/// Refuse a value flag that was given no value: the token after it is another
+/// flag, or there is none.
 ///
-/// A global is never value-optional, `--output` included, so its valueless form
-/// is not one the grammar accepts. `typed` is the token as the caller wrote it,
-/// so `-o` names `-o` rather than `--output`.
-pub(crate) fn reject_missing_global_value(name: &str, typed: &str) -> Result<(), CliError> {
+/// It covers every flag the catalog declares as taking a value, globals and
+/// surface-local alike, so `--token-file -x` is the missing value rather than a
+/// token stored as the credential store's path. A flag any record declares
+/// valueless is left alone, so `--bind` on `mcp http` keeps its documented bare
+/// form. `typed` is the token as the caller wrote it, so `-o` names `-o` rather
+/// than `--output`.
+pub(crate) fn reject_missing_value(name: &str, typed: &str) -> Result<(), CliError> {
     if crate::cli_command_registry::requires_a_value(name) {
         return Err(missing_value(typed));
     }

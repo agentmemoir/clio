@@ -92,6 +92,35 @@ fn bare_output_flag_is_a_usage_error() {
     }
 }
 
+/// A surface-local value flag with a flag after it is the missing-value refusal,
+/// not a token stored as its value: `--dir -x` must not silently resolve the
+/// default compose root.
+#[test]
+fn a_surface_value_flag_followed_by_a_flag_is_a_usage_error() {
+    let deps = Idle;
+    for argv in [
+        vec!["--dir", "-x"],
+        vec!["--dir", "--db", "x"],
+        vec!["--dir"],
+    ] {
+        let error = build(&args(&argv), &deps).expect_err("usage");
+        assert_eq!(error.code(), "usage", "{argv:?}");
+        assert_eq!(error.message(), "flag `--dir` requires a value", "{argv:?}");
+        assert_eq!(status_with(&args(&argv), &deps), ExitCode::from(2));
+    }
+    // A lone `-` is still a value, and a plain one is accepted as before.
+    let names = crate::cli_command_registry_surface::parse_flag_names("status");
+    for argv in [vec!["--dir", "-"], vec!["--dir", "/tmp"]] {
+        let flags = crate::cli_top_level::parse_flags(argv.iter().map(|t| (*t).to_owned()), &names)
+            .unwrap_or_else(|error| panic!("{argv:?}: {}", error.message()));
+        assert_eq!(
+            flags.get("dir").map(String::as_str),
+            Some(argv[1]),
+            "{argv:?}"
+        );
+    }
+}
+
 #[test]
 fn short_output_alias_bad_values_are_usage_errors() {
     let deps = Idle;

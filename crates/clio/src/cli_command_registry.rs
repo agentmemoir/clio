@@ -144,14 +144,34 @@ pub(crate) fn global_flag(name: &str) -> Option<&'static Flag> {
         .find(|flag| flag.long == name)
 }
 
-/// Whether `name` is a declared global that a surface must refuse when no value
-/// follows it.
+/// Whether a flag of this name must be given a value wherever it is accepted.
 ///
 /// Every declared global value flag qualifies, `--output` included: no surface
-/// implements a valueless `-o`/`--output`, and a bare one reaches the output
-/// resolution as the string `true`, which is refused as an unknown mode.
+/// implements a valueless `-o`/`--output`, and the reserved surfaces record a
+/// bare one as the string `true`, which their own output resolution then refuses
+/// as an unknown mode.
+///
+/// A surface-local flag qualifies when a record declares it with a value that is
+/// not optional, which is the `Flag.value: Some` / `Flag.value_optional: false`
+/// pair. A name that any record declares valueless keeps its valueless form,
+/// because the parser has no surface identity to tell the two declarations
+/// apart: `--dry-run` is `ops doctor`'s value flag and `ops reindex`'s toggle,
+/// and `--bind` on `mcp http` is value-optional, so neither is refused bare.
 pub(crate) fn requires_a_value(name: &str) -> bool {
-    GLOBAL_VALUE_FLAGS.iter().any(|flag| flag.long == name)
+    if GLOBAL_VALUE_FLAGS.iter().any(|flag| flag.long == name) {
+        return true;
+    }
+    let mut declares_a_value = false;
+    for flag in all().flat_map(|spec| spec.documented.iter()) {
+        if flag.long != name {
+            continue;
+        }
+        if flag.value.is_none() || flag.value_optional {
+            return false;
+        }
+        declares_a_value = true;
+    }
+    declares_a_value
 }
 
 /// Every command record, tranche order preserved.
