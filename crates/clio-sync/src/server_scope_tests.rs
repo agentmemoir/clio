@@ -339,6 +339,34 @@ fn a_removed_credential_is_refused_without_a_restart() {
 }
 
 #[test]
+fn a_failed_store_reread_is_refused_without_a_fallback() {
+    let scratch = Scratch::new("reread-failed");
+    let a = secret("a");
+    scratch.write(&[record("client-a", &a, &["b-a"])]);
+    let (server, _store) = serve_file(&["b-a"], scratch.path(), false);
+    let addr = server.addr().to_owned();
+    let (status, _) = http(&addr, "GET", "/sync/status", Some(a.as_str()), None);
+    assert_eq!(status, 200);
+
+    // The store goes malformed while the same server keeps running. The
+    // secret that was valid at start must not fall back to the last good load.
+    scratch.write_raw("{\"version\": 1, \"tokens\": [");
+    let fixed = json!({ "ok": false, "code": "forbidden", "message": "unauthorized" });
+    let (status, body) = http(&addr, "GET", "/sync/status", Some(a.as_str()), None);
+    assert_eq!(status, 401);
+    assert_eq!(
+        body, fixed,
+        "a store that cannot be read now must be refused like an unknown secret"
+    );
+
+    // A readable store restores the credential on the next request.
+    scratch.write(&[record("client-a", &a, &["b-a"])]);
+    let (status, _) = http(&addr, "GET", "/sync/status", Some(a.as_str()), None);
+    assert_eq!(status, 200, "the kept credential authorizes again");
+    server.stop();
+}
+
+#[test]
 fn an_unusable_store_refuses_the_start() {
     let absent = Scratch::new("start-absent");
     let (opts, _store) = options(&["b-a"], absent.path(), false);
