@@ -204,9 +204,10 @@ pub(crate) fn commit_task_upsert_tx(
 
 /// A failure record's attempt as the Postgres `integer` the column holds.
 ///
-/// The record's own `validate` has already rejected an attempt above `i32::MAX`,
-/// so the narrowing is unreachable through the validated paths; it stays a
-/// `Result` so a caller outside them cannot write a wrapped value.
+/// This is the single conversion point for the column width: the write path
+/// reaches it through the failure-record commit and the read path through
+/// `failure_by_attempt`, so both refuse an attempt above `i32::MAX` instead of
+/// binding a wrapped or mismatched value.
 pub(crate) fn attempt_n_to_i32(attempt_n: i64) -> Result<i32, AmError> {
     i32::try_from(attempt_n).map_err(|_| {
         AmError::new(

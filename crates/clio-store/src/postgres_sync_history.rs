@@ -167,9 +167,10 @@ pub(crate) fn failure_by_attempt_pg(
 ) -> Result<Option<FailureRecord>, AmError> {
     // `attempt_n` is an INT4 column: bind the same width back or the driver
     // rejects the parameter (the SQLite body is untyped and needs no cast). An
-    // attempt that cannot fit the column cannot match a stored row, so it
-    // resolves to the never-matching width instead of a new error path.
-    let attempt = i32::try_from(attempt_n).unwrap_or_default();
+    // attempt the column cannot hold is reported as an out-of-range error, so
+    // `Ok(None)` from here means only that no row exists at a representable
+    // attempt.
+    let attempt = crate::postgres_history_write::attempt_n_to_i32(attempt_n)?;
     store.with_client(|client| {
         let row = client
             .query_opt(
