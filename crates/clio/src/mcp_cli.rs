@@ -75,14 +75,14 @@ fn print_mcp_help() {
 
 pub(crate) fn mcp_schema_export(args: impl IntoIterator<Item = String>) -> ExitCode {
     let collected: Vec<String> = args.into_iter().collect();
+    let names = crate::cli_command_registry_surface::parse_flag_names("mcp schema-export");
     // `--help` used to fall through and print the whole schema pack, so asking
     // for help produced 70 KB of JSON and never said what the command takes.
     // The help screen is the record's: its usage line and its notes.
-    if wants_help(&collected) {
+    if crate::cli_help_request::wants_help(&collected) {
         println!("{}", schema_export_help_text());
         return ExitCode::SUCCESS;
     }
-    let names = crate::cli_command_registry_surface::parse_flag_names("mcp schema-export");
     let flags = match parse_flags(collected.iter().cloned(), &names) {
         Ok(flags) => flags,
         Err(error) => {
@@ -173,20 +173,8 @@ where
     })
 }
 
-/// True when `--help` / `-h` appears anywhere in a subcommand's arguments
-/// before the `--` delimiter.
-pub(crate) fn wants_help(args: &[String]) -> bool {
-    crate::cli_args::before_delimiter(args)
-        .iter()
-        .any(|arg| arg == "--help" || arg == "-h")
-}
-
 fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     let collected: Vec<String> = args.into_iter().collect();
-    if wants_help(&collected) {
-        println!("{}", mcp_stdio_help());
-        return ExitCode::SUCCESS;
-    }
     // A flag this transport does not take is a usage error (exit 2), checked
     // before the store is opened, so `clio mcp stdio --bogus` fails closed the
     // way every other surface does rather than reporting an exit-1 open
@@ -194,6 +182,10 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     // transport sets; the shared builder below parses the http record's wider
     // one and reports only open failures.
     let names = crate::cli_command_registry_surface::parse_flag_names("mcp stdio");
+    if crate::cli_help_request::wants_help(&collected) {
+        println!("{}", mcp_stdio_help());
+        return ExitCode::SUCCESS;
+    }
     let flags = match parse_flags(collected.iter().cloned(), &names) {
         Ok(flags) => flags,
         Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
@@ -271,11 +263,11 @@ pub(crate) fn mcp_stdio_serve<R: std::io::BufRead, W: std::io::Write>(
 
 fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
     let collected: Vec<String> = args.into_iter().collect();
-    if wants_help(&collected) {
+    let names = crate::cli_command_registry_surface::parse_flag_names("mcp http");
+    if crate::cli_help_request::wants_help(&collected) {
         println!("{}", mcp_http_help());
         return ExitCode::SUCCESS;
     }
-    let names = crate::cli_command_registry_surface::parse_flag_names("mcp http");
     let flags = match parse_flags(collected.iter().cloned(), &names) {
         Ok(flags) => flags,
         Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
@@ -405,6 +397,10 @@ pub(crate) fn http_config(
 #[cfg(test)]
 #[path = "mcp_cli_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "mcp_cli_value_flag_tests.rs"]
+mod value_flag_tests;
 
 #[cfg(test)]
 #[path = "mcp_cli_dispatch_tests.rs"]

@@ -39,6 +39,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use crate::cli_arg_token::{is_flag_token, out_value, unexpected_argument};
 use crate::cli_error::CliError;
 use crate::cli_help;
 use crate::cli_output;
@@ -46,8 +47,11 @@ use crate::command_catalog;
 use crate::port_scan;
 
 /// Whether the arguments ask for help rather than for the command's work.
+///
+/// The rule is the one in `cli_help_request::wants_help`, shared with every
+/// surface: a help spelling is honoured unless it would be a value flag's value.
 pub(crate) fn wants_help(args: &[String]) -> bool {
-    crate::cli_help_request::help_requested(args, &crate::cli_args::is_global_value_flag)
+    crate::cli_help_request::wants_help(args)
 }
 
 /// The flag names a surface's registry record documents, in print order: the
@@ -89,7 +93,7 @@ pub(crate) fn markdown_request(args: &[String]) -> Result<Option<PathBuf>, CliEr
         let arg = args[index].as_str();
         // A lifted global's value is not a TOPIC: `main` appends it after the verb.
         if crate::cli_args::is_global_value_flag(arg)
-            && args.get(index + 1).is_some_and(|v| !v.starts_with("--"))
+            && args.get(index + 1).is_some_and(|v| !is_flag_token(v))
         {
             index += 2;
             continue;
@@ -138,22 +142,6 @@ pub(crate) fn markdown_request(args: &[String]) -> Result<Option<PathBuf>, CliEr
         ));
     };
     Ok(Some(PathBuf::from(dir)))
-}
-
-/// The value token after a bare `--out`: refused when it is absent or starts
-/// with `-`, so `--out -h` is a missing value, never a directory named `-h`;
-/// `--out=DIR` keeps its token as typed. Blank values are refused too.
-fn out_value(args: &[String], index: usize) -> Result<String, CliError> {
-    match args.get(index + 1) {
-        Some(value) if !value.starts_with('-') => {
-            crate::cli_error::reject_blank_value("--out", value)?;
-            Ok(value.clone())
-        }
-        _ => Err(CliError::usage_hint(
-            "--out requires a directory value",
-            "pass the directory after --out, or spell it `--out=DIR`",
-        )),
-    }
 }
 
 /// The unknown-command failure, with a suggestion when one is close.
@@ -259,10 +247,10 @@ pub(crate) fn parse_flags(
     let mut pending: Option<String> = None;
     let mut it = args.into_iter();
     // `--flag=value` carries its own value. A bare `--flag` takes the next
-    // token as its value only when that token is not itself a `--flag`;
-    // otherwise `--flag` is value-less and the token is reprocessed. Without
-    // this, `--bind --db X` would bind the value `--db` and `--bind=ADDR`
-    // would be ignored, silently falling back to auto-bind.
+    // token as its value only when that token is not a flag; otherwise the flag
+    // is valueless, and a flag that needs a value is refused here. Without this,
+    // `--bind --db X` would bind the value `--db` and `--bind=ADDR` would be
+    // ignored, silently falling back to auto-bind.
     while let Some(flag) = pending.take().or_else(|| it.next()) {
         // A bare `--` is the top level's documented delimiter before positional
         // text. The delimiter itself is accepted; anything after it is refused,
@@ -307,7 +295,7 @@ pub(crate) fn parse_flags(
             continue;
         }
         match it.next() {
-            Some(value) if !value.starts_with("--") => {
+            Some(value) if !is_flag_token(&value) => {
                 crate::cli_error::reject_blank_value(&format!("--{name}"), &value)?;
                 crate::cli_error::reject_repeated_flag(
                     &format!("--{name}"),
@@ -315,12 +303,14 @@ pub(crate) fn parse_flags(
                 )?;
                 insert_known(&mut flags, name, value, known)?;
             }
-            Some(value) => {
+            rest => {
+                // A flag the catalog declares as taking a value — a global or
+                // this surface's own — has no value here: the token after it is
+                // another flag, or there is none. A flag any record declares
+                // valueless keeps its bare form and the token is reprocessed.
+                crate::cli_error::reject_missing_value(name, &flag)?;
                 insert_known(&mut flags, name, "true".into(), known)?;
-                pending = Some(value);
-            }
-            None => {
-                insert_known(&mut flags, name, "true".into(), known)?;
+                pending = rest;
             }
         }
     }
@@ -382,13 +372,6 @@ fn unknown_surface_flag(flag: &str, known: &[&str]) -> CliError {
     }
 }
 
-/// A token with no leading dash, which these surfaces have no operand slot for.
-/// It is refused so a mistyped flag cannot arrive as a silent no-op.
-fn unexpected_argument(token: &str) -> CliError {
-    CliError::usage(format!("unexpected argument `{token}`"))
-        .with_hint("these commands take flags only; run `clio help` for the list")
-}
-
 /// Report a usage failure from one of the reserved surfaces and return its exit
 /// code, honouring the caller's `--output` so the envelope is JSON when asked
 /// for and text otherwise.
@@ -444,6 +427,10 @@ pub(crate) fn print_help() {
 #[cfg(test)]
 #[path = "cli_top_level_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_top_level_help_tests.rs"]
+mod help_tests;
 
 #[cfg(test)]
 #[path = "cli_top_level_markdown_tests.rs"]

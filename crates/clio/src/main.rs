@@ -64,6 +64,7 @@ pub(crate) mod backup_cli_fixtures;
 #[cfg(test)]
 #[path = "backup_cli_fixtures_handmade_tests.rs"]
 pub(crate) mod backup_cli_fixtures_handmade;
+mod cli_arg_token;
 mod cli_args;
 mod cli_args_delimiter;
 mod cli_args_suggest;
@@ -257,7 +258,10 @@ fn main() -> ExitCode {
 
 fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
     let collected: Vec<String> = args.into_iter().collect();
-    let (rest, globals) = cli_args::split_leading_globals(&collected);
+    let (rest, globals) = match cli_args::split_leading_globals(&collected) {
+        Ok(split) => split,
+        Err(error) => return report_usage_error(&error, &collected),
+    };
     let mut args = rest.into_iter();
     // With no verb at all the catalog is what a reader needs; a bare version line
     // is what they got, and it named no command and no flag.

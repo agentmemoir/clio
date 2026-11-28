@@ -284,6 +284,37 @@ pub(crate) fn reject_blank_value(flag: &str, value: &str) -> Result<(), CliError
     ))
 }
 
+/// Refuse a value flag whose value is missing: the token after it is another
+/// flag, or there is none. `label` is the flag as the caller typed it, so the
+/// message and the hint both name the spelling that needs the value.
+///
+/// It lives here beside `reject_blank_value` for the same reason: both parsers
+/// hand out this refusal, and neither may let the next flag be read as a value.
+pub(crate) fn missing_value(label: &str) -> CliError {
+    let hint = if label == "-o" {
+        "try `-o json` or `-o text`".to_owned()
+    } else {
+        format!("try `{label} VALUE`")
+    };
+    CliError::usage_hint(format!("flag `{label}` requires a value"), hint)
+}
+
+/// Refuse a value flag that was given no value: the token after it is another
+/// flag, or there is none.
+///
+/// It covers every flag the catalog declares as taking a value, globals and
+/// surface-local alike, so `--token-file -x` is the missing value rather than a
+/// token stored as the credential store's path. A flag any record declares
+/// valueless is left alone, so `--bind` on `mcp http` keeps its documented bare
+/// form. `typed` is the token as the caller wrote it, so `-o` names `-o` rather
+/// than `--output`.
+pub(crate) fn reject_missing_value(name: &str, typed: &str) -> Result<(), CliError> {
+    if crate::cli_command_registry::requires_a_value(name) {
+        return Err(missing_value(typed));
+    }
+    Ok(())
+}
+
 /// Refuse a blank positional argument. A write verb would store its text as
 /// given, so blank text is refused before it reaches the store.
 pub(crate) fn reject_blank_positional(value: &str) -> Result<(), CliError> {

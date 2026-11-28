@@ -92,10 +92,11 @@ pub(crate) fn status(args: impl IntoIterator<Item = String>) -> ExitCode {
 
 /// Command core over injected probes: render the report and map its verdict.
 fn status_with(raw: &[String], deps: &dyn StatusDeps) -> ExitCode {
-    if crate::cli_args::before_delimiter(raw)
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
-    {
+    // The help request is read with the same rule the flag parser applies, so a
+    // value flag with no value behind it is the missing value here too:
+    // `--db -h` reports it instead of printing help, the way the top level does,
+    // while a valueless flag such as `--yes` never swallows the spelling.
+    if crate::cli_help_request::wants_help(raw) {
         print_help();
         return ExitCode::SUCCESS;
     }

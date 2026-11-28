@@ -79,6 +79,46 @@ fn bare_output_flag_is_a_usage_error() {
     let deps = Idle;
     assert_eq!(status_with(&args(&["--output"]), &deps), ExitCode::from(2));
     assert_eq!(status_with(&args(&["-o"]), &deps), ExitCode::from(2));
+    // The refusal names the missing value rather than recording the bare flag as
+    // the mode, so no run can report an unknown output mode `true`.
+    for argv in [vec!["--output"], vec!["-o"]] {
+        let error = build(&args(&argv), &deps).expect_err("usage");
+        assert_eq!(error.code(), "usage", "{argv:?}");
+        assert!(
+            error.message().contains("requires a value"),
+            "{argv:?}: {}",
+            error.message()
+        );
+    }
+}
+
+/// A surface-local value flag with a flag after it is the missing-value refusal,
+/// not a token stored as its value: `--dir -x` must not silently resolve the
+/// default compose root.
+#[test]
+fn a_surface_value_flag_followed_by_a_flag_is_a_usage_error() {
+    let deps = Idle;
+    for argv in [
+        vec!["--dir", "-x"],
+        vec!["--dir", "--db", "x"],
+        vec!["--dir"],
+    ] {
+        let error = build(&args(&argv), &deps).expect_err("usage");
+        assert_eq!(error.code(), "usage", "{argv:?}");
+        assert_eq!(error.message(), "flag `--dir` requires a value", "{argv:?}");
+        assert_eq!(status_with(&args(&argv), &deps), ExitCode::from(2));
+    }
+    // A lone `-` is still a value, and a plain one is accepted as before.
+    let names = crate::cli_command_registry_surface::parse_flag_names("status");
+    for argv in [vec!["--dir", "-"], vec!["--dir", "/tmp"]] {
+        let flags = crate::cli_top_level::parse_flags(argv.iter().map(|t| (*t).to_owned()), &names)
+            .unwrap_or_else(|error| panic!("{argv:?}: {}", error.message()));
+        assert_eq!(
+            flags.get("dir").map(String::as_str),
+            Some(argv[1]),
+            "{argv:?}"
+        );
+    }
 }
 
 #[test]
@@ -190,7 +230,7 @@ fn a_leading_global_flag_survives_the_verb_and_is_accepted() {
         .iter()
         .map(|token| (*token).to_owned())
         .collect();
-    let (rest, globals) = crate::cli_args::split_leading_globals(&argv);
+    let (rest, globals) = crate::cli_args::split_leading_globals(&argv).expect("split");
     let mut it = rest.into_iter();
     assert_eq!(it.next().as_deref(), Some("status"));
     let trailing = crate::cli_args::merge_leading_globals(it, globals);

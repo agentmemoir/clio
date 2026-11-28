@@ -95,7 +95,10 @@ fn explicit_output(args: &[String]) -> Option<&str> {
         let token = &args[index];
         index += 1;
         if token == "--output" || token == "-o" {
-            if let Some(value) = args.get(index).filter(|value| !value.starts_with("--")) {
+            if let Some(value) = args
+                .get(index)
+                .filter(|value| !crate::cli_arg_token::is_flag_token(value))
+            {
                 found = Some(value.as_str());
                 index += 1;
             }

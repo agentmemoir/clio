@@ -37,7 +37,7 @@
 
 use crate::agent_harness::{self, HarnessRecord};
 use crate::cli_error::CliError;
-use crate::cli_top_level::{parse_flags, record_flag_names, wants_help};
+use crate::cli_top_level::{parse_flags, record_flag_names};
 use crate::install_cli_help::{known_but_unsupported, missing_harness, unknown_harness};
 
 /// The two verbs, so the parse-decide-report flow runs once for both.
@@ -97,7 +97,7 @@ pub(crate) enum Decision {
 /// An unknown flag, a flag with no value, an unknown harness, or a missing
 /// `--harness` on uninstall outside `--skill-only`.
 pub(crate) fn decide(verb: Verb, args: &[String]) -> Result<Decision, CliError> {
-    if wants_help(args) {
+    if crate::cli_help_request::wants_help(args) {
         return Ok(Decision::Help);
     }
     // Each verb parses its own record: `install` documents `--force` and
