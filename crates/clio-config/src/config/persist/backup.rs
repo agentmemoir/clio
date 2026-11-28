@@ -41,7 +41,9 @@ pub(crate) const BACKUP_DIR_NAME: &str = "backups";
 ///
 /// # Errors
 /// [`ErrorCode::Forbidden`] when the source is a symbolic link or is not a
-/// regular file; I/O failures reading the source or writing the backup.
+/// regular file, when the backups directory is a symbolic link, or when an
+/// entry already exists at the backup target name; I/O failures reading the
+/// source or writing the backup.
 pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -111,6 +113,21 @@ fn backup_config_file_with_stamp(path: &Path, stamp: u128) -> Result<Option<Path
             format!("failed to create backup dir {}: {e}", dir.display()),
         )
     })?;
+    let dir_meta = fs::symlink_metadata(&dir).map_err(|e| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!("failed to inspect backup dir {}: {e}", dir.display()),
+        )
+    })?;
+    if dir_meta.file_type().is_symlink() {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            format!(
+                "backup dir {}: refused because it is a symbolic link; remove it and run again",
+                dir.display()
+            ),
+        ));
+    }
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -124,10 +141,21 @@ fn backup_config_file_with_stamp(path: &Path, stamp: u128) -> Result<Option<Path
         )
     })?;
     create_new_private(&target, &text).map_err(|e| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!("failed to write backup {}: {e}", target.display()),
-        )
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            AmError::new(
+                ErrorCode::Forbidden,
+                format!(
+                    "backup target {}: refused because an entry with that name already exists; \
+                     remove or rename it and run again",
+                    target.display()
+                ),
+            )
+        } else {
+            AmError::new(
+                ErrorCode::Internal,
+                format!("failed to write backup {}: {e}", target.display()),
+            )
+        }
     })?;
     Ok(Some(target))
 }

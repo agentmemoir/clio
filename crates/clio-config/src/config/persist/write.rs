@@ -126,6 +126,15 @@ pub(crate) fn temp_sibling(path: &Path) -> PathBuf {
     ))
 }
 
+/// Create `path` as a new file and write `contents`, owner-only (0600) on Unix.
+///
+/// This call creates a new file and never writes to an existing one.
+///
+/// # Errors
+/// `AlreadyExists` when any entry already sits at `path`, including a symbolic
+/// link. The open uses exclusive create, so an existing entry is refused
+/// instead of followed. A write or sync error removes the file this call just
+/// created.
 #[cfg(unix)]
 pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
@@ -152,9 +161,12 @@ pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result
 
 /// Create `path` as a new file and write `contents`.
 ///
+/// This call creates a new file and never writes to an existing one.
+///
 /// # Errors
-/// `AlreadyExists` when any entry already sits at `path`, including a symlink.
-/// A write error removes the new file.
+/// `AlreadyExists` when any entry already sits at `path`, including a symbolic
+/// link. The open uses exclusive create, so an existing entry is refused
+/// instead of followed. A write error removes the file this call just created.
 #[cfg(not(unix))]
 pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write;

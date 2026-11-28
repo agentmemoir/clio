@@ -317,13 +317,13 @@ fn backup_refuses_a_planted_entry_at_the_target_name() {
 
     assert_eq!(
         err.code,
-        ErrorCode::Internal,
-        "the refusal must surface as an internal write failure: {}",
+        ErrorCode::Forbidden,
+        "the refusal must surface as a refusal the operator can act on: {}",
         err.message
     );
     assert!(
-        err.message.contains("failed to write backup"),
-        "the failure must name the backup it could not write: {}",
+        err.message.contains("already exists"),
+        "the failure must name the entry that exists: {}",
         err.message
     );
     assert_eq!(
@@ -339,4 +339,37 @@ fn backup_refuses_a_planted_entry_at_the_target_name() {
         "the planted entry must still be the symlink, not a replaced file"
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+// A symlink planted at the backups directory name is followed by a directory
+// create, so the backup would land in the directory the link points at. The
+// backup inspects the directory it created and refuses a link.
+#[cfg(unix)]
+#[test]
+fn backup_refuses_a_symlinked_backups_directory() {
+    use std::os::unix::fs::symlink;
+    let dir = scratch("symlink-dir");
+    fs::create_dir_all(&dir).expect("dir");
+    let cfg = dir.join("deployment.json");
+    fs::write(&cfg, r#"{"log.level":"warn"}"#).expect("write");
+    let target_dir = scratch("symlink-dir-target");
+    fs::create_dir_all(&target_dir).expect("target dir");
+    let backups = dir.join(BACKUP_DIR_NAME);
+    symlink(&target_dir, &backups).expect("symlink");
+
+    let err = backup_config_file(&cfg).expect_err("refused");
+
+    assert_eq!(err.code, ErrorCode::Forbidden, "{}", err.message);
+    assert!(
+        err.message.contains("symbolic link"),
+        "the refusal must name the link: {}",
+        err.message
+    );
+    assert_eq!(
+        fs::read_dir(&target_dir).expect("read_dir").count(),
+        0,
+        "a refused backups dir must not receive a backup file"
+    );
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&target_dir);
 }
