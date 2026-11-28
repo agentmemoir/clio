@@ -38,6 +38,93 @@ fn help_with_an_explicit_value_is_answered_through_parse_flags() {
     assert!(matches!(decision, Decision::Help), "{decision:?}");
 }
 
+/// `install`'s one-line purpose, which the help screen opens with.
+#[test]
+fn install_purpose_says_it_registers_the_server() {
+    assert_eq!(
+        Verb::Install.purpose(),
+        "Register the clio MCP server with a supported agent harness."
+    );
+}
+
+/// `uninstall`'s one-line purpose. It is the removal, not the registration, so
+/// the two verbs cannot be confused for one another in help.
+#[test]
+fn uninstall_purpose_says_it_removes_the_registration() {
+    assert_eq!(
+        Verb::Uninstall.purpose(),
+        "Remove the clio MCP server registration from a supported agent harness."
+    );
+}
+
+/// `uninstall --skill-only` with no `--harness` removes the portable copy, so
+/// the decision names no harness record at all.
+#[test]
+fn skill_only_with_no_harness_is_the_portable_removal() {
+    let decision =
+        decide(Verb::Uninstall, &args(&["--skill-only"])).expect("--skill-only is documented");
+    assert!(
+        matches!(decision, Decision::SkillOnly { record: None }),
+        "{decision:?}"
+    );
+}
+
+/// `uninstall --skill-only --harness claude` still removes only the package; it
+/// names the record so the removal targets that harness's skill root.
+#[test]
+fn skill_only_with_a_harness_names_that_record() {
+    let decision = decide(
+        Verb::Uninstall,
+        &args(&["--skill-only", "--harness", "claude"]),
+    )
+    .expect("--skill-only with a supported harness is valid");
+    assert!(
+        matches!(decision, Decision::SkillOnly { record: Some(record) } if record.name == "claude"),
+        "{decision:?}"
+    );
+}
+
+/// Uninstall has no portable-only shape, so a call with neither `--harness` nor
+/// `--skill-only` is refused rather than guessed at.
+#[test]
+fn uninstall_with_no_harness_is_the_missing_harness_usage_error() {
+    let error = decide(Verb::Uninstall, &args(&[])).expect_err("uninstall requires a harness");
+    assert_eq!(error.code(), "usage");
+    assert_eq!(error.exit_code(), ExitCode::from(2));
+    assert_eq!(error.message(), "--harness is required");
+    assert!(
+        error
+            .hint()
+            .unwrap_or_default()
+            .starts_with("supported harnesses: claude,"),
+        "{error:?}"
+    );
+}
+
+/// Every name the registry knows decides to a run. `resolve_harness` refuses a
+/// name as known-but-unsupported only when `agent_harness::normalize` names it
+/// while `agent_harness::resolve` holds no record for that name, and the
+/// registry serves a record for every name it normalizes, so no accepted name —
+/// canonical or alias — reaches that refusal from `decide`. The property is
+/// asserted rather than the refusal because the refusal has no reachable input.
+#[test]
+fn every_name_the_registry_knows_is_an_install_rather_than_a_known_refusal() {
+    let names = agent_harness::supported_names();
+    assert!(!names.is_empty(), "the registry offers a name to check");
+    for name in names {
+        let record = agent_harness::resolve(name).expect("a supported name has a record");
+        for accepted in std::iter::once(name).chain(record.aliases.iter().copied()) {
+            let decision = decide(Verb::Install, &args(&["--harness", accepted]))
+                .unwrap_or_else(|error| panic!("`{accepted}` is a known name: {error:?}"));
+            assert!(
+                matches!(decision, Decision::Run { record: resolved, .. } if resolved.name == record.name),
+                "`{accepted}` must run `{}`: {decision:?}",
+                record.name
+            );
+        }
+    }
+}
+
 #[test]
 fn unknown_harness_is_refused_with_the_supported_list() {
     let error =
