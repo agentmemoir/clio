@@ -62,9 +62,10 @@ fn the_absent_flag_leaves_the_document_to_decide() {
     );
 }
 
-/// Every value other than `on` and `off` is a usage refusal, including the
-/// `true` a bare flag produces, so no unrecognised word silently means on or
-/// off.
+/// Every value other than `on` and `off` is a usage refusal, so no unrecognised
+/// word silently means on or off. A bare `--discovery` carries no value at all,
+/// so `parse_flags` refuses it before `selection` sees a map; a bare flag is
+/// never read as the value `true`.
 #[test]
 fn an_unrecognised_value_is_refused_not_defaulted() {
     for value in ["true", "yes", "ON", "1"] {
@@ -77,12 +78,15 @@ fn an_unrecognised_value_is_refused_not_defaulted() {
         );
         assert!(error.message().contains(value), "{}", error.message());
     }
-    let bare = selection(&flags_of(&["--discovery"]))
-        .expect_err("a bare `--discovery` names no accepted value");
+    let bare = crate::cli_top_level::parse_flags(
+        ["--discovery".to_owned()],
+        crate::cli_flags_test_support::RESERVED_FLAGS,
+    )
+    .expect_err("a bare `--discovery` carries no value at all");
     assert_eq!(
         bare.exit_code(),
         ExitCode::from(2),
         "a bare flag must be a usage error"
     );
-    assert!(bare.message().contains("true"), "{}", bare.message());
+    assert!(bare.message().contains("--discovery"), "{}", bare.message());
 }
