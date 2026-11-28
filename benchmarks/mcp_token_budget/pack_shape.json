@@ -40,21 +40,21 @@
     {
       "shape": "reference",
       "path": "crates/clio-mcp/tests/fixtures/schema_pack_reference.json",
-      "sha256": "3fa8768bd5fe6af7230087211349d1c05f0c1e59479f6c24ee67c06cd2ebe4d2",
-      "bytes": 138452,
-      "tokens": 29634
+      "sha256": "aedf0cc6ece0356ab0f53acbddc5593297f6151139763bba6052250fd255dc19",
+      "bytes": 138462,
+      "tokens": 29635
     },
     {
       "shape": "flattened",
       "path": "crates/clio-mcp/tests/fixtures/schema_pack.json",
-      "sha256": "8040ae472d76d5c6e1513ae6455ae3f4da5506411691d81625199dd8ba65c10c",
-      "bytes": 139225,
-      "tokens": 29767
+      "sha256": "4f931d6ba0746eadf01d6fb8c61e07f406dae70c3e51884e76df74a2d5c1c237",
+      "bytes": 139235,
+      "tokens": 29768
     }
   ],
   "shipped": {
     "shape": "flattened",
     "path": "crates/clio-mcp/tests/fixtures/schema_pack.json",
-    "sha256": "8040ae472d76d5c6e1513ae6455ae3f4da5506411691d81625199dd8ba65c10c"
+    "sha256": "4f931d6ba0746eadf01d6fb8c61e07f406dae70c3e51884e76df74a2d5c1c237"
   }
 }
