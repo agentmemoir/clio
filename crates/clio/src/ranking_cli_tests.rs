@@ -229,6 +229,39 @@ fn ranking_set_reads_a_patch_file() {
 }
 
 #[test]
+fn a_patch_file_past_the_byte_cap_is_refused_and_a_small_one_still_applies() {
+    // One boundary, both sides of it: a document past the input cap is refused
+    // by name before it is parsed, and a document under the cap is still read,
+    // so the cap costs no legitimate patch file its read.
+    let dir = ScratchDir::new();
+    let path = dir.join("patch.json");
+    let mut body = br#"{"theta_admit":0.55}"#.to_vec();
+    body.resize(crate::cli_read_cap::MAX_INPUT_BYTES + 1, b' ');
+    std::fs::write(&path, &body).expect("write the oversized patch");
+    let flag = format!("--patch-file={}", path.display());
+
+    let mut rt = runtime();
+    let (code, out, err) = run(&["set", &flag, "--dry-run"], &mut rt, false);
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(
+        err.contains(&format!(
+            "--patch-file `{}` is larger than the",
+            path.display()
+        )),
+        "{err}"
+    );
+    assert!(err.contains("4 MiB input cap"), "{err}");
+
+    std::fs::write(&path, br#"{"theta_admit":0.55}"#).expect("write the small patch");
+    let (code, out, err) = run(&["set", &flag, "--dry-run"], &mut rt, false);
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    let theta = json_of(&out)["ranking"]["theta_admit"]
+        .as_f64()
+        .expect("theta_admit");
+    assert!((theta - 0.55).abs() < 1e-9, "{out}");
+}
+
+#[test]
 fn ranking_set_rejects_extra_positionals() {
     let mut rt = runtime();
     let (code, _, err) = run(&["set", "extra"], &mut rt, false);

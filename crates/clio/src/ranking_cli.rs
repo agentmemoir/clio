@@ -36,6 +36,12 @@ use clio::Runtime;
 use serde_json::{Map, Value, json};
 use std::process::ExitCode;
 
+/// The alternative `--patch-file` offers a caller whose document is past the
+/// input cap: the weight groups are independent, so a later run applies only the
+/// groups that document names.
+const TOO_LARGE: &str =
+    "apply the weight groups in separate runs: a patch names only the groups it changes";
+
 /// The `clio ranking` command group.
 pub(crate) struct RankingGroup;
 
@@ -120,10 +126,11 @@ fn set_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     let (raw, flag) = if let Some(inline) = parsed.value("patch") {
         (inline.to_owned(), "--patch")
     } else if let Some(path) = parsed.value("patch-file") {
-        let raw = std::fs::read_to_string(path).map_err(|error| {
-            CliError::usage(format!("--patch-file `{path}` is not readable: {error}"))
-        })?;
-        (raw, "--patch-file")
+        let what = format!("--patch-file `{path}`");
+        (
+            crate::cli_read_cap::read_document_file(path, &what, TOO_LARGE)?,
+            "--patch-file",
+        )
     } else {
         return Err(CliError::usage_hint(
             "`ranking set` requires --patch (a JSON object) or --patch-file FILE",

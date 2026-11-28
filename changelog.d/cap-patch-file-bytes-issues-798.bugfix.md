@@ -1,0 +1,1 @@
+`clio ranking set --patch-file` now refuses a file larger than the 4 MiB input cap with a usage error and exit 2, instead of reading the whole file into memory first, and a patch file under the cap is still read and applied exactly as before.
