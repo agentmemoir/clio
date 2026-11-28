@@ -244,7 +244,7 @@ fn load_from_keystore(store: &dyn SecretStore, file: Option<&Path>) -> Result<Lo
     }
     match store.get() {
         Ok(Some(raw)) => Ok(LoadedKey::new(
-            key_from_bytes(&Zeroizing::new(raw), &KeyLocation::Keystore)?,
+            key_from_bytes(&raw, &KeyLocation::Keystore)?,
             KeyLocation::Keystore,
         )),
         Ok(None) => generate_into_keystore(store),
@@ -395,9 +395,9 @@ fn location_with(
     let source = secret_key_source::read(secret_key_source::marker_path(file).as_deref())?
         .unwrap_or_else(KeySource::recommended);
     match source {
-        // Read through the `Zeroizing` so a key seen here is scrubbed on the way
-        // out rather than dropped unread. `location` reports where a key is,
-        // never what it is, so the bytes themselves are discarded.
+        // The store hands back bytes that are scrubbed when they drop, so only
+        // the presence of a key matters here. `location` reports where a key is,
+        // never what it is.
         KeySource::Keystore => Ok(store.get()?.map(|_| KeyLocation::Keystore)),
         KeySource::File => Ok(file
             .filter(|path| path.exists())

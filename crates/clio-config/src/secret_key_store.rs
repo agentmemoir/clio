@@ -45,6 +45,7 @@
 
 use clio_types::{AmError, ErrorCode};
 use std::collections::HashMap;
+use zeroize::Zeroizing;
 
 /// The platform store this build installs, and the production entry over it.
 #[path = "secret_key_store_platform.rs"]
@@ -80,9 +81,11 @@ pub(crate) const SYNC_KEY: &str = "the Clio sync key";
 pub trait SecretStore {
     /// Read the stored key bytes, or `None` when the store holds no entry.
     ///
+    /// The bytes are scrubbed when the returned value drops.
+    ///
     /// # Errors
     /// The store is unreachable, locked, or refused the read.
-    fn get(&self) -> Result<Option<Vec<u8>>, AmError>;
+    fn get(&self) -> Result<Option<Zeroizing<Vec<u8>>>, AmError>;
 
     /// Store `bytes` as the key, replacing any existing entry.
     ///
@@ -148,7 +151,7 @@ pub(crate) type EntryFactory =
 pub struct NoKeystore;
 
 impl SecretStore for NoKeystore {
-    fn get(&self) -> Result<Option<Vec<u8>>, AmError> {
+    fn get(&self) -> Result<Option<Zeroizing<Vec<u8>>>, AmError> {
         Ok(None)
     }
 
@@ -210,9 +213,11 @@ impl KeyringStore {
 }
 
 impl SecretStore for KeyringStore {
-    fn get(&self) -> Result<Option<Vec<u8>>, AmError> {
+    fn get(&self) -> Result<Option<Zeroizing<Vec<u8>>>, AmError> {
         match self.entry()?.get_secret() {
-            Ok(secret) => Ok(Some(secret)),
+            // Wrap at the source, so the copy the store just handed over is the
+            // only one and it is scrubbed when the caller drops it.
+            Ok(secret) => Ok(Some(Zeroizing::new(secret))),
             // "No entry" is the answer to the question, not a failure to read.
             Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(err) => Err(store_error("read from", self.what, &err)),
