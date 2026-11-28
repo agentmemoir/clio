@@ -222,6 +222,77 @@ fn an_unknown_secret_is_401_and_the_answer_matches_a_missing_one() {
 }
 
 #[test]
+fn a_removed_record_stops_resolving_without_a_restart() {
+    let scratch = Scratch::new("revoked");
+    let removed = secret("removed");
+    let kept = secret("kept");
+    scratch.write(&[
+        record("removed", &removed, &["demo"]),
+        record("kept", &kept, &["demo"]),
+    ]);
+    let bearer = format!("Bearer {removed}");
+    let before = authorize_current_request(Some(scratch.path()), false, Some(&bearer))
+        .expect("the first read allows");
+    assert!(matches!(before, AuthOutcome::Bound(_)));
+
+    // The operator rewrites the same file without the first record.
+    scratch.write(&[record("kept", &kept, &["demo"])]);
+
+    assert_eq!(
+        authorize_current_request(Some(scratch.path()), false, Some(&bearer)).unwrap_err(),
+        401,
+        "the removed record must not authorize"
+    );
+    let after =
+        authorize_current_request(Some(scratch.path()), false, Some(&format!("Bearer {kept}")))
+            .expect("the kept record still authorizes");
+    assert!(matches!(after, AuthOutcome::Bound(peer) if peer.label == "kept"));
+}
+
+#[test]
+fn an_unreadable_store_refuses_on_the_next_request() {
+    let scratch = Scratch::new("reread");
+    let current = secret("current");
+    scratch.write(&[record("ci", &current, &["demo"])]);
+    let bearer = format!("Bearer {current}");
+    authorize_current_request(Some(scratch.path()), false, Some(&bearer))
+        .expect("the first read allows");
+
+    std::fs::remove_file(scratch.path()).expect("remove the store");
+    assert_eq!(
+        authorize_current_request(Some(scratch.path()), false, Some(&bearer)).unwrap_err(),
+        401,
+        "a missing store must refuse, not reuse the previous load"
+    );
+
+    scratch.write_raw("not json at all");
+    assert_eq!(
+        authorize_current_request(Some(scratch.path()), false, Some(&bearer)).unwrap_err(),
+        401,
+        "a malformed store must refuse, not reuse the previous load"
+    );
+}
+
+#[test]
+fn a_configured_file_requires_a_credential_in_dev_mode() {
+    let scratch = Scratch::new("dev-file");
+    let current = secret("dev");
+    scratch.write(&[record("ci", &current, &["demo"])]);
+    assert_eq!(
+        authorize_current_request(Some(scratch.path()), true, None).unwrap_err(),
+        401,
+        "a configured file disables the dev-mode anonymous answer"
+    );
+    let bound = authorize_current_request(
+        Some(scratch.path()),
+        true,
+        Some(&format!("Bearer {current}")),
+    )
+    .expect("the record authorizes in dev mode");
+    assert!(matches!(bound, AuthOutcome::Bound(_)));
+}
+
+#[test]
 fn a_record_secret_resolves_to_its_record_and_no_bank_beyond_it() {
     let record_secret = secret("solo");
     let store = CredentialStore::from_records(vec![record("ci", &record_secret, &["demo"])]);

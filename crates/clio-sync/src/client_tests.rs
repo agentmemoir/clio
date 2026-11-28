@@ -47,9 +47,10 @@ pub(crate) fn serve(banks: &[&str]) -> (SyncServer, Arc<SqliteStore>, Arc<dyn De
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
     let store = Arc::new(SqliteStore::open_in_memory(Arc::clone(&kms)).expect("sqlite open"));
     // The bearer secret every client config presents (`TOKEN`) is a scoped
-    // record, so push/pull auth reaches a record the server loaded at start.
+    // record in a file the server reads on every request, so the fixture must
+    // outlive the server.
     let credentials = scoped_store("client-serve", TOKEN, banks);
-    let server = sync_serve(SyncServerOptions {
+    let mut server = sync_serve(SyncServerOptions {
         bind: "127.0.0.1:0".into(),
         store: store.clone(),
         sync: store.clone(),
@@ -65,6 +66,7 @@ pub(crate) fn serve(banks: &[&str]) -> (SyncServer, Arc<SqliteStore>, Arc<dyn De
         sync_key: None,
     })
     .expect("serve");
+    server.keep_token_store(credentials);
     (server, store, kms)
 }
 

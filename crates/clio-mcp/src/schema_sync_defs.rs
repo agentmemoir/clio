@@ -143,7 +143,7 @@ pub fn sync_defs() -> Vec<ToolDef> {
                 (
                     "token_file",
                     s(
-                        "Path to the shared credential store of scoped records added with `clio auth token add`: each client secret resolves to that record's banks, loaded once at start, so revocation takes effect at the next start. A configured store requires a secret on every request, dev mode included.",
+                        "Path to the shared credential store of scoped records added with `clio auth token add`: each client secret resolves to that record's banks, read again for every request, so revocation takes effect at the next request. A configured store requires a secret on every request, dev mode included.",
                     ),
                 ),
                 ("ttl_secs", num("Auto-stop TTL in seconds (default 1800).")),

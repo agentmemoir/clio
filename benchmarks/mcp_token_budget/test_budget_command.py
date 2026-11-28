@@ -30,7 +30,7 @@ import budget_targets
 REPO_ROOT = HERE.parents[1]
 PACK = REPO_ROOT / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 
-FIXTURE_DIGEST = "8040ae472d76d5c6e1513ae6455ae3f4da5506411691d81625199dd8ba65c10c"
+FIXTURE_DIGEST = "4f931d6ba0746eadf01d6fb8c61e07f406dae70c3e51884e76df74a2d5c1c237"
 
 ACTIVATED_ROW = "activated_skill_body/tokens"
 ACTIVATED_TOKENS = 594
@@ -84,19 +84,19 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(report["format"], "clio_mcp_budget_check")
         self.assertEqual(report["verdict"], "pass")
         expected_allowance = {
-            "decision_id": "mcp-sync-serve-public-bind-description-2026-11-25",
-            "date": "2026-11-25",
-            "base_commit": "44fd7d12db23683cc047925cd41dcd8c7533e9b3",
-            "max_bytes": 139225,
-            "max_tokens": 29767,
+            "decision_id": "mcp-sync-revocation-description-2026-11-28",
+            "date": "2026-11-28",
+            "base_commit": "e0eb30d4ef6de797e61524000df77b09eea6740e",
+            "max_bytes": 139235,
+            "max_tokens": 29768,
         }
         self.assertEqual(report["allowance"], expected_allowance)
         self.assertEqual(report["failures"], [])
         self.assertEqual(
             report["candidate"],
-            {"sha256": FIXTURE_DIGEST, "bytes": 139225, "tokens": 29767},
+            {"sha256": FIXTURE_DIGEST, "bytes": 139235, "tokens": 29768},
         )
-        self.assertEqual([arm["delta"] for arm in report["arms"]], [33593, 8076])
+        self.assertEqual([arm["delta"] for arm in report["arms"]], [33603, 8077])
         for arm in report["arms"]:
             self.assertEqual(arm["verdict"], "pass")
             self.assertEqual(arm["allowance"], expected_allowance)

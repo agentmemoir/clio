@@ -4,15 +4,17 @@
 //! # Responsibility
 //!
 //! This module is responsible for the sync server's credential edge: the
-//! one-time load of the shared token store at start, and the per-request
-//! resolution of a presented bearer secret to the peer (label plus bank list)
-//! its record names.
+//! fail-closed load of the shared token store, and the per-request resolution
+//! of a presented bearer secret to the peer (label plus bank list) its record
+//! names.
 //!
 //! ## Owns
 //! - `CredentialStore::load`: the fail-closed read of an operator-named store
 //! - `resolve`: digest comparison through the shared constant-time helper
 //! - `Peer`: the per-request bank scope, the record's label, actor, and banks
 //! - `authorize_request`: the one request check the connection layer reads
+//! - `authorize_current_request`: the same check against the store as it is
+//!   now, for the connection layer's call site
 //!
 //! ## Does not own
 //! - The record shape, its validation, and the store file itself (see
@@ -27,11 +29,16 @@
 //!
 //! Keep this module focused on the credential edge and nothing past it.
 //!
-//! # The store is loaded once
+//! # The store is read for every request
 //!
-//! A request must not re-read a file: that would make every request's cost
-//! depend on the filesystem, and it would make a store edit take effect
-//! mid-request. Revocation therefore takes effect at the next server start.
+//! The operator-named store is loaded again for each request, so removing or
+//! rotating a record stops authorizing new requests as soon as the write is
+//! visible. A request that cannot read the store now is refused; the previous
+//! load is never used as a fallback.
+//!
+//! The residual window is one request wide: a request that was authorized
+//! before a revocation keeps the scope it was given until it finishes. A write
+//! that lands between two request reads is seen by the next read.
 //!
 //! # Why the scan does not stop at the match
 //!
@@ -86,7 +93,7 @@ struct StoredCredential {
     digest: String,
 }
 
-/// The loaded credential store, held for the life of one server.
+/// The credential records of one load of the operator-named store.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CredentialStore {
     credentials: Vec<StoredCredential>,
@@ -231,6 +238,28 @@ pub(crate) fn authorize_request(
         return Ok(AuthOutcome::Unbound);
     }
     Err(401)
+}
+
+/// Decide one request's bank scope from the store file as it is now.
+///
+/// This is the connection layer's call site: it loads the configured store for
+/// every request instead of reading a snapshot taken at start, so a revocation
+/// is seen by the next request. A load failure is the same `401` as an unknown
+/// secret, so the refusal discloses nothing about the store's state.
+///
+/// # Errors
+/// `401` when a source is configured and the store cannot be read now, or when
+/// the request presents no secret the current store names.
+pub(crate) fn authorize_current_request(
+    token_file: Option<&Path>,
+    dev_mode: bool,
+    header: Option<&str>,
+) -> Result<AuthOutcome, u16> {
+    let Some(path) = token_file else {
+        return authorize_request(None, dev_mode, header);
+    };
+    let store = CredentialStore::load(path).map_err(|_| 401u16)?;
+    authorize_request(Some(&store), dev_mode, header)
 }
 
 #[cfg(test)]

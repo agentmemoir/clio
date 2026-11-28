@@ -1,0 +1,1 @@
+Removing or rotating a sync credential now stops it authorizing the next request, without a server restart; if the token store cannot be read at that moment, the request is refused instead of being checked against the store loaded at start.

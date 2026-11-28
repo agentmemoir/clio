@@ -195,7 +195,7 @@ fn the_route_holds_the_lock_of_a_mutation_bank() {
         // The mutation writes bank "b" while the envelope names "a", so the
         // push can only be serialized by locking "b" itself.
         banks: vec!["a".into(), "b".into()],
-        credentials: None,
+        token_file: None,
         dev_mode: true,
         deadline_secs: 30,
         max_envelope_skew_secs: 0,

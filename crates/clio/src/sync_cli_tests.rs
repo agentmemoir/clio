@@ -422,7 +422,7 @@ fn serve_help_documents_the_token_file_and_never_the_removed_token() {
     assert!(out.contains("usage: clio sync serve"), "{out}");
     assert!(out.contains("--token-file PATH"), "{out}");
     assert!(
-        out.contains("revocation takes effect at the next start"),
+        out.contains("revocation takes effect at the next request"),
         "{out}"
     );
     assert!(!out.contains("[--token T]"), "{out}");
