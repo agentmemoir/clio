@@ -348,6 +348,46 @@ fn t04n_partial_header_block_refused() {
     );
 }
 
+/// The total-size cap is consulted against the total a chunk would produce,
+/// before that chunk reaches the output: a refused member leaves no byte past
+/// the cap on disk, which is the whole point of the cap on the staging path.
+#[test]
+fn t04p_total_cap_refuses_before_a_chunk_reaches_the_output() {
+    let manifest_len = MANIFEST_JSON.len() as u64;
+    let pad = |len: u64| (HEADER_SIZE as u64 - len % HEADER_SIZE as u64) % HEADER_SIZE as u64;
+    let after_manifest = manifest_len + pad(manifest_len);
+    let budget = 500;
+    let bounds = ReaderBounds {
+        max_members: 1024,
+        max_member_bytes: u64::MAX,
+        max_total_bytes: after_manifest + budget,
+    };
+    let mut raw = raw_member(crate::MANIFEST_MEMBER, MANIFEST_JSON.as_bytes());
+    raw.extend(raw_member("store.db", &vec![1u8; 1000]));
+    let gz = gzip(&raw);
+    let mut r = ArchiveReader::with_bounds(gz.as_slice(), bounds).expect("opens");
+    r.next_member().expect("manifest header");
+    r.skip_current().expect("manifest payload");
+    r.next_member().expect("store.db header");
+    let mut out = Vec::new();
+    let err = r
+        .read_current(&mut out)
+        .expect_err("the member crosses the total cap");
+    assert_eq!(err.code, ErrorCode::ArchiveCorrupt, "{}", err.message);
+    assert!(
+        err.message.contains("total inflated-size cap"),
+        "{}",
+        err.message
+    );
+    // Nothing past the budget reached the output: the cap is consulted on the
+    // total the next chunk would produce, not on the total already written.
+    assert!(
+        out.len() as u64 <= budget,
+        "{} bytes were written under a budget of {budget}",
+        out.len()
+    );
+}
+
 /// The total-size cap also fires during padding bytes, not only payload
 /// bytes.
 #[test]

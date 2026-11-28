@@ -208,6 +208,11 @@ impl<R: Read> ArchiveReader<R> {
                     ),
                 ));
             }
+            // The cap is tested against the total this chunk would produce,
+            // before the chunk reaches `out`: a member refused for exceeding
+            // the budget must leave none of itself behind on disk.
+            let projected = self.total_bytes.saturating_add(n as u64);
+            self.check_total(projected)?;
             if let Some(out) = out.as_mut() {
                 out.write_all(&buf[..n])
                     .map_err(|e| io_internal(&format!("writing member {name:?}"), &e))?;
@@ -215,8 +220,7 @@ impl<R: Read> ArchiveReader<R> {
             hasher.update(&buf[..n]);
             remaining -= n as u64;
             streamed += n as u64;
-            self.total_bytes += n as u64;
-            self.check_total()?;
+            self.total_bytes = projected;
         }
         while padding > 0 {
             let want = padding.min(buf.len() as u64) as usize;
@@ -227,9 +231,10 @@ impl<R: Read> ArchiveReader<R> {
                     format!("unexpected end of stream in the padding of member {name:?}"),
                 ));
             }
+            let projected = self.total_bytes.saturating_add(n as u64);
+            self.check_total(projected)?;
             padding -= n as u64;
-            self.total_bytes += n as u64;
-            self.check_total()?;
+            self.total_bytes = projected;
         }
         Ok((streamed, to_hex(&hasher.finalize())))
     }
@@ -270,8 +275,11 @@ impl<R: Read> ArchiveReader<R> {
         }
     }
 
-    fn check_total(&self) -> Result<(), AmError> {
-        if self.total_bytes > self.bounds.max_total_bytes {
+    /// Refuse a running total that would pass the total-size cap. The caller
+    /// passes the total its next chunk would produce, so nothing is written or
+    /// counted past the cap.
+    fn check_total(&self, projected: u64) -> Result<(), AmError> {
+        if projected > self.bounds.max_total_bytes {
             // The third cap, and the same reasoning as the other two.
             return Err(AmError::new(
                 ErrorCode::ArchiveCorrupt,
