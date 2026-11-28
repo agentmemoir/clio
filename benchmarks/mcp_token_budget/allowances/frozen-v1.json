@@ -95,6 +95,15 @@
       "candidate_sha256": "8040ae472d76d5c6e1513ae6455ae3f4da5506411691d81625199dd8ba65c10c",
       "max_bytes": 139225,
       "max_tokens": 29767
+    },
+    {
+      "decision_id": "mcp-sync-revocation-description-2026-11-28",
+      "date": "2026-11-28",
+      "reason": "The sync_serve token_file description now says a credential is read again every request and revocation takes effect at the next request. The canonical tools array grows by 10 bytes and 1 cl100k_base token to 139235 bytes and 29768 tokens; this record covers the new candidate digest at exactly the measured size.",
+      "base_commit": "e0eb30d4ef6de797e61524000df77b09eea6740e",
+      "candidate_sha256": "4f931d6ba0746eadf01d6fb8c61e07f406dae70c3e51884e76df74a2d5c1c237",
+      "max_bytes": 139235,
+      "max_tokens": 29768
     }
   ]
 }
