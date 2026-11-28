@@ -66,34 +66,6 @@ fn atomic_write_lands_owner_only_contents_without_a_temp_file() {
 }
 
 #[test]
-fn write_private_replaces_an_existing_file_and_forces_owner_only() {
-    let dir = tmp("replace");
-    fs::create_dir_all(&dir).expect("dir");
-    let path = dir.join("backup.json");
-    fs::write(&path, "old").expect("seed");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("mode");
-    }
-
-    write_private(&path, "new").expect("write");
-
-    assert_eq!(fs::read_to_string(&path).expect("read"), "new");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(&path).expect("meta").permissions().mode();
-        assert_eq!(
-            mode & 0o777,
-            0o600,
-            "a replaced file must be owner-only, not keep its old mode"
-        );
-    }
-    let _ = fs::remove_dir_all(&dir);
-}
-
-#[test]
 fn temp_sibling_stays_beside_the_target_and_is_unique() {
     let path = Path::new("/tmp").join("deployment.json");
 

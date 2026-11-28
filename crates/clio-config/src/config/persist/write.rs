@@ -127,33 +127,6 @@ pub(crate) fn temp_sibling(path: &Path) -> PathBuf {
 }
 
 #[cfg(unix)]
-pub(super) fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    // A pre-existing temp file keeps its old mode through `open`; force 0600.
-    file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    file.write_all(contents.as_bytes())?;
-    file.sync_all()
-}
-
-#[cfg(not(unix))]
-pub(super) fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
-    fs::write(path, contents)
-}
-
-/// Create `path` as a new file and write `contents`, owner-only on Unix.
-///
-/// # Errors
-/// `AlreadyExists` when any entry already sits at `path`, including a symlink.
-/// `create_new` is `O_CREAT|O_EXCL`, so the open fails instead of following the
-/// entry and truncating its target. A write or sync error removes the new file.
-#[cfg(unix)]
 pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};

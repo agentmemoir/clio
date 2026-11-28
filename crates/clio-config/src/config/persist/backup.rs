@@ -24,7 +24,7 @@
 //! Keep this module focused on the pre-replace backup.
 
 use super::path::DEPLOYMENT_CONFIG_FILE_NAME;
-use super::write::{create_private_dir, write_private};
+use super::write::{create_new_private, create_private_dir};
 use crate::error::{AmError, ErrorCode};
 use std::fs;
 use std::io::Read;
@@ -43,6 +43,15 @@ pub(crate) const BACKUP_DIR_NAME: &str = "backups";
 /// [`ErrorCode::Forbidden`] when the source is a symbolic link or is not a
 /// regular file; I/O failures reading the source or writing the backup.
 pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    backup_config_file_with_stamp(path, stamp)
+}
+
+/// The backup body with the nanosecond stamp supplied, so a test can predict the
+/// target name the write must refuse.
+fn backup_config_file_with_stamp(path: &Path, stamp: u128) -> Result<Option<PathBuf>, AmError> {
     // One open: the bytes the backup holds are read from the same descriptor
     // the type check accepted, never from a second lookup by path.
     let mut options = fs::OpenOptions::new();
@@ -102,9 +111,6 @@ pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
             format!("failed to create backup dir {}: {e}", dir.display()),
         )
     })?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -117,7 +123,7 @@ pub fn backup_config_file(path: &Path) -> Result<Option<PathBuf>, AmError> {
             format!("failed to read {} for backup: {e}", path.display()),
         )
     })?;
-    write_private(&target, &text).map_err(|e| {
+    create_new_private(&target, &text).map_err(|e| {
         AmError::new(
             ErrorCode::Internal,
             format!("failed to write backup {}: {e}", target.display()),

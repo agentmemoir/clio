@@ -286,3 +286,57 @@ fn backup_reports_a_target_name_that_cannot_be_written() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+// A symlink planted at the stamped backup name would be followed by an
+// overwriting open, truncating the file it points at. The backup now creates its
+// target exclusively, so the planted entry is refused and the link target keeps
+// its bytes.
+#[cfg(unix)]
+#[test]
+fn backup_refuses_a_planted_entry_at_the_target_name() {
+    use std::os::unix::fs::symlink;
+    let dir = scratch("planted-target");
+    fs::create_dir_all(&dir).expect("dir");
+    let cfg = dir.join("deployment.json");
+    fs::write(&cfg, r#"{"log.level":"warn"}"#).expect("write");
+    let secret = "bytes the link must keep";
+    let victim = dir.join("victim.json");
+    fs::write(&victim, secret).expect("victim");
+    let backups = dir.join(BACKUP_DIR_NAME);
+    fs::create_dir_all(&backups).expect("backups");
+    let stamp = 42u128;
+    let name = cfg
+        .file_name()
+        .expect("name")
+        .to_string_lossy()
+        .into_owned();
+    let target = backups.join(format!("{name}.{stamp}"));
+    symlink(&victim, &target).expect("symlink");
+
+    let err = backup_config_file_with_stamp(&cfg, stamp).expect_err("refused");
+
+    assert_eq!(
+        err.code,
+        ErrorCode::Internal,
+        "the refusal must surface as an internal write failure: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("failed to write backup"),
+        "the failure must name the backup it could not write: {}",
+        err.message
+    );
+    assert_eq!(
+        fs::read_to_string(&victim).expect("victim"),
+        secret,
+        "the link target must keep its bytes"
+    );
+    assert!(
+        fs::symlink_metadata(&target)
+            .expect("meta")
+            .file_type()
+            .is_symlink(),
+        "the planted entry must still be the symlink, not a replaced file"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
