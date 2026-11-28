@@ -92,7 +92,7 @@ pub(crate) fn status(args: impl IntoIterator<Item = String>) -> ExitCode {
 
 /// Command core over injected probes: render the report and map its verdict.
 fn status_with(raw: &[String], deps: &dyn StatusDeps) -> ExitCode {
-    if raw
+    if crate::cli_args::before_delimiter(raw)
         .iter()
         .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
     {

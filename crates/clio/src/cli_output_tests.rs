@@ -139,6 +139,11 @@ fn mode_from_raw_ignores_output_after_the_delimiter() {
         mode_from_raw(&tokens(&["--", "-o=text"]), false),
         OutputMode::Json
     );
+    // The short form with its value in the next token is also an operand pair.
+    assert_eq!(
+        mode_from_raw(&tokens(&["q", "--", "-o", "text"]), false),
+        OutputMode::Json
+    );
 }
 
 #[test]

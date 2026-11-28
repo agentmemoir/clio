@@ -56,7 +56,7 @@ pub fn retention(args: impl IntoIterator<Item = String>) -> ExitCode {
     // usage error by a stray token or an unknown flag; `status` and the `mcp`
     // subcommands answer help the same way.
     if retention_subcommands().contains(&sub.as_str())
-        && collected
+        && crate::cli_args::before_delimiter(&collected)
             .iter()
             .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
     {
