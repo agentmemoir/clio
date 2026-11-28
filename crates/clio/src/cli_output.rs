@@ -83,7 +83,7 @@ pub(crate) fn mode_from_raw(args: &[String], is_tty: bool) -> OutputMode {
 }
 
 /// The value of the last explicit `--output` / `--output=…` / `-o` / `-o=…`
-/// token in `args`.
+/// token before the `--` delimiter in `args`.
 ///
 /// A bare `--output` (or `-o`) followed by another flag (or nothing) has no
 /// value and is ignored, mirroring the parser's fail-closed missing-value rule.

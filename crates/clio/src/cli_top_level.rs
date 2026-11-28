@@ -71,7 +71,7 @@ pub(crate) fn wants_json_catalog(args: &[String]) -> bool {
         .is_some_and(|json| args.iter().any(|arg| arg == &format!("--{}", json.long)))
 }
 
-/// The manual request the raw arguments make, validated before any write.
+/// The manual request the raw arguments before the `--` delimiter make, validated before any write.
 ///
 /// `Ok(Some(dir))` when `--markdown` names an `--out` directory; `Ok(None)`
 /// when the arguments ask for one of the other help modes. The comparison is

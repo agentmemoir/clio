@@ -4,8 +4,8 @@
 //! # Responsibility
 //!
 //! This module is responsible for reading a help request from a surface's raw
-//! arguments: the `help`, `--help`, and `-h` spellings, read without taking a
-//! value flag's value as a request. `--db help` names a database called `help`.
+//! arguments before the `--` delimiter: the `help`, `--help`, and `-h` spellings,
+//! read without taking a value flag's value; `--db help` names a database `help`.
 //!
 //! ## Owns
 //! - `help_requested`, the scan shared by the top level and the reserved
