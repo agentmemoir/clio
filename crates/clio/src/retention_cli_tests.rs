@@ -347,4 +347,3 @@ fn a_profile_given_as_neither_is_refused_with_both_ways_to_give_one() {
     assert!(reason.contains("--profile "), "{reason}");
     assert!(reason.contains("--profile-file"), "{reason}");
 }
-
