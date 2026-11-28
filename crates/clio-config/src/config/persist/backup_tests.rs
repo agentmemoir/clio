@@ -412,9 +412,9 @@ fn backup_refuses_a_hard_link_at_the_target_name() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// A symlink planted at the backups directory name is followed by a directory
-// create, so the backup would land in the directory the link points at. The
-// backup inspects the directory it created and refuses a link.
+// A symlink planted at the backups directory name is refused with Forbidden.
+// The backup inspects the entry before any create, so no directory is made and
+// nothing lands in the directory the link points at.
 #[cfg(unix)]
 #[test]
 fn backup_refuses_a_symlinked_backups_directory() {
