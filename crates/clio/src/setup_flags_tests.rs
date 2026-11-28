@@ -97,6 +97,31 @@ fn an_unknown_flag_positional_or_missing_value_is_a_refusal() {
 }
 
 #[test]
+fn a_bare_delimiter_is_accepted_as_no_flags() {
+    let flags = parse_setup_args(&["--".to_owned()]).expect("a bare delimiter");
+    assert!(flags.is_empty(), "{flags:?}");
+}
+
+#[test]
+fn a_token_after_the_delimiter_is_refused_as_an_operand() {
+    let error = parse_setup_args(&["--".to_owned(), "--help".to_owned()])
+        .expect_err("a post-delimiter operand");
+    assert!(error.contains("unexpected argument"), "{error}");
+    assert!(error.contains("--help"), "{error}");
+}
+
+#[test]
+fn a_flag_before_the_delimiter_is_still_parsed() {
+    let flags = parse_setup_args(&[
+        "--database".to_owned(),
+        "sqlite".to_owned(),
+        "--".to_owned(),
+    ])
+    .expect("parse");
+    assert_eq!(flags.get("database").map(String::as_str), Some("sqlite"));
+}
+
+#[test]
 fn the_retired_type_flag_names_its_replacement() {
     let error =
         parse_setup_args(&["--type".to_owned(), "custom".to_owned()]).expect_err("a retired flag");
