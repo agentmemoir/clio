@@ -26,8 +26,9 @@ use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A unique scratch path under the system temp dir. Each test owns its own, so
-/// no test reads or removes a directory another one created.
-fn scratch(name: &str) -> PathBuf {
+/// no test reads or removes a directory another one created. Visible to the
+/// sibling refusal tests, which own their scratch paths the same way.
+pub(super) fn scratch(name: &str) -> PathBuf {
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time")
@@ -51,6 +52,50 @@ fn backup_reports_a_directory_creation_failure() {
         err.message
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+// A backups directory the process cannot create is an internal failure that
+// names the create, and nothing is left at the backups name. The read-only
+// scratch dir lets the source open but makes `mkdir` fail with EACCES.
+#[cfg(unix)]
+#[test]
+fn backup_reports_a_backups_dir_it_cannot_create() {
+    use std::os::unix::fs::PermissionsExt;
+    // Root ignores mode bits, so the refusal is unobservable there. CI runs as
+    // uid 1000; every other user runs the assertions below.
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    let dir = scratch("unwritable");
+    fs::create_dir_all(&dir).expect("dir");
+    let cfg = dir.join("deployment.json");
+    fs::write(&cfg, "{}").expect("write");
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).expect("mode");
+    let result = backup_config_file(&cfg);
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).expect("restore");
+    let err = result.expect_err("mkdir");
+    assert_eq!(err.code, ErrorCode::Internal);
+    assert!(
+        err.message.contains("failed to create backup dir"),
+        "the failure must name the create it could not do: {}",
+        err.message
+    );
+    assert!(
+        !dir.join(BACKUP_DIR_NAME).exists(),
+        "a failed create must leave no backups entry behind"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// A source named with no parent directory still resolves to a sibling backups
+// directory, the relative `./backups` name, without depending on the working
+// directory itself.
+#[test]
+fn backup_dir_for_a_bare_source_name_is_the_relative_backups_dir() {
+    assert_eq!(
+        backup_dir_for(Path::new("deployment.json")),
+        Path::new(".").join(BACKUP_DIR_NAME)
+    );
 }
 
 #[test]
@@ -89,48 +134,6 @@ fn backup_copies_owner_only_and_skips_missing() {
     if let Some(parent) = path.parent() {
         let _ = fs::remove_dir_all(parent);
     }
-}
-
-// A symlink planted at the source is refused, so a backup never holds the bytes
-// of a file the existence check approved. `O_NOFOLLOW` refuses the link in the
-// one open, so no descriptor ever reaches the file behind it.
-#[cfg(unix)]
-#[test]
-fn planted_symlink_at_backup_source_is_refused() {
-    use std::os::unix::fs::symlink;
-    let dir = scratch("symlink");
-    fs::create_dir_all(&dir).expect("dir");
-    let secret = r#"{"credentials.embed_api_key":"sk-keep-me"}"#;
-    let victim = dir.join("victim.json");
-    fs::write(&victim, secret).expect("victim");
-    let source = dir.join("deployment.json");
-    symlink(&victim, &source).expect("symlink");
-
-    let err = backup_config_file(&source).expect_err("refused");
-
-    assert_eq!(err.code, ErrorCode::Forbidden, "{}", err.message);
-    assert!(
-        err.message.contains("symbolic link"),
-        "the refusal must name the link: {}",
-        err.message
-    );
-    assert!(
-        !dir.join(BACKUP_DIR_NAME).exists(),
-        "a refused source must not leave a backup directory behind"
-    );
-    assert_eq!(
-        fs::read_to_string(&victim).expect("victim"),
-        secret,
-        "the link target must be untouched"
-    );
-    assert!(
-        fs::symlink_metadata(&source)
-            .expect("meta")
-            .file_type()
-            .is_symlink(),
-        "the planted entry must still be the symlink, not a replaced file"
-    );
-    let _ = fs::remove_dir_all(&dir);
 }
 
 // The backup dir is created by the backup itself and is owner-only from the
@@ -250,7 +253,7 @@ fn backup_target_is_a_timestamped_namesake_in_the_backups_dir() {
     );
     assert_ne!(
         first, second,
-        "two backups must never share one name, or the second replaces the first"
+        "a second backup at the same stamp is refused, so two backups never share one name"
     );
     assert!(first.exists() && second.exists());
     assert_eq!(

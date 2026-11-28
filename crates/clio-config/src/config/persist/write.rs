@@ -126,33 +126,15 @@ pub(crate) fn temp_sibling(path: &Path) -> PathBuf {
     ))
 }
 
-#[cfg(unix)]
-pub(super) fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    // A pre-existing temp file keeps its old mode through `open`; force 0600.
-    file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    file.write_all(contents.as_bytes())?;
-    file.sync_all()
-}
-
-#[cfg(not(unix))]
-pub(super) fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
-    fs::write(path, contents)
-}
-
-/// Create `path` as a new file and write `contents`, owner-only on Unix.
+/// Create `path` as a new file and write `contents`, owner-only (0600) on Unix.
+///
+/// This call creates a new file and never writes to an existing one.
 ///
 /// # Errors
-/// `AlreadyExists` when any entry already sits at `path`, including a symlink.
-/// `create_new` is `O_CREAT|O_EXCL`, so the open fails instead of following the
-/// entry and truncating its target. A write or sync error removes the new file.
+/// `AlreadyExists` when any entry already sits at `path`, including a symbolic
+/// link. The open uses exclusive create, so an existing entry is refused
+/// instead of followed. A write or sync error removes the file this call just
+/// created.
 #[cfg(unix)]
 pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
@@ -179,9 +161,12 @@ pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result
 
 /// Create `path` as a new file and write `contents`.
 ///
+/// This call creates a new file and never writes to an existing one.
+///
 /// # Errors
-/// `AlreadyExists` when any entry already sits at `path`, including a symlink.
-/// A write error removes the new file.
+/// `AlreadyExists` when any entry already sits at `path`, including a symbolic
+/// link. The open uses exclusive create, so an existing entry is refused
+/// instead of followed. A write error removes the file this call just created.
 #[cfg(not(unix))]
 pub(super) fn create_new_private(path: &Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
